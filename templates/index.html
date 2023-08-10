@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Product Search</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+
+</head>
+<body>
+    <h1>Product Search</h1>
+    <div>
+
+        <div class="search-container">
+    <label for="Product search">Product search:</label>
+    <input type="text" id="searchQuery" placeholder="Search by Code or Cas">
+    <button onclick="searchProducts()" class="search-button">Search</button>
+	</div>
+
+
+    </div>
+    <table id="results">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Code</th>
+                <th>Cas</th>
+                <th>Brand</th>
+                <th>Size</th>
+                <th>Unit_Price</th>
+                <th>Note</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Kết quả tìm kiếm sẽ được hiển thị ở đây -->
+        </tbody>
+    </table>
+</body>
+</html>

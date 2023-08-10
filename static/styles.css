@@ -1,0 +1,40 @@
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+table, th, td {
+    border: 1px solid black;
+}
+
+th, td {
+    padding: 8px;
+    text-align: left;
+}
+
+.search-container {
+    text-align: center; /* Căn giữa nội dung trong container */
+    margin: 20px; /* Thêm khoảng cách từ các phần tử xung quanh */
+}
+
+#searchQuery {
+    padding: 10px; /* Thêm đệm cho ô nhập liệu */
+    font-size: 16px; /* Kích thước chữ */
+    border: 1px solid #ccc; /* Viền mỏng màu xám */
+    width: 300px; /* Chiều rộng của ô nhập liệu */
+}
+
+.search-button {
+    background-color: #f8f8f8; /* Màu nền xám nhạt */
+    color: #5F6368; /* Màu chữ xám */
+    border: 1px solid #f8f8f8; /* Viền màu xám nhạt */
+    padding: 10px 20px; /* Đệm cho nút */
+    font-size: 16px; /* Kích thước chữ */
+    cursor: pointer; /* Biểu tượng con trỏ khi di chuyển qua nút */
+    border-radius: 4px; /* Làm tròn góc của nút */
+}
+
+.search-button:hover {
+    background-color: #f1f1f1; /* Màu nền khi di chuyển chuột qua nút */
+}

@@ -7,6 +7,10 @@ import os
 app = Flask(__name__)
 CORS(app)
 
+# Đường dẫn tuyệt đối tới database trên VPS
+DB_PATH = '/home/deploy/myapps/shared_data/products.db'
+
+# Hàm lấy tỷ giá
 def get_exchange_rate(brand):
     with open(os.path.join(app.root_path, 'static', 'exchange_rates.json'), 'r', encoding='utf-8') as file:
         exchange_rates = json.load(file)
@@ -20,7 +24,8 @@ def home():
 def search_products():
     search_query = request.args.get('query')
 
-    conn = sqlite3.connect('products.db')
+    # Sử dụng đường dẫn tuyệt đối tới database
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
     query = 'SELECT name, code, cas, brand, size, ship, price, note FROM products WHERE code LIKE ? OR cas LIKE ?'

@@ -8,7 +8,7 @@ if defined _OLD_CODEPAGE (
     "%SystemRoot%\System32\chcp.com" 65001 > nul
 )
 
-set VIRTUAL_ENV=C:\Users\truon\OneDrive\Desktop\Python\search-tools\venv
+set VIRTUAL_ENV=C:\Users\truon\Dropbox\Python\search-tools\venv
 
 if not defined PROMPT set PROMPT=$P$G
 

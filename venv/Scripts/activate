@@ -37,7 +37,7 @@ deactivate () {
 # unset irrelevant variables
 deactivate nondestructive
 
-VIRTUAL_ENV="C:\Users\truon\OneDrive\Desktop\Python\search-tools\venv"
+VIRTUAL_ENV="C:\Users\truon\Dropbox\Python\search-tools\venv"
 export VIRTUAL_ENV
 
 _OLD_VIRTUAL_PATH="$PATH"

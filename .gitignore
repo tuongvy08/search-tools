@@ -1,0 +1,17 @@
+# Bỏ qua file database
+products.db
+
+# Bỏ qua môi trường ảo Python
+venv/
+myenv/
+
+# Bỏ qua file tạm và cache
+__pycache__/
+*.pyc
+
+# Bỏ qua file log
+*.log
+
+# Bỏ qua cài đặt IDE (PyCharm, VSCode)
+.idea/
+.vscode/

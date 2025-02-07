@@ -1,40 +1,236 @@
+/* Google Fonts - Poppins */
+@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap");
 
-table {
-    width: 100%;
-    border-collapse: collapse;
+body {
+  font-family: "Poppins", sans-serif;
+  background: #e7f0fd;
+  padding: 20px;
 }
 
-table, th, td {
-    border: 1px solid black;
-}
-
-th, td {
-    padding: 8px;
-    text-align: left;
+h1 {
+  color: #2e45b6;
+  text-align: center;
 }
 
 .search-container {
-    text-align: center; /* Căn giữa nội dung trong container */
-    margin: 20px; /* Thêm khoảng cách từ các phần tử xung quanh */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 15px; /* Khoảng cách giữa các phần tử trong search-container */
+  margin-bottom: 20px;
 }
 
-#searchQuery {
-    padding: 10px; /* Thêm đệm cho ô nhập liệu */
-    font-size: 16px; /* Kích thước chữ */
-    border: 1px solid #ccc; /* Viền mỏng màu xám */
-    width: 300px; /* Chiều rộng của ô nhập liệu */
+/* Nút điều hướng thêm */
+.nav-button {
+  background-color: #4caf50; /* Màu xanh lá */
+  color: white;
+  border: none;
+  border-radius: 25px;
+  padding: 10px 20px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
 }
 
-.search-button {
-    background-color: #f8f8f8; /* Màu nền xám nhạt */
-    color: #5F6368; /* Màu chữ xám */
-    border: 1px solid #f8f8f8; /* Viền màu xám nhạt */
-    padding: 10px 20px; /* Đệm cho nút */
-    font-size: 16px; /* Kích thước chữ */
-    cursor: pointer; /* Biểu tượng con trỏ khi di chuyển qua nút */
-    border-radius: 4px; /* Làm tròn góc của nút */
+.nav-button:hover {
+  background-color: #45a049; /* Màu xanh đậm hơn khi hover */
 }
 
-.search-button:hover {
-    background-color: #f1f1f1; /* Màu nền khi di chuyển chuột qua nút */
+.input-box {
+  position: relative;
+  height: 50px;
+  width: 100%;
+  max-width: 500px;
+  background: #fff;
+  border-radius: 25px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.input-box i {
+  position: absolute;
+  top: 50%;
+  left: 16px;
+  transform: translateY(-50%);
+  color: #2e45b6;
+  font-size: 20px;
+}
+
+.input-box input {
+  height: 100%;
+  width: 100%;
+  border: none;
+  outline: none;
+  padding-left: 45px;
+  border-radius: 25px;
+  font-size: 16px;
+  color: #2e45b6;
+}
+
+.input-box button {
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  transform: translateY(-50%);
+  background-color: #ff6600; /* Màu cam đậm */
+  color: #fff; /* Màu chữ trắng */
+  border: none;
+  border-radius: 15px;
+  padding: 10px 20px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.input-box button:hover {
+  background-color: #e65c00; /* Màu cam đậm hơn khi hover */
+}
+
+.filter-container {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+/* Styles for brand checkboxes */
+#brandCheckboxes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+#brandCheckboxes div {
+  margin: 5px 10px;
+}
+
+#brandCheckboxes input[type="checkbox"] {
+  margin-right: 5px;
+}
+
+#brandCheckboxes label {
+  cursor: pointer;
+}
+
+/* Áp dụng các lớp CSS cho labels của các brand đặc biệt */
+#brandCheckboxes .button-brand {
+  padding: 5px 10px;
+  border-radius: 15px;
+  color: #fff;
+}
+
+#brandCheckboxes .brand-cam-nhap {
+  background-color: #b22222;
+}
+
+#brandCheckboxes .brand-phu-luc-ii {
+  background-color: #b8860b;
+}
+
+#brandCheckboxes .brand-phu-luc-i {
+  background-color: #008b8b;
+}
+
+#brandCheckboxes .brand-ton-kho {
+  background-color: #556b2f;
+}
+
+/* Styles for size checkboxes */
+#sizeCheckboxes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+#sizeCheckboxes div {
+  margin: 5px 10px;
+}
+
+#sizeCheckboxes input[type="checkbox"] {
+  margin-right: 5px;
+}
+
+#sizeCheckboxes label {
+  cursor: pointer;
+}
+
+/* Table Styles */
+#results {
+  width: 100%;
+  margin-top: 20px;
+  border-collapse: collapse;
+  background-color: #fff;
+}
+
+#results th,
+#results td {
+  padding: 12px;
+  border: 1px solid #caced1;
+  text-align: center;
+}
+
+#results th:first-child,
+#results td:first-child {
+  text-align: left;
+}
+
+#results th {
+  background-color: #f4f7fe;
+  color: #2e45b6;
+}
+
+#results tbody tr:nth-child(odd) {
+  background-color: #f6f8fd;
+}
+
+#results tbody tr:hover {
+  background-color: #e7f0fd;
+}
+
+/* Styles for warnings (áp dụng cho hàng) */
+.warning-cam-nhap {
+  background-color: #ffe4e1 !important; /* Light pink */
+  color: #b22222 !important; /* Firebrick red */
+}
+
+.warning-phu-luc-ii {
+  background-color: #fffacd !important; /* Light yellow */
+  color: #b8860b !important; /* Dark goldenrod */
+}
+
+.warning-phu-luc-i {
+  background-color: #e0ffff !important; /* Light cyan */
+  color: #008b8b !important; /* Dark cyan */
+}
+
+.warning-ton-kho {
+  background-color: #f0e68c !important; /* Khaki */
+  color: #556b2f !important; /* Dark olive green */
+}
+
+/* Button style for Brands */
+.button-brand {
+  display: inline-block;
+  background-color: #ff6600; /* Màu cam đậm */
+  color: #fff;
+  border: none;
+  border-radius: 15px;
+  padding: 5px 10px;
+  font-size: 14px;
+  cursor: default;
+  text-align: center;
+}
+
+/* Responsive Design */
+@media screen and (max-width: 500px) {
+  .input-box,
+  .input-box input,
+  .input-box button {
+    height: 40px;
+    font-size: 14px;
+  }
+
+  #results th,
+  #results td {
+    padding: 8px;
+  }
 }

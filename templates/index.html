@@ -2,25 +2,36 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Product Search</title>
+    <!-- Include stylesheets -->
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-    <script src="{{ url_for('static', filename='script.js') }}"></script>
-    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
-
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" integrity="sha512-XXX" crossorigin="anonymous" />
 </head>
 <body>
     <h1>Product Search</h1>
-    <div>
+    <div class="search-container">
+        <!-- Thêm hai nút Find CAS và Find Code -->
+        <button class="nav-button" onclick="window.location.href='http://192.168.68.128:8000'">Check liscense</button>
+        <button class="nav-button" onclick="window.location.href='http://192.168.68.128:5001'">Find Code</button>
 
-        <div class="search-container">
-    <label for="Product search">Product search:</label>
-    <input type="text" id="searchQuery" placeholder="Search by Code or Cas">
-    <button onclick="searchProducts()" class="search-button">Search</button>
-	</div>
-
-
+        <div class="input-box">
+            <i class="fas fa-search"></i>
+            <input type="text" id="searchQuery" placeholder="Search for products...">
+            <button class="search-button">Search</button>
+        </div>
     </div>
+
+    <div class="filter-container">
+        <!-- Div để chứa các checkbox của Brand -->
+        <div id="brandCheckboxes">
+            <!-- Checkboxes sẽ được thêm động bằng JavaScript -->
+        </div>
+        <!-- Div để chứa các checkbox của Size -->
+        <div id="sizeCheckboxes">
+            <!-- Checkboxes sẽ được thêm động bằng JavaScript -->
+        </div>
+    </div>
+
     <table id="results">
         <thead>
             <tr>
@@ -34,8 +45,11 @@
             </tr>
         </thead>
         <tbody>
-            <!-- Kết quả tìm kiếm sẽ được hiển thị ở đây -->
         </tbody>
     </table>
+
+    <!-- Include necessary scripts -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>    
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>

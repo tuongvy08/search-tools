@@ -4,34 +4,34 @@ import json
 from flask_cors import CORS
 import os
 
-from middleware_access import register_ip_access_control  # ✅ import middleware
+from middleware_access import register_ip_access_control  # Kiểm soát IP & vai trò
 
 app = Flask(__name__)
 CORS(app)
-app.secret_key = 'supersecretkey'  # Đặt secret key cho Flask session
+app.secret_key = 'supersecretkey'
 
-# ✅ Kích hoạt kiểm soát IP và phân quyền
+# Kích hoạt middleware kiểm soát IP & vai trò
 register_ip_access_control(app, base_path='/home/deploy/myapps')
 
-# Đường dẫn tuyệt đối tới database trên VPS
+# Đường dẫn database dùng chung
 DB_PATH = '/home/deploy/myapps/shared_data/products.db'
 
-# Hàm lấy tỷ giá
+# Lấy tỷ giá
 def get_exchange_rate(brand):
     with open(os.path.join(app.root_path, 'static', 'exchange_rates.json'), 'r', encoding='utf-8') as file:
         exchange_rates = json.load(file)
         return exchange_rates.get(brand, 1)
 
-# ✅ Login có phân quyền
+# Đăng nhập có phân quyền
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         password = request.form['password']
-        if password == 'Truong@2004':  # Quản lý
+        if password == 'Truong@2004':
             session['authenticated'] = True
             session['role'] = 'manager'
             return redirect(url_for('home'))
-        elif password == 'Truong@123':  # Nhân viên
+        elif password == 'Truong@123':
             session['authenticated'] = True
             session['role'] = 'staff'
             return redirect(url_for('home'))
@@ -39,21 +39,20 @@ def login():
             return "Incorrect password!", 403
     return render_template('login.html')
 
+# Trang chủ
 @app.route('/')
 def home():
     if not session.get('authenticated'):
         return redirect(url_for('login'))
     return render_template('index.html')
 
+# API tìm kiếm sản phẩm
 @app.route('/search', methods=['GET'])
 def search_products():
     search_query = request.args.get('query')
-
-    # Sử dụng đường dẫn tuyệt đối tới database
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # Tìm kiếm sản phẩm dựa trên tên, mã hoặc CAS
     query = '''SELECT name, code, cas, brand, size, ship, price, note 
                FROM products 
                WHERE name LIKE ? OR code LIKE ? OR cas LIKE ?'''
@@ -87,22 +86,15 @@ def search_products():
         })
 
     conn.close()
+    return jsonify({'results': results})
 
-    response = {
-        'results': results
-    }
-
-    return jsonify(response)
-
-# API để kiểm tra CAS có thuộc danh mục đặc biệt "CẤM NHẬP" hoặc "Phụ lục II" hay không
+# API kiểm tra CAS đặc biệt
 @app.route('/check_cas', methods=['GET'])
 def check_cas():
     cas = request.args.get('cas')
-
-    conn = sqlite3.connect('products.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # Kiểm tra nếu CAS thuộc danh mục "CẤM NHẬP", "Phụ lục II", "TỒN KHO", hoặc "Phụ lục I"
     query = '''SELECT brand 
                FROM products 
                WHERE cas = ? AND brand IN ("CẤM NHẬP", "Phụ lục II", "TỒN KHO", "Phụ lục I")'''
@@ -112,14 +104,7 @@ def check_cas():
     warning = None
     if result:
         brand = result[0]
-        if brand == "CẤM NHẬP":
-            warning = "CẤM NHẬP"
-        elif brand == "Phụ lục II":
-            warning = "Phụ lục II"
-        elif brand == "Phụ lục I":
-            warning = "Phụ lục I"
-        elif brand == "TỒN KHO":
-            warning = "TỒN KHO"
+        warning = brand
 
     conn.close()
 
@@ -130,9 +115,7 @@ def check_cas():
             'message': f'CAS {cas} thuộc danh mục {warning}.'
         })
     else:
-        return jsonify({
-            'warning': False
-        })
+        return jsonify({ 'warning': False })
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

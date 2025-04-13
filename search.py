@@ -4,10 +4,14 @@ import json
 from flask_cors import CORS
 import os
 
+from middleware_access import register_ip_access_control  # ✅ import middleware
+
 app = Flask(__name__)
 CORS(app)
 app.secret_key = 'supersecretkey'  # Đặt secret key cho Flask session
-PASSWORD = 'truong3344'  # Mật khẩu cần nhập để truy cập trang web
+
+# ✅ Kích hoạt kiểm soát IP và phân quyền
+register_ip_access_control(app, base_path='/home/deploy/myapps')
 
 # Đường dẫn tuyệt đối tới database trên VPS
 DB_PATH = '/home/deploy/myapps/shared_data/products.db'
@@ -18,11 +22,18 @@ def get_exchange_rate(brand):
         exchange_rates = json.load(file)
         return exchange_rates.get(brand, 1)
 
+# ✅ Login có phân quyền
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        if request.form['password'] == PASSWORD:
+        password = request.form['password']
+        if password == 'Truong@2004':  # Quản lý
             session['authenticated'] = True
+            session['role'] = 'manager'
+            return redirect(url_for('home'))
+        elif password == 'Truong@123':  # Nhân viên
+            session['authenticated'] = True
+            session['role'] = 'staff'
             return redirect(url_for('home'))
         else:
             return "Incorrect password!", 403

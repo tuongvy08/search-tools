@@ -47,8 +47,8 @@ function updateBrandFilterOptions() {
         // Áp dụng các lớp CSS nếu cần
         const specialBrands = {
             'CẤM NHẬP': 'brand-cam-nhap',
+            'Phụ lục III': 'brand-phu-luc-iii',
             'Phụ lục II': 'brand-phu-luc-ii',
-            'Phụ lục I': 'brand-phu-luc-i',
             'TỒN KHO': 'brand-ton-kho'
         };
 

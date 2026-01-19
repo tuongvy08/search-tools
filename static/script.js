@@ -197,10 +197,10 @@ function applyWarningClassToRows(cas, warningType) {
     let cssClass;
     if (warningType === 'CẤM NHẬP') {
         cssClass = 'warning-cam-nhap';
+    } else if (warningType === 'Phụ lục III') {
+        cssClass = 'warning-phu-luc-iii';
     } else if (warningType === 'Phụ lục II') {
         cssClass = 'warning-phu-luc-ii';
-    } else if (warningType === 'Phụ lục I') {
-        cssClass = 'warning-phu-luc-i';
     } else if (warningType === 'TỒN KHO') {
         cssClass = 'warning-ton-kho';
     }

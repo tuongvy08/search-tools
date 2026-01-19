@@ -97,7 +97,7 @@ def check_cas():
 
     query = '''SELECT brand 
                FROM products 
-               WHERE cas = ? AND brand IN ("CẤM NHẬP", "Phụ lục II", "TỒN KHO", "Phụ lục I")'''
+               WHERE cas = ? AND brand IN ("CẤM NHẬP", "Phụ lục III", "TỒN KHO", "Phụ lục II")'''
     cursor.execute(query, (cas,))
     result = cursor.fetchone()
 

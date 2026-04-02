@@ -1,5 +1,12 @@
 let searchResults = [];
-let warningsDisplayed = false; // Biến để kiểm soát việc hiển thị cảnh báo
+let warningsDisplayed = false;
+
+const COMPLIANCE_CLASS = {
+    'CẤM NHẬP': 'warning-cam-nhap',
+    'Phụ lục II': 'warning-phu-luc-ii',
+    'Phụ lục III': 'warning-phu-luc-iii',
+    'TỒN KHO': 'warning-ton-kho',
+};
 
 function searchProducts() {
     const query = $('#searchQuery').val();
@@ -8,14 +15,17 @@ function searchProducts() {
         return;
     }
 
-    // Reset cảnh báo khi thực hiện tìm kiếm mới
     warningsDisplayed = false;
 
     $.getJSON(`/search?query=${encodeURIComponent(query)}`, function(data) {
         searchResults = data.results;
         updateBrandFilterOptions();
-        updateSizeFilterOptions(); // Gọi hàm cập nhật checkboxes cho Size
+        updateSizeFilterOptions();
         displayResults(searchResults);
+    }).fail(function(xhr) {
+        const msg = xhr && xhr.responseText ? xhr.responseText : 'Unknown error';
+        alert(`Search request failed: ${msg}`);
+        console.error('Search request failed', xhr);
     });
 }
 
@@ -27,15 +37,14 @@ function updateBrandFilterOptions() {
         }
     });
 
-    const brands = Array.from(brandSet).sort(); // Chuyển sang mảng và sắp xếp A-Z
-
+    const brands = Array.from(brandSet).sort();
     const brandCheckboxesContainer = document.getElementById('brandCheckboxes');
-    brandCheckboxesContainer.innerHTML = ''; // Xóa các checkbox cũ
+    brandCheckboxesContainer.innerHTML = '';
 
     brands.forEach(brand => {
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
-        checkbox.id = `brand_${brand.replace(/\s+/g, '_')}`; // Thay thế khoảng trắng bằng dấu gạch dưới
+        checkbox.id = `brand_${brand.replace(/\s+/g, '_')}`;
         checkbox.name = 'brand';
         checkbox.value = brand;
         checkbox.addEventListener('change', filterResultsByBrand);
@@ -44,23 +53,9 @@ function updateBrandFilterOptions() {
         label.htmlFor = `brand_${brand.replace(/\s+/g, '_')}`;
         label.textContent = brand;
 
-        // Áp dụng các lớp CSS nếu cần
-        const specialBrands = {
-            'CẤM NHẬP': 'brand-cam-nhap',
-            'Phụ lục III': 'brand-phu-luc-iii',
-            'Phụ lục II': 'brand-phu-luc-ii',
-            'TỒN KHO': 'brand-ton-kho'
-        };
-
-        const cssClass = specialBrands[brand] || '';
-        if (cssClass) {
-            label.classList.add('button-brand', cssClass);
-        }
-
         const container = document.createElement('div');
         container.appendChild(checkbox);
         container.appendChild(label);
-
         brandCheckboxesContainer.appendChild(container);
     });
 }
@@ -82,10 +77,9 @@ function updateSizeFilterOptions() {
         }
     });
 
-    const sizes = Array.from(sizeSet).sort(); // Chuyển sang mảng và sắp xếp A-Z
-
+    const sizes = Array.from(sizeSet).sort();
     const sizeCheckboxesContainer = document.getElementById('sizeCheckboxes');
-    sizeCheckboxesContainer.innerHTML = ''; // Xóa các checkbox cũ
+    sizeCheckboxesContainer.innerHTML = '';
 
     sizes.forEach(size => {
         const checkbox = document.createElement('input');
@@ -102,121 +96,74 @@ function updateSizeFilterOptions() {
         const container = document.createElement('div');
         container.appendChild(checkbox);
         container.appendChild(label);
-
         sizeCheckboxesContainer.appendChild(container);
     });
 }
 
+function badgeForCompliance(label) {
+    if (!label) {
+        return '';
+    }
+    return `<span class="button-brand">${label}</span>`;
+}
+
+function formatNoteCell(product) {
+    const mainNote = product.Note || '';
+    const complianceNote = product.Compliance_Note || '';
+    if (!complianceNote) {
+        return mainNote;
+    }
+    if (!mainNote) {
+        return `<strong>Compliance:</strong> ${complianceNote}`;
+    }
+    return `${mainNote}<br><small><strong>Compliance:</strong> ${complianceNote}</small>`;
+}
+
 function displayResults(products) {
     const resultsTable = document.getElementById('results').getElementsByTagName('tbody')[0];
-    resultsTable.innerHTML = ''; // Xóa kết quả cũ
+    resultsTable.innerHTML = '';
 
     products.forEach(product => {
         const row = resultsTable.insertRow();
+        row.insertCell(0).innerHTML = product.Name || '';
+        row.insertCell(1).innerHTML = product.Code || '';
+        row.insertCell(2).innerHTML = product.Cas || '';
+        row.insertCell(3).innerHTML = product.Brand || '';
+        row.insertCell(4).innerHTML = product.Size || '';
+        row.insertCell(5).innerHTML = product.Unit_Price || '';
+        row.insertCell(6).innerHTML = formatNoteCell(product);
+        row.insertCell(7).innerHTML = badgeForCompliance(product.Compliance_Status);
 
-        // Chèn các ô dữ liệu
-        row.insertCell(0).innerHTML = product.Name;
-        row.insertCell(1).innerHTML = product.Code;
-        row.insertCell(2).innerHTML = product.Cas;
-
-        // Tạo nút cho ô Brand
-        const brandCell = row.insertCell(3);
-        const specialBrands = {
-            'CẤM NHẬP': 'brand-cam-nhap',
-            'Phụ lục III': 'brand-phu-luc-iii',
-            'Phụ lục II': 'brand-phu-luc-ii',
-            'TỒN KHO': 'brand-ton-kho'
-        };
-
-        const cssClass = specialBrands[product.Brand] || '';
-
+        const cssClass = product.Compliance_Css || COMPLIANCE_CLASS[product.Compliance_Status];
         if (cssClass) {
-            const brandButton = document.createElement('span');
-            brandButton.classList.add('button-brand', cssClass);
-            brandButton.textContent = product.Brand;
-            brandCell.appendChild(brandButton);
-        } else {
-            brandCell.textContent = product.Brand;
-        }
-
-        row.insertCell(4).innerHTML = product.Size;
-        row.insertCell(5).innerHTML = product.Unit_Price;
-        row.insertCell(6).innerHTML = product.Note;
-    });
-
-    // Chỉ gọi hàm checkCASForWarnings nếu chưa hiển thị cảnh báo và đây là kết quả tìm kiếm mới
-    if (!warningsDisplayed && products === searchResults) {
-        checkCASForWarnings(products);
-    }
-}
-
-function checkCASForWarnings(products) {
-    const foundCAS = new Set(); // Để theo dõi các CAS đã xử lý
-    const casPromises = []; // Mảng chứa các promise fetch
-
-    products.forEach(product => {
-        const casToCheck = product.Cas.trim(); // Lấy CAS của mỗi sản phẩm
-        if (casToCheck && !foundCAS.has(casToCheck)) {
-            foundCAS.add(casToCheck);
-            casPromises.push(
-                fetch(`/check_cas?cas=${encodeURIComponent(casToCheck)}`)
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.warning) {
-                            data.cas = casToCheck; // Đính kèm CAS vào dữ liệu
-                            return data;
-                        }
-                    })
-                    .catch(error => console.error('An error occurred while checking CAS:', error))
-            );
-        }
-    });
-
-    // Chờ tất cả các kiểm tra CAS hoàn thành
-    Promise.all(casPromises).then(results => {
-        const messages = [];
-        results.forEach(data => {
-            if (data && data.warning) {
-                messages.push(data.message);
-                applyWarningClassToRows(data.cas, data.warning_type);
-            }
-        });
-
-        if (messages.length > 0) {
-            // Hiển thị cảnh báo một lần với tất cả các thông báo
-            alert(messages.join('\n'));
-        }
-        // Đặt warningsDisplayed = true bất kể có cảnh báo hay không
-        warningsDisplayed = true; // Đánh dấu đã hiển thị cảnh báo
-    });
-}
-
-function applyWarningClassToRows(cas, warningType) {
-    const resultsTable = document.getElementById('results').getElementsByTagName('tbody')[0];
-
-    let cssClass;
-    if (warningType === 'CẤM NHẬP') {
-        cssClass = 'warning-cam-nhap';
-    } else if (warningType === 'Phụ lục III') {
-        cssClass = 'warning-phu-luc-iii';
-    } else if (warningType === 'Phụ lục II') {
-        cssClass = 'warning-phu-luc-ii';
-    } else if (warningType === 'TỒN KHO') {
-        cssClass = 'warning-ton-kho';
-    }
-
-    for (let i = 0; i < resultsTable.rows.length; i++) {
-        const row = resultsTable.rows[i];
-        const casInRow = row.cells[2].innerText.trim();
-
-        if (casInRow === cas) {
             row.classList.add(cssClass);
         }
+    });
+
+    if (!warningsDisplayed && products === searchResults) {
+        showComplianceWarnings(products);
     }
+}
+
+function showComplianceWarnings(products) {
+    const warningSet = new Set();
+
+    products.forEach(product => {
+        if (product.Compliance_Status) {
+            const detail = product.Compliance_Note ? ` | ${product.Compliance_Note}` : '';
+            warningSet.add(`${product.Compliance_Status}: ${product.Cas || product.Name || product.Code || 'không rõ mã'}${detail}`);
+        }
+    });
+
+    if (warningSet.size > 0) {
+        alert(Array.from(warningSet).join('\n'));
+    }
+
+    warningsDisplayed = true;
 }
 
 function filterResultsByBrand() {
-    updateSizeFilterOptions(); // Cập nhật lại các tùy chọn Size
+    updateSizeFilterOptions();
     filterResults();
 }
 
@@ -245,7 +192,6 @@ function filterResults() {
 }
 
 $(document).ready(function() {
-    // Xử lý phím Enter trong ô tìm kiếm
     $('#searchQuery').on('keypress', function(event) {
         if (event.key === 'Enter') {
             event.preventDefault();
@@ -253,8 +199,129 @@ $(document).ready(function() {
         }
     });
 
-    // Sự kiện click cho nút "Search"
     $('.search-button').on('click', function() {
         searchProducts();
+    });
+
+    function setMultiMode(mode) {
+        $('#multiModePanel').show();
+        $('#licenseWarnings').hide().html('');
+
+        if (mode === 'license') {
+            $('#multiModeTitle').text('Check license (CAS list)');
+            $('#multiInput').attr('placeholder', 'Paste CAS (mỗi dòng 1 CAS)');
+            $('.filter-container').hide();
+            $('#results').hide();
+        } else if (mode === 'findcode') {
+            $('#multiModeTitle').text('Find code (Code list)');
+            $('#multiInput').attr('placeholder', 'Paste code (mỗi dòng 1 code)');
+            $('.filter-container').show();
+            $('#results').show();
+        }
+        window.__multiMode = mode;
+    }
+
+    $('#btnCheckLicense').on('click', function() {
+        setMultiMode('license');
+        $('#multiInput').focus();
+    });
+
+    $('#btnFindCode').on('click', function() {
+        setMultiMode('findcode');
+        $('#multiInput').focus();
+    });
+
+    $('#multiCancelBtn').on('click', function() {
+        $('#multiModePanel').hide();
+        $('#licenseWarnings').hide().html('');
+        $('#multiInput').val('');
+        // Trở về màn search mặc định
+        $('.filter-container').show();
+        $('#results').show();
+        window.__multiMode = null;
+    });
+
+    $('#multiRunBtn').on('click', function() {
+        const mode = window.__multiMode;
+        const text = ($('#multiInput').val() || '').trim();
+        if (!mode) {
+            alert('Chọn chế độ trước (Check license hoặc Find Code).');
+            return;
+        }
+        if (!text) {
+            alert('Vui lòng dán danh sách vào ô input.');
+            return;
+        }
+
+        if (mode === 'license') {
+            $('#licenseWarnings').show().html('<div>Đang kiểm tra...</div>');
+            $.ajax({
+                url: '/check_cas_batch',
+                method: 'POST',
+                data: { cas: text },
+                success: function(data) {
+                    const items = data && data.results ? data.results : [];
+                    let warnCount = 0;
+
+                    let rowsHtml = '';
+                    items.forEach(item => {
+                        const status = item.Compliance_Status || '';
+                        const note = item.Compliance_Note || '';
+                        if (status) warnCount += 1;
+                        rowsHtml += `
+                          <tr>
+                            <td>${item.Cas || ''}</td>
+                            <td>${status}</td>
+                            <td>${note}</td>
+                          </tr>
+                        `;
+                    });
+
+                    const summary = `<div class="hint" style="margin-bottom:10px; font-weight:600;">Cảnh báo: ${warnCount}/${items.length}</div>`;
+                    const tableHtml = `
+                      <table class="license-table">
+                        <thead>
+                          <tr>
+                            <th>CAS</th>
+                            <th>Compliance_Status</th>
+                            <th>Compliance_Note</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          ${rowsHtml}
+                        </tbody>
+                      </table>
+                    `;
+                    $('#licenseWarnings').html(summary + tableHtml);
+                    $('#multiInput').val('');
+                },
+                error: function(xhr) {
+                    const msg = xhr && xhr.responseText ? xhr.responseText : 'Unknown error';
+                    $('#licenseWarnings').html(`<div style="color:#b00020;">${msg}</div>`);
+                }
+            });
+            return;
+        }
+
+        if (mode === 'findcode') {
+            $.ajax({
+                url: '/find_code_batch',
+                method: 'POST',
+                data: { codes: text },
+                success: function(data) {
+                    const products = (data && data.results) ? data.results : [];
+                    searchResults = products;
+                    warningsDisplayed = false;
+                    updateBrandFilterOptions();
+                    updateSizeFilterOptions();
+                    displayResults(searchResults);
+                    $('#multiInput').val('');
+                },
+                error: function(xhr) {
+                    const msg = xhr && xhr.responseText ? xhr.responseText : 'Unknown error';
+                    alert(`Find code request failed: ${msg}`);
+                }
+            });
+        }
     });
 });

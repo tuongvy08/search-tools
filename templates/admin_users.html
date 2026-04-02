@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quản lý Users</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 1100px; margin: 24px auto; padding: 0 12px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin-bottom: 16px; background: #fff; }
+    .ok { color: #0b7a0b; }
+    .err { color: #b00020; white-space: pre-wrap; margin-bottom: 12px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+    th, td { border: 1px solid #ddd; padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #f4f7fe; color: #2e45b6; }
+    code { background: #f6f6f6; padding: 1px 4px; border-radius: 4px; }
+    .nav a { margin-right: 12px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    input[type="text"], input[type="password"], textarea, select {
+      padding: 8px 10px; border: 1px solid #ddd; border-radius: 8px; background: #fff; font-family: inherit;
+      min-width: 220px;
+    }
+    textarea { min-width: 320px; min-height: 80px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    button { padding: 10px 14px; border-radius: 8px; border: 1px solid #ddd; background: #fff; cursor: pointer; font-weight: 600; }
+    button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+    button.danger { background: #dc2626; color: #fff; border-color: #dc2626; }
+    .muted { color: #555; font-size: 0.95rem; }
+    .split { display: grid; grid-template-columns: 1fr; gap: 16px; }
+    @media (min-width: 980px) {
+      .split { grid-template-columns: 1fr 1fr; }
+    }
+    .brand-tips { margin-top: 8px; color: #555; font-size: 0.9rem; }
+    .small { font-size: 0.9rem; color: #666; }
+  </style>
+</head>
+<body>
+  <div class="nav" style="margin-bottom: 12px;">
+    <a href="/">Search</a>
+    <a href="/admin/imports">Imports</a>
+    <a href="/admin/exchange-rates">Tỷ giá</a>
+    <a href="/admin/network">Mạng / IP</a>
+    <a href="/admin/users"><b>Users</b></a>
+  </div>
+
+  <h1 style="margin-top:0;">Quản lý Users & Gán Brand</h1>
+  <p class="muted">
+    Với user thường: hệ thống lọc dữ liệu theo <code>team_brands</code> (brand bạn gán).
+    Admin thì nhìn thấy toàn bộ (không cần gán brand).
+  </p>
+
+  {% if message %}<p class="ok">{{ message }}</p>{% endif %}
+  {% if error %}<p class="err">{{ error }}</p>{% endif %}
+
+  <div class="split">
+    <div class="card">
+      <h2 style="margin-top:0;">Tạo user mới</h2>
+      <form method="post" action="/admin/users">
+        <input type="hidden" name="action" value="create_user" />
+
+        <div class="row" style="margin-bottom:10px;">
+          <div class="field">
+            <label>Username</label>
+            <input type="text" name="username" required placeholder="vd: staff1" />
+          </div>
+          <div class="field">
+            <label>Mật khẩu</label>
+            <input type="password" name="password" required placeholder="đặt mật khẩu" />
+          </div>
+        </div>
+
+        <div class="row" style="margin-bottom:10px;">
+          <div class="field">
+            <label>Role</label>
+            <select name="role">
+              <option value="user" selected>User thường</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <div class="field" style="flex:1;">
+            <label>Brands (dùng cho user thường)</label>
+            <textarea name="brands" placeholder="Mỗi dòng 1 brand hoặc dùng dấu phẩy"></textarea>
+            <div class="brand-tips">
+              Ví dụ: <code>Sigma</code>, <code>Merck</code>, <code>CẤM NHẬP</code>
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <button class="primary" type="submit">Tạo user</button>
+        </div>
+
+        {% if distinct_brands %}
+          <div class="small">
+            (Tuỳ chọn) Có thể dùng brands đã tồn tại trong DB: <code>{{ distinct_brands[:10]|join(', ') }}{% if distinct_brands|length > 10 %}, ...{% endif %}</code>
+          </div>
+        {% endif %}
+      </form>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0;">Lưu ý vận hành</h2>
+      <ul class="muted" style="padding-left:18px; margin:10px 0;">
+        <li>Nếu đổi role sang admin: user sẽ xem toàn bộ.</li>
+        <li>Nếu đổi role sang user thường: cần gán brands để lọc dữ liệu.</li>
+        <li>Nếu bạn muốn xoá quyền/thu hẹp brand: sửa lại textarea Brands.</li>
+      </ul>
+      <div class="small" style="margin-top:12px;">
+        Username đăng nhập mới có thể dùng luôn ở trang <code>/login</code>.
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Danh sách users</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Username</th>
+          <th>Role</th>
+          <th>Brand đã gán</th>
+          <th>Cập nhật</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+          <tr>
+            <td>{{ u.id }}</td>
+            <td><code>{{ u.username }}</code></td>
+            <td>{{ 'Admin' if u.is_admin else 'User' }}</td>
+            <td>
+              {% if u.is_admin %}
+                <div class="muted" style="margin-bottom:6px;">Admin: tất cả brands</div>
+                <textarea
+                  form="form_update_{{ u.id }}"
+                  name="brands"
+                  style="min-width: 280px; min-height: 90px;"
+                  placeholder="Nhập brands để chuyển sang user (mỗi dòng 1 brand)"
+                >{{ u.brands_text }}</textarea>
+              {% else %}
+                <div class="muted">Team: {{ u.team_id }}</div>
+                <div class="small" style="margin-top:6px;">{{ u.brands_count }} brands</div>
+                <textarea form="form_update_{{ u.id }}" name="brands" style="min-width: 280px; min-height: 90px;">{{ u.brands_text }}</textarea>
+              {% endif %}
+            </td>
+            <td style="min-width: 320px;">
+              <form id="form_update_{{ u.id }}" method="post" action="/admin/users">
+                <input type="hidden" name="action" value="update_user" />
+                <input type="hidden" name="user_id" value="{{ u.id }}" />
+
+                <div class="field" style="margin-bottom:8px;">
+                  <label>Role</label>
+                  <select name="role">
+                    <option value="user" {{ 'selected' if not u.is_admin else '' }}>User</option>
+                    <option value="admin" {{ 'selected' if u.is_admin else '' }}>Admin</option>
+                  </select>
+                </div>
+
+                <div class="field" style="margin-bottom:8px;">
+                  <label>Mật khẩu mới (tuỳ chọn)</label>
+                  <input type="password" name="password" placeholder="để trống nếu không đổi" />
+                </div>
+
+                {% if u.is_admin %}
+                  <div class="muted small">Đang là admin nên không cần brands (nếu chuyển sang user sẽ dùng Brands ở ô bên trái).</div>
+                {% endif %}
+
+                <button class="primary" type="submit" style="margin-top:8px;">Lưu thay đổi</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>
+

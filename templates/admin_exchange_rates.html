@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tỷ giá (exchange rates)</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 24px auto; padding: 0 12px; }
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 14px; margin-bottom: 16px; }
+    .ok { color: #0b7a0b; }
+    .err { color: #b00020; white-space: pre-wrap; }
+    table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+    th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; }
+    code { background: #f6f6f6; padding: 1px 4px; }
+    .nav a { margin-right: 12px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <p class="nav">
+    <a href="/">Search</a>
+    <a href="/admin/imports">Imports</a>
+    <a href="/admin/exchange-rates"><b>Tỷ giá</b></a>
+    <a href="/admin/network">Mạng / IP</a>
+    <a href="/admin/users">Users</a>
+  </p>
+  <h1>Tỷ giá theo brand</h1>
+  <p>Giá hiển thị = <code>price × ship × tỷ_giá</code>. Brand có trong bảng dưới dùng tỷ giá DB; còn lại lấy từ <code>static/exchange_rates.json</code> (hiện có <b>{{ json_fallback_count }}</b> mục trong file).</p>
+
+  {% if message %}<p class="ok">{{ message }}</p>{% endif %}
+  {% if error %}<p class="err">{{ error }}</p>{% endif %}
+
+  <div class="card">
+    <h2>Thêm / cập nhật một brand</h2>
+    <form method="post">
+      <div class="row">
+        <label>Brand <input name="brand" type="text" placeholder="Tên hãng" required /></label>
+        <label>Tỷ giá <input name="rate" type="text" inputmode="decimal" placeholder="1.23" required /></label>
+        <button type="submit">Lưu</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Một tỷ giá chung cho nhiều brand (nhanh)</h2>
+    <p>Dán danh sách brand: <b>mỗi dòng một hoặc nhiều brand</b> (cách nhau bởi dấu phẩy hoặc chấm phẩy). Cùng một tỷ giá sẽ được ghi cho tất cả.</p>
+    <form method="post">
+      <p><textarea name="bulk_brands" rows="8" style="width:100%; box-sizing:border-box; font-family: monospace;" placeholder="Brand A&#10;Brand B, Brand C&#10;Brand D"></textarea></p>
+      <div class="row">
+        <label>Tỷ giá chung <input name="bulk_rate" type="text" inputmode="decimal" placeholder="23500" /></label>
+        <button type="submit" name="bulk_same_apply" value="1">Áp dụng cho cả danh sách</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Nhiều brand, tỷ giá khác nhau (mỗi dòng một cặp)</h2>
+    <p>Định dạng: <code>brand,tỷ_giá</code> hoặc <code>brand</code> + tab + <code>tỷ_giá</code>. Dòng bắt đầu bằng <code>#</code> bị bỏ qua.</p>
+    <form method="post">
+      <p><textarea name="bulk_lines" rows="8" style="width:100%; box-sizing:border-box; font-family: monospace;" placeholder="Sigma, 23500&#10;Merck	25000&#10;# ghi chú"></textarea></p>
+      <button type="submit" name="bulk_lines_apply" value="1">Áp dụng các dòng</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Đồng bộ từ file JSON một lần</h2>
+    <p>Ghi đè/ bổ sung toàn bộ brand có trong <code>static/exchange_rates.json</code> vào database (sau đó có thể sửa từng dòng trên web, không cần upload file JSON nữa).</p>
+    <form method="post" onsubmit="return confirm('Ghi đồng bộ tất cả brand từ JSON vào DB?');">
+      <button type="submit" name="seed_json" value="1">Đồng bộ từ JSON → DB</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Đang lưu trong database</h2>
+    {% if rows %}
+    <table>
+      <thead><tr><th>brand</th><th>rate</th><th>updated_at</th><th></th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r.brand }}</td>
+        <td>{{ r.rate }}</td>
+        <td>{{ r.updated_at }}</td>
+        <td>
+          <form method="post" style="display:inline" onsubmit="return confirm('Xóa tỷ giá {{ r.brand }}?');">
+            <input type="hidden" name="delete_brand" value="{{ r.brand }}" />
+            <button type="submit">Xóa</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p>Chưa có dòng nào trong bảng <code>exchange_rates</code> — mọi brand đang dùng file JSON (hoặc mặc định 1).</p>
+    {% endif %}
+  </div>
+</body>
+</html>

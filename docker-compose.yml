@@ -1,0 +1,18 @@
+# Chỉ dùng trên máy dev — PostgreSQL cục bộ, không liên quan Vultr.
+# Chạy: docker compose up -d
+# Dừng: docker compose down
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: searchlocal
+      POSTGRES_PASSWORD: searchlocal
+      POSTGRES_DB: products_local
+    ports:
+      - "5432:5432"
+    volumes:
+      - search_pgdata:/var/lib/postgresql/data
+
+volumes:
+  search_pgdata:

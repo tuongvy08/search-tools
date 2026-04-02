@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Giới hạn IP văn phòng</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 24px auto; padding: 0 12px; }
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 14px; margin-bottom: 16px; }
+    .ok { color: #0b7a0b; }
+    .err { color: #b00020; white-space: pre-wrap; }
+    table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+    th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; }
+    code { background: #f6f6f6; padding: 1px 4px; }
+    .nav a { margin-right: 12px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+    .muted { color: #555; font-size: 0.95rem; }
+  </style>
+</head>
+<body>
+  <p class="nav">
+    <a href="/">Search</a>
+    <a href="/admin/imports">Imports</a>
+    <a href="/admin/exchange-rates">Tỷ giá</a>
+    <a href="/admin/network"><b>Mạng / IP</b></a>
+    <a href="/admin/users">Users</a>
+  </p>
+  <h1>Giới hạn IP (văn phòng)</h1>
+
+  <div class="card muted">
+    <p><b>IP nào cần cho phép?</b> Không phải IP máy tính nội bộ (<code>192.168.x.x</code>, <code>10.x.x.x</code>). Cần <b>IP công khai (WAN)</b> — địa chỉ mà modem/router văn phòng dùng khi ra Internet, do ISP cấp (thường động: reset modem là có thể đổi).</p>
+    <p>Ví dụ: văn phòng <b>Hà Nội</b> và <b>HCM</b> thường mỗi nơi <b>một</b> IP WAN; mọi máy trong cùng LAN dùng chung IP đó khi truy cập server bên ngoài. Khi IP WAN đổi, cập nhật lại rule (thủ công hoặc nút bên dưới khi đang kết nối Wi‑Fi/LAN đúng văn phòng, <b>tắt 4G điện thoại</b>).</p>
+  </div>
+
+  <p><b>IP mà máy chủ đang thấy</b> từ phiên của bạn: <code>{{ seen_ip }}</code>
+    {% if seen_ip %}<span class="muted">(sau reverse proxy thường lấy từ hop đầu <code>X-Forwarded-For</code>)</span>{% endif %}
+  </p>
+  {% if seen_ip_non_public %}
+  <p class="err"><b>Cảnh báo:</b> Đây có vẻ là IP nội bộ / loopback. Nếu bạn đang truy cập production qua Internet, hãy kiểm tra cấu hình nginx/proxy có gửi đúng IP khách (<code>proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;</code>). Nếu chỉ dùng trên máy dev thì bình thường.</p>
+  {% endif %}
+
+  {% if disable_allowlist %}
+  <p class="ok">Cảnh báo: <code>DISABLE_IP_ALLOWLIST</code> đang bật — mọi IP đều vào được (phù hợp máy dev).</p>
+  {% endif %}
+
+  {% if env_allowlist %}
+  <div class="card">
+    <h2>Rule từ biến môi trường <code>OFFICE_IP_ALLOWLIST</code></h2>
+    <ul>{% for x in env_allowlist %}<li><code>{{ x }}</code></li>{% endfor %}</ul>
+    <p class="muted">Đổi list này cần sửa <code>.env</code> trên server và restart app (hoặc dùng bảng DB bên dưới để khỏi deploy lại).</p>
+  </div>
+  {% endif %}
+
+  {% if message %}<p class="ok">{{ message }}</p>{% endif %}
+  {% if error %}<p class="err">{{ error }}</p>{% endif %}
+
+  <div class="card">
+    <h2>Thêm CIDR / IP WAN thủ công</h2>
+    <p>Nhập <b>IP công khai</b> của văn phòng (xem trên modem, hoặc từ site kiểm tra IP khi đang ở văn phòng). Ví dụ: <code>203.0.113.0/24</code> nếu ISP gán cả dải, hoặc một WAN cụ thể <code>203.0.113.88/32</code>.</p>
+    <form method="post">
+      <div class="row">
+        <label>CIDR <input name="cidr" type="text" placeholder="x.x.x.x/24" required /></label>
+        <label>Ghi chú <input name="label" type="text" placeholder="VP chính" /></label>
+        <button type="submit">Thêm</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Ghi nhanh IP WAN hiện tại (sau khi modem đổi IP)</h2>
+    <p>Đăng nhập admin, <b>đang dùng mạng văn phòng</b> (Wi‑Fi/LAN, không dùng 4G), mở trang này — số ở mục “IP máy chủ đang thấy” chính là IP WAN chung của văn phòng. Bấm nút để thêm rule <code>…/32</code> (IPv4) hoặc <code>…/128</code> (IPv6). Sau khi ISP cấp IP mới, lặp lại thao tác này (có thể xóa rule cũ trong bảng).</p>
+    <form method="post">
+      <input type="hidden" name="add_my_ip" value="1" />
+      <label>Nhãn (VD VP HN / VP HCM) <input name="my_ip_label" type="text" placeholder="VP HN — sau reset modem 4/2026" /></label>
+      <button type="submit">Thêm IP WAN đang dùng (theo phiên hiện tại)</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Rule trong database</h2>
+    {% if rules %}
+    <table>
+      <thead><tr><th>id</th><th>cidr</th><th>label</th><th>active</th><th>created_at</th><th></th></tr></thead>
+      <tbody>
+      {% for r in rules %}
+      <tr>
+        <td>{{ r.id }}</td>
+        <td><code>{{ r.cidr }}</code></td>
+        <td>{{ r.label or '' }}</td>
+        <td>{{ r.is_active }}</td>
+        <td>{{ r.created_at }}</td>
+        <td>
+          <form method="post" style="display:inline" onsubmit="return confirm('Xóa rule này?');">
+            <input type="hidden" name="delete_id" value="{{ r.id }}" />
+            <button type="submit">Xóa</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p>Chưa có rule trong DB. Nếu cũng không cấu hình <code>OFFICE_IP_ALLOWLIST</code>, app <b>không chặn</b> IP.</p>
+    {% endif %}
+  </div>
+
+  <div class="card muted">
+    <p><b>Production (Vultr):</b> đặt <code>DISABLE_IP_ALLOWLIST=0</code> (hoặc xóa), thêm rule bằng env hoặc DB. Trên máy dev đặt <code>DISABLE_IP_ALLOWLIST=1</code> để không bị khóa.</p>
+  </div>
+</body>
+</html>

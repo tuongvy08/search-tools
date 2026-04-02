@@ -84,6 +84,73 @@ h1 {
   background-color: #e65c00; /* Màu cam đậm hơn khi hover */
 }
 
+/* Panel nhập nhanh để Check license / Find code */
+.multi-panel {
+  max-width: 720px;
+  margin: 0 auto 18px;
+  background: #fff;
+  border-radius: 15px;
+  border: 1px solid #caced1;
+  padding: 14px 16px;
+}
+
+.multi-panel-title {
+  text-align: center;
+  font-weight: 700;
+  color: #2e45b6;
+  margin-bottom: 10px;
+}
+
+.multi-panel textarea {
+  width: 100%;
+  min-height: 140px;
+  resize: vertical;
+  border: 1px solid #caced1;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  color: #2e45b6;
+  outline: none;
+}
+
+.multi-panel-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+#multiCancelBtn {
+  background-color: #94a3b8 !important; /* ghi */
+}
+
+#multiCancelBtn:hover {
+  background-color: #7b8aa3 !important;
+}
+
+/* Bảng kết quả cho Check license (CAS list) */
+.license-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  margin-top: 8px;
+}
+
+.license-table th,
+.license-table td {
+  border: 1px solid #caced1;
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+  white-space: pre-wrap;
+}
+
+.license-table th {
+  background-color: #f4f7fe;
+  color: #2e45b6;
+}
+
 .filter-container {
   display: flex;
   justify-content: center;
@@ -197,7 +264,7 @@ h1 {
   color: #b8860b !important; /* Dark goldenrod */
 }
 
-.warning-phu-luc-i {
+.warning-phu-luc-iii {
   background-color: #e0ffff !important; /* Light cyan */
   color: #008b8b !important; /* Dark cyan */
 }

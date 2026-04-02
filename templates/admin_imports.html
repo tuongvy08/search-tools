@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nhập dữ liệu — Admin</title>
+  <style>
+    :root {
+      --bg: #f1f5f9;
+      --card: #fff;
+      --text: #0f172a;
+      --muted: #64748b;
+      --border: #e2e8f0;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --success: #059669;
+      --danger: #dc2626;
+      --radius: 12px;
+      --shadow: 0 1px 3px rgb(15 23 42 / 8%), 0 4px 12px rgb(15 23 42 / 6%);
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 24px 16px 48px;
+      line-height: 1.5;
+    }
+    .wrap { max-width: 920px; margin: 0 auto; }
+    header {
+      margin-bottom: 24px;
+    }
+    header h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin: 0 0 8px 0;
+    }
+    .sub {
+      color: var(--muted);
+      font-size: 0.95rem;
+      max-width: 52rem;
+    }
+    .nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 16px;
+      margin-top: 14px;
+    }
+    .nav a {
+      color: var(--primary);
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .nav a:hover { text-decoration: underline; }
+
+    .flow {
+      background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
+      border: 1px solid #bfdbfe;
+      border-radius: var(--radius);
+      padding: 16px 18px;
+      margin-bottom: 22px;
+      font-size: 0.9rem;
+    }
+    .flow strong { color: #1e40af; }
+    .flow ol { margin: 10px 0 0 0; padding-left: 1.25rem; }
+    .flow li { margin: 6px 0; }
+
+    .alert {
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      margin-bottom: 18px;
+      font-size: 0.95rem;
+    }
+    .alert.ok { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+    .alert.err { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; white-space: pre-wrap; }
+
+    .card {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      border: 1px solid var(--border);
+      padding: 20px 22px;
+      margin-bottom: 18px;
+    }
+    .card h2 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin: 0 0 6px 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 1.6rem;
+      height: 1.6rem;
+      border-radius: 6px;
+      background: var(--primary);
+      color: #fff;
+      font-size: 0.8rem;
+      font-weight: 700;
+    }
+    .card .hint {
+      color: var(--muted);
+      font-size: 0.875rem;
+      margin: 0 0 14px 0;
+    }
+    code {
+      background: #f1f5f9;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.85em;
+    }
+    .tpl-links a {
+      color: var(--primary);
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .tpl-links a:hover { text-decoration: underline; }
+    .tpl-links p { margin: 8px 0; font-size: 0.9rem; }
+
+    .form-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: flex-end;
+    }
+    .field { display: flex; flex-direction: column; gap: 4px; min-width: 160px; }
+    .field label, .field span.lbl { font-size: 0.8rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    input[type="file"] {
+      font-size: 0.875rem;
+      max-width: 100%;
+    }
+    select {
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #fff;
+      font-size: 0.9rem;
+      min-width: 200px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: #fff;
+    }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-success {
+      background: var(--success);
+      color: #fff;
+      font-size: 1rem;
+      padding: 12px 22px;
+    }
+    .btn-success:hover { filter: brightness(1.05); }
+    .btn-ghost {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover { background: #f8fafc; color: var(--text); }
+
+    .preview-card {
+      border-color: #93c5fd;
+      background: linear-gradient(180deg, #fff 0%, #f8fafc 100%);
+    }
+    .preview-meta {
+      font-size: 0.9rem;
+      margin-bottom: 12px;
+      color: var(--text);
+    }
+    .preview-meta span { color: var(--muted); }
+    table.data {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+      margin: 12px 0 18px;
+      overflow: auto;
+      display: block;
+      max-height: 320px;
+    }
+    table.data thead { position: sticky; top: 0; background: #f8fafc; }
+    table.data th, table.data td {
+      border: 1px solid var(--border);
+      padding: 8px 10px;
+      text-align: left;
+    }
+    table.data th { font-weight: 600; color: var(--muted); }
+    .apply-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 8px; }
+
+    .jobs table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    .jobs th, .jobs td { border: 1px solid var(--border); padding: 8px; text-align: left; }
+    .jobs th { background: #f8fafc; color: var(--muted); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Nhập dữ liệu (Admin)</h1>
+      <p class="sub">Import sản phẩm hoặc quy tắc từ Excel. Hệ thống dùng hai bước để tránh ghi nhầm vào cơ sở dữ liệu.</p>
+      <nav class="nav">
+        <a href="/">← Search</a>
+        <a href="/admin/exchange-rates">Tỷ giá</a>
+        <a href="/admin/network">Mạng / IP</a>
+        <a href="/admin/users"><b>Users</b></a>
+      </nav>
+    </header>
+
+    <div class="flow">
+      <strong>Luồng làm việc (không có nút “Upload” một chạm):</strong>
+      <ol>
+        <li><strong>Bước 1 — Xem trước:</strong> chọn file <code>.xlsx</code>, chế độ import, rồi bấm <strong>“Xem trước”</strong>. Hệ thống kiểm tra cột và hiển thị vài dòng mẫu.</li>
+        <li><strong>Bước 2 — Ghi database:</strong> sau khi xem trước, bấm <strong>“Xác nhận ghi vào database”</strong> ở khối màu xanh bên dưới (chỉ xuất hiện sau bước 1).</li>
+      </ol>
+    </div>
+
+    {% if message %}<div class="alert ok">{{ message }}</div>{% endif %}
+    {% if error %}<div class="alert err">{{ error }}</div>{% endif %}
+
+    <div class="card">
+      <h2><span class="badge">↓</span> File mẫu Excel</h2>
+      <p class="hint">Tải mẫu, điền dữ liệu, giữ nguyên tên cột dòng đầu (tiếng Anh, chữ thường như mẫu). File phải là <strong>Excel Workbook (.xlsx)</strong> thật (File → Save As), không đổi đuôi CSV/HTML thành .xlsx. Có thể upload thêm <strong>.csv</strong> (UTF-8 hoặc Excel Việt Nam) với cùng tên cột.</p>
+      <div class="tpl-links">
+        <p><a href="/admin/templates/products.xlsx">products_import_template.xlsx</a> — <code>name, code, cas, brand, size, ship, price, note</code></p>
+        <p><a href="/admin/templates/regulatory_rules.xlsx">regulatory_rules_import_template.xlsx</a> — <code>rule_type, rule_label, match_field, match_value, priority, is_active, note</code></p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2><span class="badge">1</span> Import sản phẩm (Products)</h2>
+      <p class="hint">Cột bắt buộc trên dòng 1: <code>name, code, cas, brand, size, ship, price, note</code></p>
+      <form method="post" action="/admin/imports/preview" enctype="multipart/form-data">
+        <input type="hidden" name="dataset" value="products" />
+        <div class="form-row">
+          <div class="field" style="flex:1; min-width:220px;">
+            <span class="lbl">Chọn file .xlsx</span>
+            <input type="file" name="file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" required />
+          </div>
+          <div class="field">
+            <span class="lbl">Chế độ</span>
+            <select name="mode" aria-label="Chế độ import products">
+              <option value="upsert" selected>Upsert (code + brand)</option>
+              <option value="replace_by_brand">Xóa theo brand trong file rồi nạp lại</option>
+              <option value="append">Chỉ thêm dòng mới</option>
+            </select>
+          </div>
+          <button type="submit" class="btn btn-primary">Xem trước — Products</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2><span class="badge">1</span> Import quy tắc (Regulatory rules)</h2>
+      <p class="hint">Cột bắt buộc: <code>rule_type, rule_label, match_field, match_value, priority, is_active, note</code></p>
+      <form method="post" action="/admin/imports/preview" enctype="multipart/form-data">
+        <input type="hidden" name="dataset" value="regulatory_rules" />
+        <div class="form-row">
+          <div class="field" style="flex:1; min-width:220px;">
+            <span class="lbl">Chọn file .xlsx</span>
+            <input type="file" name="file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" required />
+          </div>
+          <div class="field">
+            <span class="lbl">Chế độ</span>
+            <select name="mode" aria-label="Chế độ import rules">
+              <option value="upsert" selected>Upsert</option>
+              <option value="replace_by_type">Xóa theo rule_type trong file rồi nạp lại</option>
+            </select>
+          </div>
+          <button type="submit" class="btn btn-primary">Xem trước — Rules</button>
+        </div>
+      </form>
+    </div>
+
+    {% if preview %}
+    <div class="card preview-card">
+      <h2><span class="badge">2</span> Kết quả xem trước — xác nhận ghi DB</h2>
+      <div class="preview-meta">
+        <div><span>Loại:</span> <strong>{{ preview.dataset }}</strong></div>
+        <div><span>Chế độ:</span> <strong>{{ preview.mode }}</strong></div>
+        <div><span>Số dòng dữ liệu:</span> <strong>{{ preview.row_count }}</strong></div>
+        <div><span>File:</span> <strong>{{ preview.filename }}</strong></div>
+      </div>
+      {% if preview.hints %}
+        <ul class="hint" style="margin-top:0;">
+          {% for h in preview.hints %}<li>{{ h }}</li>{% endfor %}
+        </ul>
+      {% endif %}
+
+      {% if preview.sample_rows %}
+      <h3 style="font-size:0.9rem; margin:16px 0 8px; color:var(--muted);">Mẫu tối đa 10 dòng đầu</h3>
+      <table class="data">
+        <thead>
+          <tr>
+            {% for k in preview.sample_rows[0].keys() %}<th>{{ k }}</th>{% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in preview.sample_rows %}
+          <tr>{% for v in r.values() %}<td>{{ v }}</td>{% endfor %}</tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+
+      <form method="post" action="/admin/imports/apply" class="apply-actions">
+        <input type="hidden" name="preview_token" value="{{ preview.token }}" />
+        <button type="submit" class="btn btn-success" onclick="return confirm('Ghi dữ liệu này vào database? Thao tác không hoàn tác tự động.');">Xác nhận ghi vào database</button>
+        <a href="/admin/imports" class="btn btn-ghost">Huỷ — làm lại từ đầu</a>
+      </form>
+    </div>
+    {% endif %}
+
+    {% if recent_jobs %}
+    <div class="card jobs">
+      <h2 style="margin-bottom:12px;">Lịch sử import gần đây</h2>
+      <table>
+        <thead><tr><th>id</th><th>dataset</th><th>mode</th><th>status</th><th>rows</th><th>ins</th><th>upd</th><th>del</th><th>created_at</th></tr></thead>
+        <tbody>
+          {% for j in recent_jobs %}
+          <tr>
+            <td>{{ j.id }}</td><td>{{ j.dataset }}</td><td>{{ j.mode }}</td><td>{{ j.status }}</td>
+            <td>{{ j.row_count }}</td><td>{{ j.inserted_count }}</td><td>{{ j.updated_count }}</td><td>{{ j.deleted_count }}</td><td>{{ j.created_at }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</body>
+</html>

@@ -287,6 +287,72 @@ h1 {
   text-align: center;
 }
 
+/* Trạng thái thao tác (tìm kiếm / tra cứu mã) */
+.operation-status {
+  display: none;
+  max-width: 920px;
+  margin: 0 auto 16px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  border: 1px solid #caced1;
+  background: #fff;
+  color: #0f172a;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+.operation-status.is-loading {
+  display: block;
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1e3a8a;
+}
+
+.operation-status.is-success {
+  display: block;
+  border-color: #6ee7b7;
+  background: #ecfdf5;
+  color: #065f46;
+}
+
+.operation-status.is-error {
+  display: block;
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.status-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: 8px;
+  vertical-align: -2px;
+  border: 2px solid #93c5fd;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: status-spin 0.7s linear infinite;
+}
+
+@keyframes status-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.batch-inline-loading {
+  padding: 8px 0;
+  color: #1e3a8a;
+  font-weight: 500;
+}
+
+.batch-error-msg {
+  color: #991b1b;
+  padding: 8px 0;
+  white-space: pre-wrap;
+}
+
 /* Responsive Design */
 @media screen and (max-width: 500px) {
   .input-box,

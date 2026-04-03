@@ -25,6 +25,20 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-only-change-me")
 base_path = os.environ.get("ACCESS_CONTROL_BASE_PATH", "/home/deploy/myapps")
 register_ip_access_control(app, base_path=base_path)
 
+
+@app.after_request
+def _static_no_cache_js_css(response):
+    """Tránh trình duyệt giữ bản cũ của script.js / styles.css sau khi deploy."""
+    try:
+        path = request.path or ""
+        if path.startswith("/static/") and path.endswith((".js", ".css")):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+    except Exception:
+        pass
+    return response
+
+
 MANAGER_PASSWORD = os.environ.get("APP_PASSWORD_MANAGER", "Truong@2004")
 STAFF_PASSWORD = os.environ.get("APP_PASSWORD_STAFF", "Truong@123")
 
@@ -1417,54 +1431,54 @@ def find_code_batch():
     try:
         rate_map = _exchange_rate_map(conn)
         with conn.cursor() as cursor:
+            # DISTINCT ON + JOIN giúp planner dùng index (UPPER(TRIM(code))) tốt hơn
+            # so với LEFT JOIN LATERAL lồng nhau trên bảng lớn.
             query = f"""
                 WITH input AS (
                     SELECT u.ord, u.code_u
                     FROM unnest(%s::text[]) WITH ORDINALITY AS u(code_u, ord)
+                ),
+                picked AS (
+                    SELECT DISTINCT ON (i.ord)
+                        i.ord,
+                        p.id AS product_id
+                    FROM input i
+                    INNER JOIN products p ON UPPER(TRIM(p.code)) = i.code_u
+                    WHERE TRUE
+                    {vis}
+                    ORDER BY i.ord, p.id ASC
                 )
                 SELECT
                     i.ord,
-                    prod.name,
-                    prod.code,
-                    prod.cas,
-                    prod.brand,
-                    prod.size,
-                    prod.ship,
-                    prod.price,
-                    prod.note,
-                    prod.compliance_status,
-                    prod.compliance_note
+                    p.name,
+                    p.code,
+                    p.cas,
+                    p.brand,
+                    p.size,
+                    p.ship,
+                    p.price,
+                    p.note,
+                    rr.rule_label AS compliance_status,
+                    rr.note AS compliance_note
                 FROM input i
+                LEFT JOIN picked pk ON pk.ord = i.ord
+                LEFT JOIN products p ON p.id = pk.product_id
                 LEFT JOIN LATERAL (
-                    SELECT
-                        p.name,
-                        p.code,
-                        p.cas,
-                        p.brand,
-                        p.size,
-                        p.ship,
-                        p.price,
-                        p.note,
-                        rr.rule_label AS compliance_status,
-                        rr.note AS compliance_note
-                    FROM products p
-                    LEFT JOIN LATERAL (
-                        SELECT r.rule_label, r.note
-                        FROM regulatory_rules r
-                        WHERE r.is_active = TRUE
-                          AND (
-                            (r.match_field = 'cas' AND NULLIF(TRIM(p.cas), '') IS NOT NULL AND UPPER(TRIM(p.cas)) = UPPER(TRIM(r.match_value)))
-                            OR (r.match_field = 'name' AND NULLIF(TRIM(p.name), '') IS NOT NULL AND UPPER(TRIM(p.name)) = UPPER(TRIM(r.match_value)))
-                            OR (r.match_field = 'code' AND NULLIF(TRIM(p.code), '') IS NOT NULL AND UPPER(TRIM(p.code)) = UPPER(TRIM(r.match_value)))
-                          )
-                        ORDER BY r.priority ASC, r.id ASC
-                        LIMIT 1
-                    ) rr ON TRUE
-                    WHERE UPPER(TRIM(p.code)) = i.code_u
-                    {vis}
-                    ORDER BY p.id ASC
+                    SELECT r.rule_label, r.note
+                    FROM regulatory_rules r
+                    WHERE p.id IS NOT NULL
+                      AND r.is_active = TRUE
+                      AND (
+                        (r.match_field = 'cas' AND NULLIF(TRIM(p.cas), '') IS NOT NULL
+                            AND UPPER(TRIM(p.cas)) = UPPER(TRIM(r.match_value)))
+                        OR (r.match_field = 'name' AND NULLIF(TRIM(p.name), '') IS NOT NULL
+                            AND UPPER(TRIM(p.name)) = UPPER(TRIM(r.match_value)))
+                        OR (r.match_field = 'code' AND NULLIF(TRIM(p.code), '') IS NOT NULL
+                            AND UPPER(TRIM(p.code)) = UPPER(TRIM(r.match_value)))
+                      )
+                    ORDER BY r.priority ASC, r.id ASC
                     LIMIT 1
-                ) prod ON TRUE
+                ) rr ON TRUE
                 ORDER BY i.ord
             """
             cursor.execute(query, (codes_upper,) + vis_params)

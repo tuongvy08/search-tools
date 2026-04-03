@@ -1,5 +1,4 @@
 let searchResults = [];
-let warningsDisplayed = false;
 
 const COMPLIANCE_CLASS = {
     'CẤM NHẬP': 'warning-cam-nhap',
@@ -8,24 +7,95 @@ const COMPLIANCE_CLASS = {
     'TỒN KHO': 'warning-ton-kho',
 };
 
+const AJAX_LONG_TIMEOUT_MS = 180000;
+
+function countBatchItems(text) {
+    const out = [];
+    for (const line of String(text).split(/\n/)) {
+        const t = line.trim();
+        if (!t || t.startsWith('#')) continue;
+        for (const part of t.replace(/;/g, ',').split(',')) {
+            const item = part.trim();
+            if (item) out.push(item);
+        }
+    }
+    return Math.min(out.length, 2000);
+}
+
+function setOperationStatus(html, kind) {
+    const el = $('#operationStatus');
+    el.removeClass('is-loading is-error is-success');
+    if (!html) {
+        el.hide().empty();
+        return;
+    }
+    if (kind === 'loading') el.addClass('is-loading');
+    else if (kind === 'error') el.addClass('is-error');
+    else if (kind === 'success') el.addClass('is-success');
+    el.html(html).show();
+}
+
+function formatAjaxError(xhr, defaultMsg) {
+    const status = xhr && xhr.status;
+    if (status === 504) {
+        return 'Hết thời gian chờ máy chủ (504). Danh sách có thể quá dài hoặc tải cao — thử giảm số dòng mỗi lần, hoặc kiểm tra index DB và timeout nginx/gunicorn.';
+    }
+    if (status === 403) {
+        return 'Truy cập bị từ chối (403). Kiểm tra IP allowlist hoặc đăng nhập.';
+    }
+    if (status === 502) {
+        return 'Lỗi 502 Bad Gateway: nginx không nhận phản hồi từ app (Gunicorn có thể crash, tắt, hoặc bị timeout). Trên VPS chạy: sudo systemctl status search-tools-pg và journalctl -u search-tools-pg -n 80. Thường cần tăng --timeout trong lệnh gunicorn (ví dụ 120).';
+    }
+    if (status === 0 || status === 503) {
+        return 'Không kết nối được tới máy chủ. Thử lại sau vài giây.';
+    }
+    let body = (xhr && xhr.responseText) ? String(xhr.responseText).trim() : '';
+    if (body.length > 280) body = body.slice(0, 280) + '…';
+    if (body && body.startsWith('<')) body = defaultMsg;
+    return body || defaultMsg;
+}
+
+function setBatchRunning(running) {
+    const btn = $('#multiRunBtn');
+    if (running) {
+        btn.prop('disabled', true).data('prev-label', btn.text()).text('Đang xử lý…');
+    } else {
+        const prev = btn.data('prev-label');
+        btn.prop('disabled', false);
+        if (prev) btn.text(prev);
+    }
+}
+
 function searchProducts() {
     const query = $('#searchQuery').val();
     if (query.trim() === '') {
-        alert('Please enter a search query.');
+        setOperationStatus('Nhập từ khóa tìm kiếm.', 'error');
         return;
     }
 
-    warningsDisplayed = false;
+    setOperationStatus('<span class="status-spinner"></span> Đang tìm kiếm…', 'loading');
 
-    $.getJSON(`/search?query=${encodeURIComponent(query)}`, function(data) {
-        searchResults = data.results;
-        updateBrandFilterOptions();
-        updateSizeFilterOptions();
-        displayResults(searchResults);
-    }).fail(function(xhr) {
-        const msg = xhr && xhr.responseText ? xhr.responseText : 'Unknown error';
-        alert(`Search request failed: ${msg}`);
-        console.error('Search request failed', xhr);
+    $.ajax({
+        url: `/search?query=${encodeURIComponent(query)}`,
+        dataType: 'json',
+        timeout: AJAX_LONG_TIMEOUT_MS,
+        success: function(data) {
+            searchResults = data.results || [];
+            updateBrandFilterOptions();
+            updateSizeFilterOptions();
+            displayResults(searchResults);
+            const n = searchResults.length;
+            setOperationStatus(
+                n ? `Tìm thấy <strong>${n}</strong> dòng.` : 'Không có kết quả.',
+                n ? 'success' : ''
+            );
+            if (!n) setTimeout(() => setOperationStatus('', ''), 4000);
+        },
+        error: function(xhr) {
+            const msg = formatAjaxError(xhr, 'Tìm kiếm thất bại.');
+            setOperationStatus(msg, 'error');
+            console.error('Search request failed', xhr);
+        },
     });
 }
 
@@ -139,27 +209,6 @@ function displayResults(products) {
             row.classList.add(cssClass);
         }
     });
-
-    if (!warningsDisplayed && products === searchResults) {
-        showComplianceWarnings(products);
-    }
-}
-
-function showComplianceWarnings(products) {
-    const warningSet = new Set();
-
-    products.forEach(product => {
-        if (product.Compliance_Status) {
-            const detail = product.Compliance_Note ? ` | ${product.Compliance_Note}` : '';
-            warningSet.add(`${product.Compliance_Status}: ${product.Cas || product.Name || product.Code || 'không rõ mã'}${detail}`);
-        }
-    });
-
-    if (warningSet.size > 0) {
-        alert(Array.from(warningSet).join('\n'));
-    }
-
-    warningsDisplayed = true;
 }
 
 function filterResultsByBrand() {
@@ -192,6 +241,12 @@ function filterResults() {
 }
 
 $(document).ready(function() {
+    if (!$('#operationStatus').length) {
+        $('.search-container').after(
+            '<div id="operationStatus" class="operation-status" role="status" aria-live="polite"></div>'
+        );
+    }
+
     $('#searchQuery').on('keypress', function(event) {
         if (event.key === 'Enter') {
             event.preventDefault();
@@ -235,6 +290,8 @@ $(document).ready(function() {
         $('#multiModePanel').hide();
         $('#licenseWarnings').hide().html('');
         $('#multiInput').val('');
+        setOperationStatus('', '');
+        setBatchRunning(false);
         // Trở về màn search mặc định
         $('.filter-container').show();
         $('#results').show();
@@ -245,20 +302,25 @@ $(document).ready(function() {
         const mode = window.__multiMode;
         const text = ($('#multiInput').val() || '').trim();
         if (!mode) {
-            alert('Chọn chế độ trước (Check license hoặc Find Code).');
+            setOperationStatus('Chọn <strong>Check license</strong> hoặc <strong>Find Code</strong> trước khi bấm Run.', 'error');
             return;
         }
         if (!text) {
-            alert('Vui lòng dán danh sách vào ô input.');
+            setOperationStatus('Vui lòng dán danh sách vào ô nhập.', 'error');
             return;
         }
 
         if (mode === 'license') {
-            $('#licenseWarnings').show().html('<div>Đang kiểm tra...</div>');
+            const nCas = countBatchItems(text);
+            $('#licenseWarnings').show().html(
+                `<div class="batch-inline-loading"><span class="status-spinner"></span> Đang kiểm tra <strong>${nCas}</strong> CAS…</div>`
+            );
+            setBatchRunning(true);
             $.ajax({
                 url: '/check_cas_batch',
                 method: 'POST',
                 data: { cas: text },
+                timeout: AJAX_LONG_TIMEOUT_MS,
                 success: function(data) {
                     const items = data && data.results ? data.results : [];
                     let warnCount = 0;
@@ -294,34 +356,64 @@ $(document).ready(function() {
                     `;
                     $('#licenseWarnings').html(summary + tableHtml);
                     $('#multiInput').val('');
+                    setBatchRunning(false);
                 },
                 error: function(xhr) {
-                    const msg = xhr && xhr.responseText ? xhr.responseText : 'Unknown error';
-                    $('#licenseWarnings').html(`<div style="color:#b00020;">${msg}</div>`);
+                    const msg = formatAjaxError(xhr, 'Kiểm tra CAS thất bại.');
+                    $('#licenseWarnings').html(`<div class="batch-error-msg">${$('<div/>').text(msg).html()}</div>`);
+                    setBatchRunning(false);
                 }
             });
             return;
         }
 
         if (mode === 'findcode') {
+            const nCodes = countBatchItems(text);
+            setOperationStatus(
+                `<span class="status-spinner"></span> Đang tra cứu <strong>${nCodes}</strong> mã sản phẩm… (có thể mất vài chục giây với danh sách dài)`,
+                'loading'
+            );
+            setBatchRunning(true);
+            const runFind = function() {
             $.ajax({
                 url: '/find_code_batch',
                 method: 'POST',
                 data: { codes: text },
+                timeout: AJAX_LONG_TIMEOUT_MS,
                 success: function(data) {
                     const products = (data && data.results) ? data.results : [];
+                    const err = data && data.error;
+                    if (err) {
+                        setOperationStatus(String(err), 'error');
+                        setBatchRunning(false);
+                        return;
+                    }
                     searchResults = products;
-                    warningsDisplayed = false;
                     updateBrandFilterOptions();
                     updateSizeFilterOptions();
                     displayResults(searchResults);
                     $('#multiInput').val('');
+                    const found = products.filter((p) => (p.Name || p.Cas || p.Brand)).length;
+                    setOperationStatus(
+                        `Hoàn tất: <strong>${products.length}</strong> mã — <strong>${found}</strong> có dữ liệu sản phẩm.`,
+                        'success'
+                    );
+                    setBatchRunning(false);
                 },
                 error: function(xhr) {
-                    const msg = xhr && xhr.responseText ? xhr.responseText : 'Unknown error';
-                    alert(`Find code request failed: ${msg}`);
+                    const msg = formatAjaxError(xhr, 'Tra cứu mã thất bại.');
+                    setOperationStatus(msg, 'error');
+                    setBatchRunning(false);
                 }
             });
+            };
+            if (window.requestAnimationFrame) {
+                requestAnimationFrame(function() {
+                    setTimeout(runFind, 0);
+                });
+            } else {
+                setTimeout(runFind, 0);
+            }
         }
     });
 });

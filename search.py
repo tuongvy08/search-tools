@@ -1370,10 +1370,22 @@ def check_cas_batch():
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
+            # Tránh EXISTS lồng trong LATERAL (mỗi CAS quét products nặng).
+            # eligible: CAS có ít nhất 1 dòng products khớp + visibility — dùng index UPPER(TRIM(cas)).
             query = f"""
                 WITH input AS (
                     SELECT u.ord, u.cas_u
                     FROM unnest(%s::text[]) WITH ORDINALITY AS u(cas_u, ord)
+                ),
+                eligible AS (
+                    SELECT DISTINCT ON (i.ord)
+                        i.ord,
+                        i.cas_u
+                    FROM input i
+                    INNER JOIN products p ON UPPER(TRIM(p.cas)) = i.cas_u
+                    WHERE TRUE
+                    {vis}
+                    ORDER BY i.ord, p.id ASC
                 )
                 SELECT
                     i.ord,
@@ -1381,18 +1393,14 @@ def check_cas_batch():
                     rr.rule_label AS compliance_status,
                     rr.note AS compliance_note
                 FROM input i
+                LEFT JOIN eligible e ON e.ord = i.ord AND e.cas_u = i.cas_u
                 LEFT JOIN LATERAL (
                     SELECT r.rule_label, r.note
                     FROM regulatory_rules r
-                    WHERE r.is_active = TRUE
+                    WHERE e.ord IS NOT NULL
+                      AND r.is_active = TRUE
                       AND r.match_field = 'cas'
                       AND UPPER(TRIM(r.match_value)) = i.cas_u
-                      AND EXISTS (
-                        SELECT 1
-                        FROM products p
-                        WHERE UPPER(TRIM(p.cas)) = i.cas_u
-                        {vis}
-                      )
                     ORDER BY r.priority ASC, r.id ASC
                     LIMIT 1
                 ) rr ON TRUE

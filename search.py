@@ -405,7 +405,11 @@ def login():
             conn = get_connection()
             try:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT id, password_hash, team_id, is_admin FROM app_users WHERE username = %s", (username,))
+                    cur.execute(
+                        "SELECT id, password_hash, team_id, is_admin, ip_bypass_allowlist "
+                        "FROM app_users WHERE username = %s",
+                        (username,),
+                    )
                     row = cur.fetchone()
             finally:
                 conn.close()
@@ -413,9 +417,11 @@ def login():
             if row and check_password_hash(row[1], password):
                 session.clear()
                 session["authenticated"] = True
+                session["username"] = username
                 session["user_id"] = row[0]
                 session["team_id"] = row[2]
                 session["is_admin"] = bool(row[3])
+                session["ip_bypass_allowlist"] = bool(row[4])
                 session["role"] = "admin" if row[3] else "user"
                 return redirect(url_for("home"))
             return render_template("login.html", error="Sai tên đăng nhập hoặc mật khẩu."), 401
@@ -423,13 +429,17 @@ def login():
         if password == MANAGER_PASSWORD:
             session.clear()
             session["authenticated"] = True
+            session["username"] = "__legacy_manager__"
             session["is_admin"] = True
+            session["ip_bypass_allowlist"] = False
             session["role"] = "manager"
             return redirect(url_for("home"))
         if password == STAFF_PASSWORD:
             session.clear()
             session["authenticated"] = True
+            session["username"] = "__legacy_staff__"
             session["is_admin"] = False
+            session["ip_bypass_allowlist"] = False
             team_id = int(os.environ.get("LEGACY_STAFF_TEAM_ID", "1"))
             session["team_id"] = team_id
             session["role"] = "staff"
@@ -1043,6 +1053,7 @@ def admin_users():
             password = request.form.get("password") or ""
             role = (request.form.get("role") or "user").strip().lower()
             is_admin = role in {"admin", "1", "true", "yes", "on"}
+            ip_bypass_allowlist = (request.form.get("ip_bypass_allowlist") or "").strip().lower() in {"1", "true", "yes", "on"}
             brands_text = request.form.get("brands") or ""
             brands = _brands_from_text(brands_text)
 
@@ -1069,10 +1080,10 @@ def admin_users():
                             if is_admin:
                                 cur.execute(
                                     """
-                                    INSERT INTO app_users (username, password_hash, team_id, is_admin)
-                                    VALUES (%s, %s, NULL, TRUE)
+                                    INSERT INTO app_users (username, password_hash, team_id, is_admin, ip_bypass_allowlist)
+                                    VALUES (%s, %s, NULL, TRUE, %s)
                                     """,
-                                    (username, password_hash),
+                                    (username, password_hash, ip_bypass_allowlist),
                                 )
                             else:
                                 team_name = f"User:{username}"
@@ -1088,10 +1099,10 @@ def admin_users():
                                 team_id = cur.fetchone()[0]
                                 cur.execute(
                                     """
-                                    INSERT INTO app_users (username, password_hash, team_id, is_admin)
-                                    VALUES (%s, %s, %s, FALSE)
+                                    INSERT INTO app_users (username, password_hash, team_id, is_admin, ip_bypass_allowlist)
+                                    VALUES (%s, %s, %s, FALSE, %s)
                                     """,
-                                    (username, password_hash, team_id),
+                                    (username, password_hash, team_id, ip_bypass_allowlist),
                                 )
                                 for b in brands:
                                     cur.execute(
@@ -1120,6 +1131,7 @@ def admin_users():
                     brands = _brands_from_text(request.form.get("brands") or "")
                     role = (request.form.get("role") or "user").strip().lower()
                     set_is_admin = role in {"admin", "1", "true", "yes", "on"}
+                    set_ip_bypass_allowlist = (request.form.get("ip_bypass_allowlist") or "").strip().lower() in {"1", "true", "yes", "on"}
 
                     if (not set_is_admin) and not brands:
                         raise ValueError("User thường cần gán ít nhất 1 brand.")
@@ -1141,8 +1153,8 @@ def admin_users():
 
                             if set_is_admin:
                                 cur.execute(
-                                    "UPDATE app_users SET is_admin = TRUE, team_id = NULL WHERE id = %s",
-                                    (user_id,),
+                                    "UPDATE app_users SET is_admin = TRUE, team_id = NULL, ip_bypass_allowlist = %s WHERE id = %s",
+                                    (set_ip_bypass_allowlist, user_id),
                                 )
                             else:
                                 # Nếu trước đó là admin (team_id NULL) thì tạo team riêng theo username.
@@ -1160,8 +1172,8 @@ def admin_users():
                                     team_id = cur.fetchone()[0]
 
                                 cur.execute(
-                                    "UPDATE app_users SET is_admin = FALSE, team_id = %s WHERE id = %s",
-                                    (team_id, user_id),
+                                    "UPDATE app_users SET is_admin = FALSE, team_id = %s, ip_bypass_allowlist = %s WHERE id = %s",
+                                    (team_id, set_ip_bypass_allowlist, user_id),
                                 )
 
                                 # Thay toàn bộ brands đã gán cho team này
@@ -1193,7 +1205,7 @@ def admin_users():
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT a.id, a.username, a.is_admin, a.team_id, t.name
+                SELECT a.id, a.username, a.is_admin, a.team_id, t.name, a.ip_bypass_allowlist
                 FROM app_users a
                 LEFT JOIN teams t ON t.id = a.team_id
                 ORDER BY a.id DESC
@@ -1202,7 +1214,7 @@ def admin_users():
             user_rows = cur.fetchall()
 
             users = []
-            for (uid, username, is_admin, team_id, team_name) in user_rows:
+            for (uid, username, is_admin, team_id, team_name, ip_bypass_allowlist) in user_rows:
                 assigned_brands = []
                 if (not is_admin) and team_id:
                     cur.execute(
@@ -1216,6 +1228,7 @@ def admin_users():
                         "id": uid,
                         "username": username,
                         "is_admin": bool(is_admin),
+                        "ip_bypass_allowlist": bool(ip_bypass_allowlist),
                         "team_id": team_id,
                         "team_name": team_name,
                         "brands_text": "\n".join(assigned_brands),

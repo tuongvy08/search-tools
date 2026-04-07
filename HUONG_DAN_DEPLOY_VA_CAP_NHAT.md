@@ -131,6 +131,7 @@ cd /opt/search-tools-pg
 set -a && source .env && set +a
 psql "$DATABASE_URL" -f sql/migration_007_products_code_upper_trim_index.sql
 psql "$DATABASE_URL" -f sql/migration_008_check_cas_perf_indexes.sql
+psql "$DATABASE_URL" -f sql/migration_009_user_ip_bypass.sql
 # psql "$DATABASE_URL" -f sql/migration_009_....sql
 psql "$DATABASE_URL" -c "ANALYZE products;"
 psql "$DATABASE_URL" -c "ANALYZE regulatory_rules;"

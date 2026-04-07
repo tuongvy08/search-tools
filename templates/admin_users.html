@@ -89,6 +89,13 @@
           <button class="primary" type="submit">Tạo user</button>
         </div>
 
+        <div class="row" style="margin-top:8px;">
+          <label style="display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" name="ip_bypass_allowlist" value="1" />
+            Cho phép truy cập từ mọi IP (bỏ qua allowlist)
+          </label>
+        </div>
+
         {% if distinct_brands %}
           <div class="small">
             (Tuỳ chọn) Có thể dùng brands đã tồn tại trong DB: <code>{{ distinct_brands[:10]|join(', ') }}{% if distinct_brands|length > 10 %}, ...{% endif %}</code>
@@ -118,6 +125,7 @@
           <th>ID</th>
           <th>Username</th>
           <th>Role</th>
+          <th>Bypass IP</th>
           <th>Brand đã gán</th>
           <th>Cập nhật</th>
         </tr>
@@ -128,6 +136,7 @@
             <td>{{ u.id }}</td>
             <td><code>{{ u.username }}</code></td>
             <td>{{ 'Admin' if u.is_admin else 'User' }}</td>
+            <td>{{ 'Có' if u.ip_bypass_allowlist else 'Không' }}</td>
             <td>
               {% if u.is_admin %}
                 <div class="muted" style="margin-bottom:6px;">Admin: tất cả brands</div>
@@ -159,6 +168,13 @@
                 <div class="field" style="margin-bottom:8px;">
                   <label>Mật khẩu mới (tuỳ chọn)</label>
                   <input type="password" name="password" placeholder="để trống nếu không đổi" />
+                </div>
+
+                <div class="field" style="margin-bottom:8px;">
+                  <label style="display:flex; align-items:center; gap:8px;">
+                    <input type="checkbox" name="ip_bypass_allowlist" value="1" {{ 'checked' if u.ip_bypass_allowlist else '' }} />
+                    Cho phép truy cập từ mọi IP (bỏ qua allowlist)
+                  </label>
                 </div>
 
                 {% if u.is_admin %}

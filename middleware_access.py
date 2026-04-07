@@ -19,7 +19,7 @@ from __future__ import annotations
 import ipaddress
 import os
 
-from flask import abort, request
+from flask import abort, request, session
 
 
 def _client_ip() -> str:
@@ -34,6 +34,13 @@ def _parse_env_allowlist() -> list[str]:
     if not raw:
         return []
     return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+def _parse_bypass_users() -> set[str]:
+    raw = (os.environ.get("IP_ALLOWLIST_BYPASS_USERS") or "").strip()
+    if not raw:
+        return set()
+    return {x.strip().lower() for x in raw.split(",") if x and x.strip()}
 
 
 def _ip_matches_rule(ip_str: str, cidr_or_ip: str) -> bool:
@@ -75,12 +82,24 @@ def register_ip_access_control(app, base_path=None):
             return None
         if request.endpoint == "static" or request.path.startswith("/static"):
             return None
+        # Luôn cho phép vào trang login để tài khoản bypass có thể xác thực.
+        if request.endpoint == "login" or request.path == "/login":
+            return None
 
         env_rules = _parse_env_allowlist()
         db_rules = _load_db_cidrs()
+        bypass_users = _parse_bypass_users()
 
         if not env_rules and not db_rules:
             return None
+
+        if session.get("authenticated") and session.get("ip_bypass_allowlist"):
+            return None
+
+        if session.get("authenticated") and bypass_users:
+            current_user = str(session.get("username") or "").strip().lower()
+            if current_user and current_user in bypass_users:
+                return None
 
         client = _client_ip()
         for rule in env_rules:

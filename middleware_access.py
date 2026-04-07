@@ -83,7 +83,9 @@ def register_ip_access_control(app, base_path=None):
         if request.endpoint == "static" or request.path.startswith("/static"):
             return None
         # Luôn cho phép vào trang login để tài khoản bypass có thể xác thực.
-        if request.endpoint == "login" or request.path == "/login":
+        # Dùng cả endpoint và path để tránh trường hợp URL có prefix hoặc dấu / cuối.
+        path = (request.path or "").rstrip("/")
+        if request.endpoint == "login" or path.endswith("/login"):
             return None
 
         env_rules = _parse_env_allowlist()

@@ -1278,6 +1278,11 @@ def search_products():
                 ) rr ON TRUE
                 WHERE (p.name ILIKE %s OR p.code ILIKE %s OR p.cas ILIKE %s)
                 {vis}
+                ORDER BY
+                    UPPER(TRIM(COALESCE(p.brand, ''))) ASC,
+                    UPPER(TRIM(COALESCE(p.name, ''))) ASC,
+                    UPPER(TRIM(COALESCE(p.code, ''))) ASC,
+                    p.id ASC
             """
             pattern = f"%{search_query}%"
             cursor.execute(query, (pattern, pattern, pattern) + vis_params)

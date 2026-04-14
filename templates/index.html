@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <title>Product Search</title>
     <!-- Include stylesheets -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260404c') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260406a') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -13,6 +13,9 @@
         <!-- Thêm hai nút Find CAS và Find Code -->
         <button class="nav-button" id="btnCheckLicense" type="button">Check license</button>
         <button class="nav-button" id="btnFindCode" type="button">Find Code</button>
+        <button class="nav-button btn-export" id="btnCopyExcel" type="button" title="Copy bảng kết quả hiện tại sang Excel">
+            <i class="fas fa-file-export"></i> Export to Excel
+        </button>
 
         <div class="input-box">
             <i class="fas fa-search"></i>
@@ -64,6 +67,6 @@
 
     <!-- Include necessary scripts -->
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>    
-    <script src="{{ url_for('static', filename='script.js', v='20260404c') }}"></script>
+    <script src="{{ url_for('static', filename='script.js', v='20260406a') }}"></script>
 </body>
 </html>

@@ -66,6 +66,65 @@ function setBatchRunning(running) {
     }
 }
 
+function _excelSafeCell(value) {
+    const s = String(value ?? '').replace(/\r?\n/g, ' ').trim();
+    // Ngăn Excel hiểu nhầm công thức khi paste.
+    if (/^[=+\-@]/.test(s)) {
+        return "'" + s;
+    }
+    return s;
+}
+
+function copyCurrentTableToClipboard() {
+    const table = document.getElementById('results');
+    if (!table) {
+        setOperationStatus('Không tìm thấy bảng kết quả để export.', 'error');
+        return;
+    }
+    const rows = table.querySelectorAll('tbody tr');
+    if (!rows.length) {
+        setOperationStatus('Chưa có dữ liệu để export sang Excel.', 'error');
+        return;
+    }
+
+    const headers = Array.from(table.querySelectorAll('thead th')).map((th) => _excelSafeCell(th.textContent));
+    const lines = [headers.join('\t')];
+    rows.forEach((tr) => {
+        const cells = Array.from(tr.querySelectorAll('td')).map((td) => _excelSafeCell(td.textContent));
+        lines.push(cells.join('\t'));
+    });
+    const payload = lines.join('\n');
+
+    const done = () => {
+        setOperationStatus(`Đã copy <strong>${rows.length}</strong> dòng kết quả. Mở Excel và dán (Ctrl/Cmd + V).`, 'success');
+    };
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(payload).then(done).catch(() => {
+            const ta = document.createElement('textarea');
+            ta.value = payload;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            done();
+        });
+        return;
+    }
+
+    const ta = document.createElement('textarea');
+    ta.value = payload;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    done();
+}
+
 function searchProducts() {
     const query = $('#searchQuery').val();
     if (query.trim() === '') {
@@ -184,9 +243,10 @@ function formatNoteCell(product) {
         return mainNote;
     }
     if (!mainNote) {
-        return `<strong>Compliance:</strong> ${complianceNote}`;
+        return `Compliance: ${complianceNote}`;
     }
-    return `${mainNote}<br><small><strong>Compliance:</strong> ${complianceNote}</small>`;
+    // Giữ 1 dòng để copy sang Excel không bị xuống dòng trong cùng ô.
+    return `${mainNote} | Compliance: ${complianceNote}`;
 }
 
 function displayResults(products) {
@@ -256,6 +316,9 @@ $(document).ready(function() {
 
     $('.search-button').on('click', function() {
         searchProducts();
+    });
+    $('#btnCopyExcel').on('click', function() {
+        copyCurrentTableToClipboard();
     });
 
     function setMultiMode(mode) {

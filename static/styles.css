@@ -36,6 +36,18 @@ h1 {
   background-color: #45a049; /* Màu xanh đậm hơn khi hover */
 }
 
+.btn-export {
+  background-color: #1f6feb;
+}
+
+.btn-export:hover {
+  background-color: #1a5fcf;
+}
+
+.btn-export i {
+  margin-right: 6px;
+}
+
 .input-box {
   position: relative;
   height: 50px;

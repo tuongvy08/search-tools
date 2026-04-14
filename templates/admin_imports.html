@@ -75,6 +75,25 @@
     }
     .alert.ok { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
     .alert.err { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; white-space: pre-wrap; }
+    .upload-status {
+      margin-top: 8px;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+    .upload-status.ok { color: #065f46; }
+    .upload-status.loading { color: #1e3a8a; font-weight: 600; }
+    .spin {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      margin-right: 6px;
+      border: 2px solid #93c5fd;
+      border-top-color: #2563eb;
+      border-radius: 50%;
+      vertical-align: -2px;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
     .card {
       background: var(--card);
@@ -243,7 +262,7 @@
 
     <div class="card">
       <h2><span class="badge">1</span> Import sản phẩm (Products)</h2>
-      <p class="hint">Cột bắt buộc trên dòng 1: <code>name, code, cas, brand, size, ship, price, note</code></p>
+      <p class="hint">Cột bắt buộc trên dòng 1: <code>brand</code>. Các cột còn lại (<code>name, code, cas, size, ship, price, note</code>) có thể thiếu nếu dữ liệu thực tế không có.</p>
       <form method="post" action="/admin/imports/preview" enctype="multipart/form-data">
         <input type="hidden" name="dataset" value="products" />
         <div class="form-row">
@@ -261,6 +280,7 @@
           </div>
           <button type="submit" class="btn btn-primary">Xem trước — Products</button>
         </div>
+        <div class="upload-status" data-upload-status>Chưa chọn file.</div>
       </form>
     </div>
 
@@ -283,6 +303,7 @@
           </div>
           <button type="submit" class="btn btn-primary">Xem trước — Rules</button>
         </div>
+        <div class="upload-status" data-upload-status>Chưa chọn file.</div>
       </form>
     </div>
 
@@ -342,5 +363,46 @@
     </div>
     {% endif %}
   </div>
+<script>
+  (function () {
+    const forms = document.querySelectorAll('form[action="/admin/imports/preview"]');
+    forms.forEach((form) => {
+      const fileInput = form.querySelector('input[type="file"][name="file"]');
+      const submitBtn = form.querySelector('button[type="submit"]');
+      const statusEl = form.querySelector('[data-upload-status]');
+      if (!fileInput || !submitBtn || !statusEl) return;
+
+      const setStatus = (text, cls) => {
+        statusEl.className = 'upload-status' + (cls ? ' ' + cls : '');
+        statusEl.innerHTML = text;
+      };
+
+      fileInput.addEventListener('change', () => {
+        const f = fileInput.files && fileInput.files[0];
+        if (!f) {
+          setStatus('Chưa chọn file.', '');
+          submitBtn.disabled = false;
+          return;
+        }
+        const kb = Math.max(1, Math.round(f.size / 1024));
+        setStatus(`Đã chọn: <strong>${f.name}</strong> (${kb} KB). Có thể bấm “Xem trước”.`, 'ok');
+        submitBtn.disabled = false;
+      });
+
+      form.addEventListener('submit', () => {
+        const f = fileInput.files && fileInput.files[0];
+        if (!f) {
+          setStatus('Vui lòng chọn file trước khi xem trước.', '');
+          return;
+        }
+        submitBtn.disabled = true;
+        const oldLabel = submitBtn.textContent;
+        submitBtn.dataset.oldLabel = oldLabel;
+        submitBtn.textContent = 'Đang xử lý...';
+        setStatus('<span class="spin"></span>Đang tải file lên và kiểm tra dữ liệu. Vui lòng chờ...', 'loading');
+      });
+    });
+  })();
+</script>
 </body>
 </html>

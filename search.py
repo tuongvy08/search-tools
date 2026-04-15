@@ -513,7 +513,9 @@ def admin_imports_preview():
         return redirect(url_for("admin_imports", err="Dataset không hợp lệ"))
 
     if dataset == "products":
-        required = ["name", "code", "cas", "brand", "size", "ship", "price", "note"]
+        # Cho phép import thiếu nhiều cột; chỉ cần có cột brand để
+        # hỗ trợ replace_by_brand và giữ dữ liệu nhất quán theo team/brand.
+        required = ["brand"]
         valid_modes = {"upsert", "replace_by_brand", "append"}
     else:
         required = ["rule_type", "rule_label", "match_field", "match_value", "priority", "is_active", "note"]
@@ -555,11 +557,13 @@ def admin_imports_preview():
     return redirect(url_for("admin_imports", preview=token))
 
 
-@app.route("/admin/imports/apply", methods=["POST"])
+@app.route("/admin/imports/apply", methods=["GET", "POST"])
 def admin_imports_apply():
     guard = _require_admin_page()
     if guard is not None:
         return guard
+    if request.method != "POST":
+        return redirect(url_for("admin_imports", err="Vui lòng bấm 'Xem trước' rồi mới 'Xác nhận ghi vào database'."))
 
     token = request.form.get("preview_token")
     data = IMPORT_PREVIEWS.pop(token, None)
@@ -581,9 +585,18 @@ def admin_imports_apply():
                 if dataset == "products":
                     if mode == "replace_by_brand":
                         brands = sorted({_norm(r.get("brand")) for r in rows if _norm(r.get("brand"))})
-                        if brands:
-                            cur.execute("DELETE FROM products WHERE brand = ANY(%s)", (brands,))
-                            deleted = cur.rowcount
+                        if not brands:
+                            raise ValueError("Mode replace_by_brand yêu cầu ít nhất 1 brand hợp lệ trong file.")
+                        # Xóa theo brand không phân biệt hoa thường và bỏ khoảng trắng thừa.
+                        brands_norm = sorted({b.strip().upper() for b in brands if b.strip()})
+                        cur.execute(
+                            """
+                            DELETE FROM products
+                            WHERE UPPER(TRIM(COALESCE(brand, ''))) = ANY(%s)
+                            """,
+                            (brands_norm,),
+                        )
+                        deleted = cur.rowcount
 
                     for r in rows:
                         vals = (
@@ -1293,6 +1306,7 @@ def search_products():
                 {vis}
                 ORDER BY
                     UPPER(TRIM(COALESCE(p.brand, ''))) ASC,
+                    UPPER(TRIM(COALESCE(p.size, ''))) ASC,
                     UPPER(TRIM(COALESCE(p.name, ''))) ASC,
                     UPPER(TRIM(COALESCE(p.code, ''))) ASC,
                     p.id ASC

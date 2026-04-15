@@ -371,6 +371,7 @@
       const submitBtn = form.querySelector('button[type="submit"]');
       const statusEl = form.querySelector('[data-upload-status]');
       if (!fileInput || !submitBtn || !statusEl) return;
+      submitBtn.disabled = true;
 
       const setStatus = (text, cls) => {
         statusEl.className = 'upload-status' + (cls ? ' ' + cls : '');
@@ -389,10 +390,15 @@
         submitBtn.disabled = false;
       });
 
-      form.addEventListener('submit', () => {
+      form.addEventListener('submit', (ev) => {
         const f = fileInput.files && fileInput.files[0];
         if (!f) {
           setStatus('Vui lòng chọn file trước khi xem trước.', '');
+          ev.preventDefault();
+          return;
+        }
+        if (submitBtn.disabled) {
+          ev.preventDefault();
           return;
         }
         submitBtn.disabled = true;

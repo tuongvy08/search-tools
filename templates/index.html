@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <title>Product Search</title>
     <!-- Include stylesheets -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260406a') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260613a') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -13,6 +13,7 @@
         <!-- Thêm hai nút Find CAS và Find Code -->
         <button class="nav-button" id="btnCheckLicense" type="button">Check license</button>
         <button class="nav-button" id="btnFindCode" type="button">Find Code</button>
+        <button class="nav-button" id="btnAdvancedSearch" type="button">Advanced Search</button>
         <button class="nav-button btn-export" id="btnCopyExcel" type="button" title="Copy bảng kết quả hiện tại sang Excel">
             <i class="fas fa-file-export"></i> Export to Excel
         </button>
@@ -33,6 +34,39 @@
             <button class="btn-secondary nav-button" id="multiCancelBtn" type="button">Cancel</button>
         </div>
         <div id="licenseWarnings" style="display:none;"></div>
+    </div>
+
+    <!-- Advanced Search: CAS list → brand → size (chỉ size có trong kết quả CAS) -->
+    <div id="advancedSearchPanel" class="multi-panel adv-panel" style="display:none;">
+        <div class="multi-panel-title">Advanced Search (CAS + Brand + Size)</div>
+        <div class="adv-step">
+            <div class="adv-step-label">Bước 1 — Dán danh sách CAS</div>
+            <textarea id="advCasInput" rows="5" placeholder="Mỗi dòng 1 CAS (hoặc phân tách bằng dấu phẩy)"></textarea>
+        </div>
+        <div class="adv-step">
+            <div class="adv-step-label">Bước 2 — Chọn brand</div>
+            <p class="adv-hint">Bấm <strong>Tải brand &amp; size</strong> sau khi dán CAS. Để trống = tất cả brand.</p>
+            <div id="advBrandCheckboxes" class="adv-checkbox-grid"></div>
+        </div>
+        <div class="adv-step">
+            <div class="adv-step-label">Bước 3 — Chọn size</div>
+            <p class="adv-hint">Chỉ hiện size thực tế có trong DB cho các CAS đã chọn (không phải toàn bộ database).</p>
+            <div class="adv-size-toolbar">
+                <input type="text" id="advSizeFilter" placeholder="Lọc size (vd. 100mg, 1L)…" autocomplete="off">
+                <label class="adv-fuzzy-label">
+                    <input type="checkbox" id="advSizeFuzzy">
+                    Gần đúng ±10% (cùng đơn vị)
+                </label>
+                <button type="button" class="btn-linkish" id="advSizeSelectAll">Chọn tất cả</button>
+                <button type="button" class="btn-linkish" id="advSizeClearAll">Bỏ chọn</button>
+            </div>
+            <div id="advSizeCheckboxes" class="adv-checkbox-grid adv-size-grid"></div>
+        </div>
+        <div class="multi-panel-actions">
+            <button class="nav-button" id="advLoadOptionsBtn" type="button">Tải brand &amp; size</button>
+            <button class="nav-button" id="advRunBtn" type="button">Tìm kiếm</button>
+            <button class="btn-secondary nav-button" id="advCancelBtn" type="button">Cancel</button>
+        </div>
     </div>
 
     <div id="operationStatus" class="operation-status" role="status" aria-live="polite"></div>
@@ -67,6 +101,6 @@
 
     <!-- Include necessary scripts -->
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>    
-    <script src="{{ url_for('static', filename='script.js', v='20260406a') }}"></script>
+    <script src="{{ url_for('static', filename='script.js', v='20260613a') }}"></script>
 </body>
 </html>

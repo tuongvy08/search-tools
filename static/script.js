@@ -300,6 +300,205 @@ function filterResults() {
     displayResults(filteredResults);
 }
 
+let advOptionsData = { brands: [], size_pairs: [] };
+
+function openAdvancedPanel() {
+    $('#multiModePanel').hide();
+    $('#licenseWarnings').hide().html('');
+    window.__multiMode = null;
+    $('#advancedSearchPanel').show();
+    $('.filter-container').show();
+    $('#results').show();
+    setOperationStatus('', '');
+}
+
+function closeAdvancedPanel() {
+    $('#advancedSearchPanel').hide();
+    $('#advCasInput').val('');
+    $('#advBrandCheckboxes').empty();
+    $('#advSizeCheckboxes').empty();
+    $('#advSizeFilter').val('');
+    $('#advSizeFuzzy').prop('checked', false);
+    advOptionsData = { brands: [], size_pairs: [] };
+    setOperationStatus('', '');
+}
+
+function getAdvSelectedBrands() {
+    return Array.from(document.querySelectorAll('#advBrandCheckboxes input[name="adv_brand"]:checked'))
+        .map((el) => el.value);
+}
+
+function getAdvSelectedSizes() {
+    return Array.from(document.querySelectorAll('#advSizeCheckboxes input[name="adv_size"]:checked'))
+        .map((el) => el.value);
+}
+
+function renderAdvBrandCheckboxes(brands) {
+    const container = document.getElementById('advBrandCheckboxes');
+    container.innerHTML = '';
+    brands.forEach((item) => {
+        const brand = item.brand || '';
+        const count = item.row_count || 0;
+        const id = `adv_brand_${brand.replace(/[^a-zA-Z0-9]+/g, '_')}`;
+        const wrap = document.createElement('label');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.name = 'adv_brand';
+        cb.id = id;
+        cb.value = brand;
+        cb.addEventListener('change', refreshAdvSizeCheckboxes);
+        wrap.appendChild(cb);
+        wrap.appendChild(document.createTextNode(`${brand} (${count})`));
+        container.appendChild(wrap);
+    });
+}
+
+function aggregateAdvSizes(sizePairs, selectedBrands) {
+    const brandSet = new Set(selectedBrands);
+    const bySize = new Map();
+    sizePairs.forEach((pair) => {
+        if (brandSet.size && !brandSet.has(pair.brand)) {
+            return;
+        }
+        const size = pair.size || '';
+        if (!size) return;
+        const prev = bySize.get(size) || { size, row_count: 0, cas_hits: 0 };
+        prev.row_count += pair.row_count || 0;
+        prev.cas_hits += pair.cas_hits || 0;
+        bySize.set(size, prev);
+    });
+    return Array.from(bySize.values()).sort((a, b) => {
+        if (b.row_count !== a.row_count) return b.row_count - a.row_count;
+        return a.size.localeCompare(b.size, undefined, { sensitivity: 'base' });
+    });
+}
+
+function renderAdvSizeCheckboxes(sizes) {
+    const filterText = ($('#advSizeFilter').val() || '').trim().toLowerCase();
+    const container = document.getElementById('advSizeCheckboxes');
+    container.innerHTML = '';
+    sizes.forEach((item) => {
+        const size = item.size || '';
+        if (filterText && !size.toLowerCase().includes(filterText)) {
+            return;
+        }
+        const id = `adv_size_${size.replace(/[^a-zA-Z0-9]+/g, '_')}`;
+        const wrap = document.createElement('label');
+        wrap.dataset.sizeLabel = size;
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.name = 'adv_size';
+        cb.id = id;
+        cb.value = size;
+        wrap.appendChild(cb);
+        wrap.appendChild(document.createTextNode(`${size} (${item.row_count})`));
+        container.appendChild(wrap);
+    });
+    if (!container.children.length) {
+        container.innerHTML = '<span class="adv-hint">Không có size phù hợp. Thử bỏ lọc hoặc chọn thêm brand.</span>';
+    }
+}
+
+function refreshAdvSizeCheckboxes() {
+    const selectedBrands = getAdvSelectedBrands();
+    const sizes = aggregateAdvSizes(advOptionsData.size_pairs || [], selectedBrands);
+    renderAdvSizeCheckboxes(sizes);
+}
+
+function loadAdvancedOptions() {
+    const casText = ($('#advCasInput').val() || '').trim();
+    if (!casText) {
+        setOperationStatus('Bước 1: vui lòng dán danh sách CAS.', 'error');
+        return;
+    }
+    const nCas = countBatchItems(casText);
+    setOperationStatus(
+        `<span class="status-spinner"></span> Đang tải brand &amp; size cho <strong>${nCas}</strong> CAS…`,
+        'loading'
+    );
+    $('#advLoadOptionsBtn').prop('disabled', true);
+    $.ajax({
+        url: '/advanced_search/options',
+        method: 'POST',
+        data: { cas: casText },
+        timeout: AJAX_LONG_TIMEOUT_MS,
+        success: function(data) {
+            $('#advLoadOptionsBtn').prop('disabled', false);
+            if (data && data.error) {
+                setOperationStatus(String(data.error), 'error');
+                return;
+            }
+            advOptionsData = {
+                brands: data.brands || [],
+                size_pairs: data.size_pairs || [],
+            };
+            renderAdvBrandCheckboxes(advOptionsData.brands);
+            refreshAdvSizeCheckboxes();
+            const nb = advOptionsData.brands.length;
+            const ns = aggregateAdvSizes(advOptionsData.size_pairs, []).length;
+            setOperationStatus(
+                `Đã tải <strong>${nb}</strong> brand, <strong>${ns}</strong> size khả dụng cho danh sách CAS.`,
+                'success'
+            );
+        },
+        error: function(xhr) {
+            $('#advLoadOptionsBtn').prop('disabled', false);
+            setOperationStatus(formatAjaxError(xhr, 'Tải brand/size thất bại.'), 'error');
+        },
+    });
+}
+
+function runAdvancedSearch() {
+    const casText = ($('#advCasInput').val() || '').trim();
+    if (!casText) {
+        setOperationStatus('Bước 1: vui lòng dán danh sách CAS.', 'error');
+        return;
+    }
+    const brands = getAdvSelectedBrands();
+    const sizes = getAdvSelectedSizes();
+    const sizeFuzzy = $('#advSizeFuzzy').is(':checked') ? '1' : '0';
+    const nCas = countBatchItems(casText);
+    setOperationStatus(
+        `<span class="status-spinner"></span> Đang tìm <strong>${nCas}</strong> CAS…`,
+        'loading'
+    );
+    $('#advRunBtn').prop('disabled', true);
+    $.ajax({
+        url: '/advanced_search',
+        method: 'POST',
+        traditional: true,
+        data: {
+            cas: casText,
+            brands: brands,
+            sizes: sizes,
+            size_fuzzy: sizeFuzzy,
+        },
+        timeout: AJAX_LONG_TIMEOUT_MS,
+        success: function(data) {
+            $('#advRunBtn').prop('disabled', false);
+            if (data && data.error) {
+                setOperationStatus(String(data.error), 'error');
+                return;
+            }
+            const products = (data && data.results) ? data.results : [];
+            searchResults = products;
+            updateBrandFilterOptions();
+            updateSizeFilterOptions();
+            displayResults(searchResults);
+            const matched = data && data.matched_cas != null ? data.matched_cas : 0;
+            const total = data && data.total_cas != null ? data.total_cas : nCas;
+            setOperationStatus(
+                `Hoàn tất: <strong>${products.length}</strong> dòng — <strong>${matched}/${total}</strong> CAS có sản phẩm khớp bộ lọc.`,
+                'success'
+            );
+        },
+        error: function(xhr) {
+            $('#advRunBtn').prop('disabled', false);
+            setOperationStatus(formatAjaxError(xhr, 'Advanced search thất bại.'), 'error');
+        },
+    });
+}
+
 $(document).ready(function() {
     if (!$('#operationStatus').length) {
         $('.search-container').after(
@@ -340,13 +539,38 @@ $(document).ready(function() {
     }
 
     $('#btnCheckLicense').on('click', function() {
+        $('#advancedSearchPanel').hide();
         setMultiMode('license');
         $('#multiInput').focus();
     });
 
     $('#btnFindCode').on('click', function() {
+        $('#advancedSearchPanel').hide();
         setMultiMode('findcode');
         $('#multiInput').focus();
+    });
+
+    $('#btnAdvancedSearch').on('click', function() {
+        openAdvancedPanel();
+        $('#advCasInput').focus();
+    });
+
+    $('#advCancelBtn').on('click', function() {
+        closeAdvancedPanel();
+    });
+
+    $('#advLoadOptionsBtn').on('click', loadAdvancedOptions);
+    $('#advRunBtn').on('click', runAdvancedSearch);
+    $('#advSizeFilter').on('input', refreshAdvSizeCheckboxes);
+    $('#advSizeSelectAll').on('click', function() {
+        document.querySelectorAll('#advSizeCheckboxes input[name="adv_size"]').forEach((el) => {
+            el.checked = true;
+        });
+    });
+    $('#advSizeClearAll').on('click', function() {
+        document.querySelectorAll('#advSizeCheckboxes input[name="adv_size"]').forEach((el) => {
+            el.checked = false;
+        });
     });
 
     $('#multiCancelBtn').on('click', function() {

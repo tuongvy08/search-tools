@@ -2,6 +2,7 @@ import csv
 import ipaddress
 import json
 import os
+import re
 import zipfile
 from io import BytesIO, StringIO
 from typing import Optional
@@ -125,6 +126,119 @@ def _split_multi_items(text: str, max_items: int = 2000) -> list[str]:
             if len(out) >= max_items:
                 return out
     return out
+
+
+_SIZE_TOKEN_RE = re.compile(
+    r"([\d]+(?:[.,]\d+)?)\s*([a-zA-Zµμ]+)?",
+    re.IGNORECASE,
+)
+
+
+def _parse_size_token(size_str: str) -> dict:
+    """Tách số lượng + đơn vị từ chuỗi size (vd. 100mg, 1 L, 2,5g)."""
+    raw = (size_str or "").strip()
+    if not raw:
+        return {"raw": "", "value": None, "unit": ""}
+    normalized = raw.replace(",", ".")
+    match = _SIZE_TOKEN_RE.search(normalized)
+    if not match:
+        return {"raw": raw.upper(), "value": None, "unit": ""}
+    try:
+        value = float(match.group(1))
+    except (TypeError, ValueError):
+        value = None
+    unit = (match.group(2) or "").strip().lower()
+    unit_aliases = {
+        "l": "l",
+        "liter": "l",
+        "litre": "l",
+        "liters": "l",
+        "litres": "l",
+        "ml": "ml",
+        "milliliter": "ml",
+        "millilitre": "ml",
+        "g": "g",
+        "gram": "g",
+        "grams": "g",
+        "mg": "mg",
+        "kg": "kg",
+        "µg": "ug",
+        "μg": "ug",
+        "ug": "ug",
+    }
+    unit = unit_aliases.get(unit, unit)
+    return {"raw": raw.upper(), "value": value, "unit": unit}
+
+
+def _size_matches(product_size: str, allowed_sizes: list[str], tolerance_pct: float = 0) -> bool:
+    if not allowed_sizes:
+        return True
+    product_norm = (product_size or "").strip().upper()
+    product_parsed = _parse_size_token(product_size)
+    for allowed in allowed_sizes:
+        allowed_norm = (allowed or "").strip().upper()
+        if product_norm and allowed_norm and product_norm == allowed_norm:
+            return True
+        if tolerance_pct <= 0:
+            continue
+        allowed_parsed = _parse_size_token(allowed)
+        if (
+            product_parsed["value"] is not None
+            and allowed_parsed["value"] is not None
+            and product_parsed["unit"]
+            and product_parsed["unit"] == allowed_parsed["unit"]
+            and allowed_parsed["value"] > 0
+        ):
+            diff_pct = abs(product_parsed["value"] - allowed_parsed["value"]) / allowed_parsed["value"] * 100
+            if diff_pct <= tolerance_pct:
+                return True
+    return False
+
+
+def _split_multi_values(text: str, max_items: int = 200) -> list[str]:
+    """Tách danh sách brand/size từ form (dòng, phẩy, hoặc nhiều field cùng tên)."""
+    if isinstance(text, list):
+        items = [str(x).strip() for x in text if str(x).strip()]
+        return items[:max_items]
+    return _split_multi_items(text or "", max_items=max_items)
+
+
+def _product_row_to_result(
+    name,
+    code,
+    cas,
+    brand,
+    size,
+    ship,
+    price,
+    note,
+    compliance_status,
+    compliance_note,
+    rate_map: dict,
+) -> dict:
+    try:
+        ship_f = float(ship) if ship is not None else 0
+    except (TypeError, ValueError):
+        ship_f = 0
+    try:
+        price_f = float(price) if price is not None else 0
+    except (TypeError, ValueError):
+        price_f = 0
+    bkey = (brand or "").strip()
+    exchange_rate = rate_map.get(bkey, 1.0)
+    unit_price = round(price_f * ship_f * exchange_rate, -3)
+    return {
+        "Name": name or "",
+        "Code": code or "",
+        "Cas": cas or "",
+        "Brand": brand or "",
+        "Size": size or "",
+        "Unit_Price": "{:,.0f}".format(unit_price),
+        "Note": note or "",
+        "Compliance_Status": compliance_status or "",
+        "Compliance_Note": compliance_note or "",
+        "Compliance_Css": _warning_css_type(compliance_status) or "",
+    }
 
 
 def _brands_from_text(text: str) -> list[str]:
@@ -1586,6 +1700,209 @@ def find_code_batch():
                 results[idx]["Unit_Price"] = "{:,.0f}".format(unit_price)
 
         return jsonify({"results": results})
+    finally:
+        conn.close()
+
+
+@app.route("/advanced_search/options", methods=["POST"])
+def advanced_search_options():
+    """Trả về brand/size thực tế có trong DB cho danh sách CAS (không liệt kê toàn bộ size)."""
+    cas_text = request.values.get("cas") or request.values.get("cas_list") or ""
+    cas_items = _split_multi_items(cas_text, max_items=2000)
+    if not cas_items:
+        return jsonify({"error": "Thiếu CAS.", "brands": [], "size_pairs": [], "cas_count": 0})
+
+    cas_upper = [c.upper() for c in cas_items]
+    vis, vis_params = _visibility_sql("p")
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            query = f"""
+                WITH input AS (
+                    SELECT u.ord, u.cas_u
+                    FROM unnest(%s::text[]) WITH ORDINALITY AS u(cas_u, ord)
+                )
+                SELECT
+                    TRIM(p.brand) AS brand,
+                    TRIM(p.size) AS size,
+                    COUNT(DISTINCT i.cas_u) AS cas_hits,
+                    COUNT(*) AS row_count
+                FROM input i
+                INNER JOIN products p ON UPPER(TRIM(p.cas)) = i.cas_u
+                WHERE NULLIF(TRIM(p.brand), '') IS NOT NULL
+                  AND NULLIF(TRIM(p.size), '') IS NOT NULL
+                  {vis}
+                GROUP BY TRIM(p.brand), TRIM(p.size)
+                ORDER BY row_count DESC, UPPER(TRIM(p.brand)), UPPER(TRIM(p.size))
+            """
+            cursor.execute(query, (cas_upper,) + vis_params)
+            rows = cursor.fetchall()
+
+        brand_totals: dict[str, int] = {}
+        size_pairs = []
+        for brand, size, cas_hits, row_count in rows:
+            brand_key = brand or ""
+            size_key = size or ""
+            brand_totals[brand_key] = brand_totals.get(brand_key, 0) + int(row_count)
+            size_pairs.append(
+                {
+                    "brand": brand_key,
+                    "size": size_key,
+                    "cas_hits": int(cas_hits),
+                    "row_count": int(row_count),
+                }
+            )
+
+        brands = [
+            {"brand": name, "row_count": count}
+            for name, count in sorted(brand_totals.items(), key=lambda x: (-x[1], x[0].upper()))
+        ]
+        return jsonify(
+            {
+                "cas_count": len(cas_items),
+                "brands": brands,
+                "size_pairs": size_pairs,
+            }
+        )
+    finally:
+        conn.close()
+
+
+@app.route("/advanced_search", methods=["POST"])
+def advanced_search():
+    """Tìm sản phẩm theo danh sách CAS + lọc brand/size (có tuỳ chọn size gần đúng)."""
+    cas_text = request.values.get("cas") or request.values.get("cas_list") or ""
+    cas_items = _split_multi_items(cas_text, max_items=2000)
+    if not cas_items:
+        return jsonify({"results": [], "error": "Thiếu CAS."})
+
+    selected_brands = request.values.getlist("brands") or _split_multi_values(
+        request.values.get("brands") or request.values.get("brand") or ""
+    )
+    selected_sizes = request.values.getlist("sizes") or _split_multi_values(
+        request.values.get("sizes") or request.values.get("size") or ""
+    )
+    size_fuzzy = str(request.values.get("size_fuzzy") or "").strip().lower() in ("1", "true", "yes", "on")
+    tolerance_pct = 10.0 if size_fuzzy else 0.0
+
+    cas_upper = [c.upper() for c in cas_items]
+    vis, vis_params = _visibility_sql("p")
+
+    conn = get_connection()
+    try:
+        rate_map = _exchange_rate_map(conn)
+        with conn.cursor() as cursor:
+            query = f"""
+                WITH input AS (
+                    SELECT u.ord, u.cas_u
+                    FROM unnest(%s::text[]) WITH ORDINALITY AS u(cas_u, ord)
+                )
+                SELECT
+                    i.ord,
+                    i.cas_u,
+                    p.name,
+                    p.code,
+                    p.cas,
+                    p.brand,
+                    p.size,
+                    p.ship,
+                    p.price,
+                    p.note,
+                    rr.rule_label AS compliance_status,
+                    rr.note AS compliance_note
+                FROM input i
+                INNER JOIN products p ON UPPER(TRIM(p.cas)) = i.cas_u
+                LEFT JOIN LATERAL (
+                    SELECT r.rule_label, r.note
+                    FROM regulatory_rules r
+                    WHERE r.is_active = TRUE
+                      AND (
+                        (r.match_field = 'cas' AND NULLIF(TRIM(p.cas), '') IS NOT NULL
+                            AND UPPER(TRIM(p.cas)) = UPPER(TRIM(r.match_value)))
+                        OR (r.match_field = 'name' AND NULLIF(TRIM(p.name), '') IS NOT NULL
+                            AND UPPER(TRIM(p.name)) = UPPER(TRIM(r.match_value)))
+                        OR (r.match_field = 'code' AND NULLIF(TRIM(p.code), '') IS NOT NULL
+                            AND UPPER(TRIM(p.code)) = UPPER(TRIM(r.match_value)))
+                      )
+                    ORDER BY r.priority ASC, r.id ASC
+                    LIMIT 1
+                ) rr ON TRUE
+                WHERE TRUE
+                {vis}
+                ORDER BY i.ord, UPPER(TRIM(COALESCE(p.brand, ''))), UPPER(TRIM(COALESCE(p.size, ''))), p.id
+            """
+            cursor.execute(query, (cas_upper,) + vis_params)
+            rows = cursor.fetchall()
+
+        brand_set = {b.upper() for b in selected_brands if b}
+        by_ord: dict[int, list[dict]] = {i + 1: [] for i in range(len(cas_items))}
+
+        for row in rows:
+            (
+                ord_,
+                cas_u,
+                name,
+                code,
+                cas,
+                brand,
+                size,
+                ship,
+                price,
+                note,
+                compliance_status,
+                compliance_note,
+            ) = row
+            if brand_set and (brand or "").strip().upper() not in brand_set:
+                continue
+            if not _size_matches(size, selected_sizes, tolerance_pct=tolerance_pct):
+                continue
+
+            by_ord[int(ord_)].append(
+                _product_row_to_result(
+                    name,
+                    code,
+                    cas,
+                    brand,
+                    size,
+                    ship,
+                    price,
+                    note,
+                    compliance_status,
+                    compliance_note,
+                    rate_map,
+                )
+            )
+
+        results: list[dict] = []
+        matched_cas = 0
+        for ord_ in range(1, len(cas_items) + 1):
+            items = by_ord.get(ord_, [])
+            if items:
+                matched_cas += 1
+                results.extend(items)
+            else:
+                results.append(
+                    {
+                        "Name": "",
+                        "Code": "",
+                        "Cas": cas_items[ord_ - 1],
+                        "Brand": "",
+                        "Size": "",
+                        "Unit_Price": "",
+                        "Note": "",
+                        "Compliance_Status": "",
+                        "Compliance_Note": "",
+                        "Compliance_Css": "",
+                    }
+                )
+
+        return jsonify(
+            {
+                "results": results,
+                "matched_cas": matched_cas,
+                "total_cas": len(cas_items),
+            }
+        )
     finally:
         conn.close()
 

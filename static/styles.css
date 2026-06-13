@@ -163,6 +163,94 @@ h1 {
   color: #2e45b6;
 }
 
+/* Advanced Search panel */
+.adv-panel {
+  max-width: 900px;
+}
+
+.adv-step {
+  margin-bottom: 14px;
+}
+
+.adv-step-label {
+  font-weight: 700;
+  color: #2e45b6;
+  margin-bottom: 6px;
+  font-size: 0.95rem;
+}
+
+.adv-hint {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
+.adv-checkbox-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  max-height: 160px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.adv-checkbox-grid label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.88rem;
+  color: #334155;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.adv-size-grid {
+  max-height: 200px;
+}
+
+.adv-size-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin-bottom: 8px;
+}
+
+#advSizeFilter {
+  flex: 1 1 200px;
+  min-width: 180px;
+  padding: 8px 12px;
+  border: 1px solid #caced1;
+  border-radius: 10px;
+  font-size: 0.9rem;
+}
+
+.adv-fuzzy-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: #475569;
+  cursor: pointer;
+}
+
+.btn-linkish {
+  background: none;
+  border: none;
+  color: #2e45b6;
+  font-size: 0.85rem;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.btn-linkish:hover {
+  color: #1e3a8a;
+}
+
 .filter-container {
   display: flex;
   justify-content: center;

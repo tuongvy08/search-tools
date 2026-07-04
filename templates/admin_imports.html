@@ -225,6 +225,86 @@
     .jobs table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
     .jobs th, .jobs td { border: 1px solid var(--border); padding: 8px; text-align: left; }
     .jobs th { background: #f8fafc; color: var(--muted); font-weight: 600; }
+
+    .quick-card { border-color: #a7f3d0; }
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .tab-btn {
+      padding: 8px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #f8fafc;
+      color: var(--text);
+      font-size: 0.875rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .tab-btn.active {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #fff;
+    }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    .quick-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 12px 14px;
+      margin-bottom: 14px;
+    }
+    .quick-grid .field { min-width: 0; }
+    .quick-grid input[type="text"],
+    .quick-grid input[type="number"],
+    .quick-grid select,
+    .quick-grid textarea {
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      font-size: 0.9rem;
+      width: 100%;
+    }
+    .quick-grid textarea { min-height: 72px; resize: vertical; }
+    .field-wide { grid-column: 1 / -1; }
+    .field-check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding-top: 22px;
+    }
+    .field-check input { width: auto; }
+    .field-check label { font-size: 0.9rem; font-weight: 500; color: var(--text); text-transform: none; letter-spacing: 0; }
+    .req::after { content: " *"; color: var(--danger); }
+
+    .toast-container {
+      position: fixed;
+      right: 20px;
+      bottom: 20px;
+      z-index: 10000;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-width: min(420px, calc(100vw - 32px));
+      pointer-events: none;
+    }
+    .toast {
+      pointer-events: auto;
+      padding: 12px 16px;
+      border-radius: 10px;
+      box-shadow: var(--shadow);
+      font-size: 0.9rem;
+      font-weight: 500;
+      animation: toast-in 0.25s ease;
+    }
+    .toast.ok { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+    .toast.err { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+    @keyframes toast-in {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
   </style>
 </head>
 <body>
@@ -250,6 +330,67 @@
 
     {% if message %}<div class="alert ok">{{ message }}</div>{% endif %}
     {% if error %}<div class="alert err">{{ error }}</div>{% endif %}
+
+    <div class="card quick-card">
+      <h2><span class="badge">✎</span> Thêm/Sửa nhanh dữ liệu lẻ</h2>
+      <p class="hint">Dùng khi cần sửa sai tên, CAS, size hoặc thêm 1–2 dòng mà không cần file Excel. Hệ thống <strong>UPSERT</strong>: nếu đã có thì cập nhật, chưa có thì thêm mới.</p>
+
+      <div class="tabs" role="tablist">
+        <button type="button" class="tab-btn active" data-tab="quick-product" role="tab" aria-selected="true">Sản phẩm (Products)</button>
+        <button type="button" class="tab-btn" data-tab="quick-rule" role="tab" aria-selected="false">Quy tắc (Regulatory rules)</button>
+      </div>
+
+      <div id="quick-product" class="tab-panel active" role="tabpanel">
+        <p class="hint" style="margin-top:0;">Khóa trùng: <code>code</code> + <code>brand</code> (không phân biệt hoa thường).</p>
+        <form id="formQuickProduct" class="quick-form" autocomplete="off">
+          <div class="quick-grid">
+            <div class="field"><span class="lbl">Name</span><input type="text" name="name" placeholder="Tên sản phẩm" /></div>
+            <div class="field"><span class="lbl req">Code</span><input type="text" name="code" required placeholder="Mã SP" /></div>
+            <div class="field"><span class="lbl">CAS</span><input type="text" name="cas" placeholder="vd. 67-64-1" /></div>
+            <div class="field"><span class="lbl req">Brand</span><input type="text" name="brand" required placeholder="vd. Sigma" /></div>
+            <div class="field"><span class="lbl">Size</span><input type="text" name="size" placeholder="vd. 100mg" /></div>
+            <div class="field"><span class="lbl">Ship</span><input type="text" name="ship" placeholder="Hệ số ship" /></div>
+            <div class="field"><span class="lbl">Price</span><input type="text" name="price" placeholder="Đơn giá" /></div>
+            <div class="field field-wide"><span class="lbl">Note</span><textarea name="note" placeholder="Ghi chú"></textarea></div>
+          </div>
+          <button type="submit" class="btn btn-success">Cập nhật trực tiếp vào Database</button>
+        </form>
+      </div>
+
+      <div id="quick-rule" class="tab-panel" role="tabpanel">
+        <p class="hint" style="margin-top:0;">Khóa trùng: <code>rule_type</code> + <code>match_field</code> + <code>match_value</code>.</p>
+        <form id="formQuickRule" class="quick-form" autocomplete="off">
+          <div class="quick-grid">
+            <div class="field">
+              <span class="lbl req">Rule Type</span>
+              <select name="rule_type" id="quickRuleType" required>
+                <option value="CAM_NHAP">CAM_NHAP — Cấm nhập</option>
+                <option value="PHU_LUC_II">PHU_LUC_II — Phụ lục II</option>
+                <option value="PHU_LUC_III">PHU_LUC_III — Phụ lục III</option>
+                <option value="TON_KHO">TON_KHO — Tồn kho</option>
+              </select>
+            </div>
+            <div class="field"><span class="lbl req">Rule Label</span><input type="text" name="rule_label" id="quickRuleLabel" required placeholder="vd. Phụ lục II" /></div>
+            <div class="field">
+              <span class="lbl req">Match Field</span>
+              <select name="match_field" required>
+                <option value="cas" selected>cas</option>
+                <option value="name">name</option>
+                <option value="code">code</option>
+              </select>
+            </div>
+            <div class="field"><span class="lbl req">Match Value</span><input type="text" name="match_value" required placeholder="CAS / tên / code khớp" /></div>
+            <div class="field"><span class="lbl">Priority</span><input type="number" name="priority" value="100" min="0" step="1" /></div>
+            <div class="field field-check">
+              <input type="checkbox" name="is_active" id="quickRuleActive" value="1" checked />
+              <label for="quickRuleActive">Is Active</label>
+            </div>
+            <div class="field field-wide"><span class="lbl">Note</span><textarea name="note" placeholder="Ghi chú compliance"></textarea></div>
+          </div>
+          <button type="submit" class="btn btn-success">Cập nhật trực tiếp vào Database</button>
+        </form>
+      </div>
+    </div>
 
     <div class="card">
       <h2><span class="badge">↓</span> File mẫu Excel</h2>
@@ -363,8 +504,98 @@
     </div>
     {% endif %}
   </div>
+  <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
 <script>
   (function () {
+    const RULE_LABELS = {
+      CAM_NHAP: 'CẤM NHẬP',
+      PHU_LUC_II: 'Phụ lục II',
+      PHU_LUC_III: 'Phụ lục III',
+      TON_KHO: 'TỒN KHO',
+    };
+
+    function showToast(message, ok) {
+      const container = document.getElementById('toastContainer');
+      if (!container) return;
+      const el = document.createElement('div');
+      el.className = 'toast ' + (ok ? 'ok' : 'err');
+      el.textContent = message;
+      container.appendChild(el);
+      setTimeout(() => {
+        el.style.opacity = '0';
+        el.style.transition = 'opacity 0.3s';
+        setTimeout(() => el.remove(), 320);
+      }, 4500);
+    }
+
+    document.querySelectorAll('.tab-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach((b) => {
+          b.classList.remove('active');
+          b.setAttribute('aria-selected', 'false');
+        });
+        document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
+        btn.classList.add('active');
+        btn.setAttribute('aria-selected', 'true');
+        const panel = document.getElementById(btn.dataset.tab);
+        if (panel) panel.classList.add('active');
+      });
+    });
+
+    const ruleTypeEl = document.getElementById('quickRuleType');
+    const ruleLabelEl = document.getElementById('quickRuleLabel');
+    if (ruleTypeEl && ruleLabelEl) {
+      ruleTypeEl.addEventListener('change', () => {
+        const label = RULE_LABELS[ruleTypeEl.value];
+        if (label) ruleLabelEl.value = label;
+      });
+      ruleLabelEl.value = RULE_LABELS[ruleTypeEl.value] || '';
+    }
+
+    async function submitQuickForm(form, url) {
+      const btn = form.querySelector('button[type="submit"]');
+      const oldText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Đang ghi…';
+      try {
+        const body = new FormData(form);
+        if (form.id === 'formQuickRule') {
+          const active = form.querySelector('#quickRuleActive');
+          body.set('is_active', active && active.checked ? '1' : '0');
+        }
+        const res = await fetch(url, { method: 'POST', body, credentials: 'same-origin' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) {
+          showToast(data.message || 'Cập nhật thất bại.', false);
+          return;
+        }
+        showToast(data.message || 'Đã cập nhật thành công.', true);
+      } catch (err) {
+        showToast('Lỗi kết nối: ' + (err && err.message ? err.message : 'unknown'), false);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = oldText;
+      }
+    }
+
+    const formProduct = document.getElementById('formQuickProduct');
+    if (formProduct) {
+      formProduct.addEventListener('submit', (ev) => {
+        ev.preventDefault();
+        if (!formProduct.reportValidity()) return;
+        submitQuickForm(formProduct, '/admin/imports/quick-product');
+      });
+    }
+
+    const formRule = document.getElementById('formQuickRule');
+    if (formRule) {
+      formRule.addEventListener('submit', (ev) => {
+        ev.preventDefault();
+        if (!formRule.reportValidity()) return;
+        submitQuickForm(formRule, '/admin/imports/quick-rule');
+      });
+    }
+
     const forms = document.querySelectorAll('form[action="/admin/imports/preview"]');
     forms.forEach((form) => {
       const fileInput = form.querySelector('input[type="file"][name="file"]');

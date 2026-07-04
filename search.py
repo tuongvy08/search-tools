@@ -429,6 +429,14 @@ def _require_admin_page():
     return None
 
 
+def _require_admin_api():
+    if not session.get("authenticated"):
+        return _quick_edit_json_response(False, "Chưa đăng nhập.", status=401)
+    if not session.get("is_admin"):
+        return _quick_edit_json_response(False, "Chỉ admin mới được thao tác.", status=403)
+    return None
+
+
 def _current_actor():
     if session.get("user_id"):
         return f"user:{session.get('user_id')}"
@@ -873,6 +881,213 @@ def admin_imports_apply():
         except Exception:
             pass
         return redirect(url_for("admin_imports", err=f"Import failed: {e}"))
+    finally:
+        conn.close()
+
+
+RULE_TYPE_LABELS = {
+    "CAM_NHAP": "CẤM NHẬP",
+    "PHU_LUC_II": "Phụ lục II",
+    "PHU_LUC_III": "Phụ lục III",
+    "TON_KHO": "TỒN KHO",
+}
+
+
+def _parse_is_active(raw) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    s = _norm(str(raw or "")).lower()
+    if not s:
+        return True
+    return s in {"1", "true", "yes", "y", "on"}
+
+
+def _upsert_single_product(cur, row: dict) -> tuple[str, str]:
+    """UPSERT 1 dòng products theo cặp code + brand (không phân biệt hoa thường)."""
+    code = _norm(row.get("code"))
+    brand = _norm(row.get("brand"))
+    if not code or not brand:
+        raise ValueError("Trường code và brand là bắt buộc.")
+
+    vals = (
+        _norm(row.get("name")),
+        code,
+        _norm(row.get("cas")),
+        brand,
+        _norm(row.get("size")),
+        _norm(row.get("ship")),
+        _norm(row.get("price")),
+        _norm(row.get("note")),
+    )
+    cur.execute(
+        """
+        SELECT id FROM products
+        WHERE UPPER(TRIM(code)) = UPPER(TRIM(%s))
+          AND UPPER(TRIM(brand)) = UPPER(TRIM(%s))
+        LIMIT 1
+        """,
+        (code, brand),
+    )
+    existing = cur.fetchone()
+    label = vals[0] or code
+    if existing:
+        cur.execute(
+            """
+            UPDATE products
+               SET name=%s, code=%s, cas=%s, brand=%s, size=%s, ship=%s, price=%s, note=%s
+             WHERE id=%s
+            """,
+            vals + (existing[0],),
+        )
+        return "updated", label
+
+    cur.execute(
+        """
+        INSERT INTO products (name, code, cas, brand, size, ship, price, note)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        vals,
+    )
+    return "inserted", label
+
+
+def _upsert_single_regulatory_rule(cur, row: dict) -> tuple[str, str]:
+    """UPSERT 1 dòng regulatory_rules theo rule_type + match_field + match_value."""
+    rule_type = _norm(row.get("rule_type")).upper()
+    match_field = _norm(row.get("match_field")).lower()
+    match_value = _norm(row.get("match_value"))
+    rule_label = _norm(row.get("rule_label")) or RULE_TYPE_LABELS.get(rule_type, rule_type)
+
+    if rule_type not in {"CAM_NHAP", "PHU_LUC_II", "PHU_LUC_III", "TON_KHO"}:
+        raise ValueError(f"rule_type không hợp lệ: {rule_type}")
+    if match_field not in {"cas", "name", "code"}:
+        raise ValueError(f"match_field không hợp lệ: {match_field}")
+    if not match_value:
+        raise ValueError("match_value là bắt buộc.")
+
+    priority_raw = _norm(row.get("priority")) or "100"
+    try:
+        priority = int(float(priority_raw))
+    except (TypeError, ValueError):
+        raise ValueError("priority phải là số nguyên.")
+    is_active = _parse_is_active(row.get("is_active"))
+    note = _norm(row.get("note"))
+
+    cur.execute(
+        """
+        SELECT id FROM regulatory_rules
+        WHERE rule_type=%s AND match_field=%s AND UPPER(TRIM(match_value))=UPPER(TRIM(%s))
+        LIMIT 1
+        """,
+        (rule_type, match_field, match_value),
+    )
+    existing = cur.fetchone()
+    label = f"{rule_label} ({match_field}={match_value})"
+    if existing:
+        cur.execute(
+            """
+            UPDATE regulatory_rules
+               SET rule_label=%s, match_value=%s, priority=%s, is_active=%s, note=%s, updated_at=NOW()
+             WHERE id=%s
+            """,
+            (rule_label, match_value, priority, is_active, note, existing[0]),
+        )
+        return "updated", label
+
+    cur.execute(
+        """
+        INSERT INTO regulatory_rules (rule_type, rule_label, match_field, match_value, priority, is_active, note)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """,
+        (rule_type, rule_label, match_field, match_value, priority, is_active, note),
+    )
+    return "inserted", label
+
+
+def _quick_edit_json_response(ok: bool, message: str, action: str = "", label: str = "", status: int = 200):
+    return jsonify({"ok": ok, "message": message, "action": action, "label": label}), status
+
+
+@app.route("/admin/imports/quick-product", methods=["POST"])
+def admin_imports_quick_product():
+    guard = _require_admin_api()
+    if guard is not None:
+        return guard
+
+    actor = _current_actor()
+    conn = get_connection()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                action, label = _upsert_single_product(cur, request.values)
+                inserted = 1 if action == "inserted" else 0
+                updated = 1 if action == "updated" else 0
+                _insert_import_job(
+                    cur,
+                    dataset="products",
+                    mode="quick_upsert",
+                    status="success",
+                    filename=None,
+                    row_count=1,
+                    inserted_count=inserted,
+                    updated_count=updated,
+                    deleted_count=0,
+                    created_by=actor,
+                    meta={"label": label, "code": _norm(request.values.get("code")), "brand": _norm(request.values.get("brand"))},
+                )
+        verb = "cập nhật" if action == "updated" else "thêm mới"
+        return _quick_edit_json_response(
+            True,
+            f"Đã {verb} thành công dữ liệu của {label}",
+            action=action,
+            label=label,
+        )
+    except ValueError as e:
+        return _quick_edit_json_response(False, str(e), status=400)
+    except Exception as e:
+        return _quick_edit_json_response(False, f"Lỗi: {e}", status=500)
+    finally:
+        conn.close()
+
+
+@app.route("/admin/imports/quick-rule", methods=["POST"])
+def admin_imports_quick_rule():
+    guard = _require_admin_api()
+    if guard is not None:
+        return guard
+
+    actor = _current_actor()
+    conn = get_connection()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                action, label = _upsert_single_regulatory_rule(cur, request.values)
+                inserted = 1 if action == "inserted" else 0
+                updated = 1 if action == "updated" else 0
+                _insert_import_job(
+                    cur,
+                    dataset="regulatory_rules",
+                    mode="quick_upsert",
+                    status="success",
+                    filename=None,
+                    row_count=1,
+                    inserted_count=inserted,
+                    updated_count=updated,
+                    deleted_count=0,
+                    created_by=actor,
+                    meta={"label": label},
+                )
+        verb = "cập nhật" if action == "updated" else "thêm mới"
+        return _quick_edit_json_response(
+            True,
+            f"Đã {verb} thành công dữ liệu của {label}",
+            action=action,
+            label=label,
+        )
+    except ValueError as e:
+        return _quick_edit_json_response(False, str(e), status=400)
+    except Exception as e:
+        return _quick_edit_json_response(False, f"Lỗi: {e}", status=500)
     finally:
         conn.close()
 

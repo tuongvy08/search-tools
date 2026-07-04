@@ -1,4 +1,17 @@
 let searchResults = [];
+let displayedProducts = [];
+const selectedProductKeys = new Set();
+
+const EXPORT_COLUMNS = [
+    { key: 'Name', label: 'Name' },
+    { key: 'Code', label: 'Code' },
+    { key: 'Cas', label: 'Cas' },
+    { key: 'Brand', label: 'Brand' },
+    { key: 'Size', label: 'Size' },
+    { key: 'Unit_Price', label: 'Unit_Price' },
+    { key: 'Note', label: 'Note', format: formatNoteCell },
+    { key: 'Compliance_Status', label: 'Compliance' },
+];
 
 const COMPLIANCE_CLASS = {
     'CẤM NHẬP': 'warning-cam-nhap',
@@ -66,37 +79,99 @@ function setBatchRunning(running) {
     }
 }
 
-function _excelSafeCell(value) {
-    const s = String(value ?? '').replace(/\r?\n/g, ' ').trim();
-    // Ngăn Excel hiểu nhầm công thức khi paste.
-    if (/^[=+\-@]/.test(s)) {
-        return "'" + s;
-    }
-    return s;
+function productRowKey(product) {
+    return [
+        product.Code || '',
+        product.Brand || '',
+        product.Cas || '',
+        product.Size || '',
+        product.Name || '',
+    ].join('\x1f');
 }
 
-function copyCurrentTableToClipboard() {
-    const table = document.getElementById('results');
-    if (!table) {
-        setOperationStatus('Không tìm thấy bảng kết quả để export.', 'error');
+function clearRowSelection() {
+    selectedProductKeys.clear();
+    document.querySelectorAll('#results tbody input.row-select').forEach((cb) => {
+        cb.checked = false;
+        cb.closest('tr')?.classList.remove('row-selected');
+    });
+    const selectAll = document.getElementById('selectAllRows');
+    if (selectAll) {
+        selectAll.checked = false;
+        selectAll.indeterminate = false;
+    }
+    updateSelectionUI();
+}
+
+function syncRowSelectionFromCheckbox(checkbox) {
+    const key = checkbox.dataset.rowKey;
+    if (!key) return;
+    if (checkbox.checked) {
+        selectedProductKeys.add(key);
+        checkbox.closest('tr')?.classList.add('row-selected');
+    } else {
+        selectedProductKeys.delete(key);
+        checkbox.closest('tr')?.classList.remove('row-selected');
+    }
+    updateSelectionUI();
+}
+
+function updateSelectionUI() {
+    const count = selectedProductKeys.size;
+    const bar = document.getElementById('selectionBar');
+    const countEl = document.getElementById('selectionCount');
+    if (bar && countEl) {
+        if (count > 0) {
+            bar.style.display = 'flex';
+            countEl.textContent = `Đã chọn: ${count} dòng`;
+        } else {
+            bar.style.display = 'none';
+            countEl.textContent = 'Đã chọn: 0 dòng';
+        }
+    }
+
+    const visibleChecks = Array.from(document.querySelectorAll('#results tbody input.row-select'));
+    const selectAll = document.getElementById('selectAllRows');
+    if (!selectAll || !visibleChecks.length) {
+        if (selectAll) {
+            selectAll.checked = false;
+            selectAll.indeterminate = false;
+        }
         return;
     }
-    const rows = table.querySelectorAll('tbody tr');
-    if (!rows.length) {
-        setOperationStatus('Chưa có dữ liệu để export sang Excel.', 'error');
+    const checkedVisible = visibleChecks.filter((cb) => cb.checked).length;
+    selectAll.checked = checkedVisible > 0 && checkedVisible === visibleChecks.length;
+    selectAll.indeterminate = checkedVisible > 0 && checkedVisible < visibleChecks.length;
+}
+
+function exportSelectedToExcel() {
+    if (!selectedProductKeys.size) {
+        setOperationStatus('Chọn ít nhất một dòng sản phẩm (checkbox đầu dòng) rồi bấm <strong>Export to Excel</strong>.', 'error');
         return;
     }
 
-    const headers = Array.from(table.querySelectorAll('thead th')).map((th) => _excelSafeCell(th.textContent));
+    const products = searchResults.filter((product) => selectedProductKeys.has(productRowKey(product)));
+    if (!products.length) {
+        setOperationStatus('Không tìm thấy dòng đã chọn để export.', 'error');
+        return;
+    }
+
+    const headers = EXPORT_COLUMNS.map((col) => _excelSafeCell(col.label));
     const lines = [headers.join('\t')];
-    rows.forEach((tr) => {
-        const cells = Array.from(tr.querySelectorAll('td')).map((td) => _excelSafeCell(td.textContent));
+    products.forEach((product) => {
+        const cells = EXPORT_COLUMNS.map((col) => {
+            const raw = col.format ? col.format(product) : (product[col.key] || '');
+            return _excelSafeCell(raw);
+        });
         lines.push(cells.join('\t'));
     });
     const payload = lines.join('\n');
 
     const done = () => {
-        setOperationStatus(`Đã copy <strong>${rows.length}</strong> dòng kết quả. Mở Excel và dán (Ctrl/Cmd + V).`, 'success');
+        setOperationStatus(
+            `Đã copy <strong>${products.length}</strong> dòng đã chọn. Mở Excel và dán (Ctrl/Cmd + V).`,
+            'success'
+        );
     };
 
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -125,6 +200,15 @@ function copyCurrentTableToClipboard() {
     done();
 }
 
+function _excelSafeCell(value) {
+    const s = String(value ?? '').replace(/\r?\n/g, ' ').trim();
+    // Ngăn Excel hiểu nhầm công thức khi paste.
+    if (/^[=+\-@]/.test(s)) {
+        return "'" + s;
+    }
+    return s;
+}
+
 function searchProducts() {
     const query = $('#searchQuery').val();
     if (query.trim() === '') {
@@ -140,6 +224,7 @@ function searchProducts() {
         timeout: AJAX_LONG_TIMEOUT_MS,
         success: function(data) {
             searchResults = data.results || [];
+            clearRowSelection();
             updateBrandFilterOptions();
             updateSizeFilterOptions();
             displayResults(searchResults);
@@ -250,25 +335,55 @@ function formatNoteCell(product) {
 }
 
 function displayResults(products) {
+    displayedProducts = products;
     const resultsTable = document.getElementById('results').getElementsByTagName('tbody')[0];
     resultsTable.innerHTML = '';
 
     products.forEach(product => {
         const row = resultsTable.insertRow();
-        row.insertCell(0).innerHTML = product.Name || '';
-        row.insertCell(1).innerHTML = product.Code || '';
-        row.insertCell(2).innerHTML = product.Cas || '';
-        row.insertCell(3).innerHTML = product.Brand || '';
-        row.insertCell(4).innerHTML = product.Size || '';
-        row.insertCell(5).innerHTML = product.Unit_Price || '';
-        row.insertCell(6).innerHTML = formatNoteCell(product);
-        row.insertCell(7).innerHTML = badgeForCompliance(product.Compliance_Status);
+        const rowKey = productRowKey(product);
+        const isSelected = selectedProductKeys.has(rowKey);
+
+        const selectCell = row.insertCell(0);
+        selectCell.className = 'col-select';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'row-select';
+        checkbox.dataset.rowKey = rowKey;
+        checkbox.checked = isSelected;
+        checkbox.setAttribute('aria-label', 'Chọn dòng');
+        checkbox.addEventListener('change', function() {
+            syncRowSelectionFromCheckbox(checkbox);
+        });
+        selectCell.appendChild(checkbox);
+
+        row.insertCell(1).innerHTML = product.Name || '';
+        row.insertCell(2).innerHTML = product.Code || '';
+        row.insertCell(3).innerHTML = product.Cas || '';
+        row.insertCell(4).innerHTML = product.Brand || '';
+        row.insertCell(5).innerHTML = product.Size || '';
+        row.insertCell(6).innerHTML = product.Unit_Price || '';
+        row.insertCell(7).innerHTML = formatNoteCell(product);
+        row.insertCell(8).innerHTML = badgeForCompliance(product.Compliance_Status);
 
         const cssClass = product.Compliance_Css || COMPLIANCE_CLASS[product.Compliance_Status];
         if (cssClass) {
             row.classList.add(cssClass);
         }
+        if (isSelected) {
+            row.classList.add('row-selected');
+        }
+
+        row.addEventListener('click', function(event) {
+            if (event.target.closest('input, a, button, label')) {
+                return;
+            }
+            checkbox.checked = !checkbox.checked;
+            syncRowSelectionFromCheckbox(checkbox);
+        });
     });
+
+    updateSelectionUI();
 }
 
 function filterResultsByBrand() {
@@ -482,6 +597,7 @@ function runAdvancedSearch() {
             }
             const products = (data && data.results) ? data.results : [];
             searchResults = products;
+            clearRowSelection();
             updateBrandFilterOptions();
             updateSizeFilterOptions();
             displayResults(searchResults);
@@ -516,8 +632,20 @@ $(document).ready(function() {
     $('.search-button').on('click', function() {
         searchProducts();
     });
-    $('#btnCopyExcel').on('click', function() {
-        copyCurrentTableToClipboard();
+    $('#btnExportExcel').on('click', function() {
+        exportSelectedToExcel();
+    });
+
+    $('#selectAllRows').on('change', function() {
+        const checked = this.checked;
+        document.querySelectorAll('#results tbody input.row-select').forEach((cb) => {
+            cb.checked = checked;
+            syncRowSelectionFromCheckbox(cb);
+        });
+    });
+
+    $('#btnClearSelection').on('click', function() {
+        clearRowSelection();
     });
 
     function setMultiMode(mode) {
@@ -676,6 +804,7 @@ $(document).ready(function() {
                         return;
                     }
                     searchResults = products;
+                    clearRowSelection();
                     updateBrandFilterOptions();
                     updateSizeFilterOptions();
                     displayResults(searchResults);

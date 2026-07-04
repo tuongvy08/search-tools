@@ -337,6 +337,42 @@ h1 {
 
 #results th:first-child,
 #results td:first-child {
+  text-align: center;
+}
+
+#results th.col-select,
+#results td.col-select {
+  width: 42px;
+  min-width: 42px;
+  padding: 8px 6px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+#results tbody tr.row-selected {
+  outline: 2px solid #2e45b6;
+  outline-offset: -2px;
+}
+
+#results tbody tr {
+  cursor: pointer;
+}
+
+.selection-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 12px 0 4px;
+  padding: 8px 12px;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  color: #1e3a8a;
+}
+
+#results th:nth-child(2),
+#results td:nth-child(2) {
   text-align: left;
 }
 

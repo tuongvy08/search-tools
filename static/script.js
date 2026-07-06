@@ -144,15 +144,15 @@ function updateSelectionUI() {
     selectAll.indeterminate = checkedVisible > 0 && checkedVisible < visibleChecks.length;
 }
 
-function exportSelectedToExcel() {
+function copySelectedRows() {
     if (!selectedProductKeys.size) {
-        setOperationStatus('Chọn ít nhất một dòng sản phẩm (checkbox đầu dòng) rồi bấm <strong>Export to Excel</strong>.', 'error');
+        setOperationStatus('Chọn ít nhất một dòng sản phẩm (checkbox đầu dòng) rồi bấm <strong>Copy Selected</strong>.', 'error');
         return;
     }
 
     const products = searchResults.filter((product) => selectedProductKeys.has(productRowKey(product)));
     if (!products.length) {
-        setOperationStatus('Không tìm thấy dòng đã chọn để export.', 'error');
+        setOperationStatus('Không tìm thấy dòng đã chọn để sao chép.', 'error');
         return;
     }
 
@@ -169,7 +169,7 @@ function exportSelectedToExcel() {
 
     const done = () => {
         setOperationStatus(
-            `Đã copy <strong>${products.length}</strong> dòng đã chọn. Mở Excel và dán (Ctrl/Cmd + V).`,
+            `Đã sao chép <strong>${products.length}</strong> dòng. Mở Excel/Google Sheet và dán (Ctrl/Cmd + V).`,
             'success'
         );
     };
@@ -632,8 +632,8 @@ $(document).ready(function() {
     $('.search-button').on('click', function() {
         searchProducts();
     });
-    $('#btnExportExcel').on('click', function() {
-        exportSelectedToExcel();
+    $('#btnCopySelected').on('click', function() {
+        copySelectedRows();
     });
 
     $('#selectAllRows').on('change', function() {

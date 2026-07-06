@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <title>Product Search</title>
     <!-- Include stylesheets -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260704a') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260706a') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -14,8 +14,10 @@
         <button class="nav-button" id="btnCheckLicense" type="button">Check license</button>
         <button class="nav-button" id="btnFindCode" type="button">Find Code</button>
         <button class="nav-button" id="btnAdvancedSearch" type="button">Advanced Search</button>
-        <button class="nav-button btn-export" id="btnExportExcel" type="button" title="Export các dòng đã chọn sang Excel (dán bằng Ctrl/Cmd+V)">
-            <i class="fas fa-file-export"></i> Export to Excel
+        <button class="nav-button btn-export" id="btnCopySelected" type="button"
+                title="Sao chép các dòng đã chọn (dán vào Excel/Google Sheet bằng Ctrl/Cmd+V)"
+                aria-label="Copy Selected">
+            <i class="fas fa-copy"></i> Copy Selected
         </button>
 
         <div class="input-box">
@@ -109,6 +111,6 @@
 
     <!-- Include necessary scripts -->
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>    
-    <script src="{{ url_for('static', filename='script.js', v='20260704a') }}"></script>
+    <script src="{{ url_for('static', filename='script.js', v='20260706a') }}"></script>
 </body>
 </html>

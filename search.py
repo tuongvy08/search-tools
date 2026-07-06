@@ -1004,6 +1004,73 @@ def _upsert_single_regulatory_rule(cur, row: dict) -> tuple[str, str]:
     return "inserted", label
 
 
+def _delete_single_product(cur, row: dict) -> tuple[str, int]:
+    """Xóa sản phẩm theo code + brand; nếu có size thì chỉ xóa đúng size đó."""
+    code = _norm(row.get("code"))
+    brand = _norm(row.get("brand"))
+    size = _norm(row.get("size"))
+    if not code or not brand:
+        raise ValueError("Trường code và brand là bắt buộc để xóa.")
+
+    if size:
+        cur.execute(
+            """
+            DELETE FROM products
+            WHERE UPPER(TRIM(code)) = UPPER(TRIM(%s))
+              AND UPPER(TRIM(brand)) = UPPER(TRIM(%s))
+              AND UPPER(TRIM(COALESCE(size, ''))) = UPPER(TRIM(%s))
+            """,
+            (code, brand, size),
+        )
+        label = f"{code} / {brand} / {size}"
+    else:
+        cur.execute(
+            """
+            DELETE FROM products
+            WHERE UPPER(TRIM(code)) = UPPER(TRIM(%s))
+              AND UPPER(TRIM(brand)) = UPPER(TRIM(%s))
+            """,
+            (code, brand),
+        )
+        label = f"{code} / {brand}"
+
+    deleted = cur.rowcount
+    if deleted <= 0:
+        raise ValueError(
+            "Không tìm thấy sản phẩm để xóa. Kiểm tra lại code, brand"
+            + (" và size." if size else " (hoặc thử điền thêm size để xóa chính xác).")
+        )
+    return label, deleted
+
+
+def _delete_single_regulatory_rule(cur, row: dict) -> tuple[str, int]:
+    """Xóa quy tắc theo rule_type + match_field + match_value."""
+    rule_type = _norm(row.get("rule_type")).upper()
+    match_field = _norm(row.get("match_field")).lower()
+    match_value = _norm(row.get("match_value"))
+
+    if rule_type not in {"CAM_NHAP", "PHU_LUC_II", "PHU_LUC_III", "TON_KHO"}:
+        raise ValueError(f"rule_type không hợp lệ: {rule_type}")
+    if match_field not in {"cas", "name", "code"}:
+        raise ValueError(f"match_field không hợp lệ: {match_field}")
+    if not match_value:
+        raise ValueError("match_value là bắt buộc để xóa.")
+
+    cur.execute(
+        """
+        DELETE FROM regulatory_rules
+        WHERE rule_type=%s AND match_field=%s AND UPPER(TRIM(match_value))=UPPER(TRIM(%s))
+        """,
+        (rule_type, match_field, match_value),
+    )
+    deleted = cur.rowcount
+    if deleted <= 0:
+        raise ValueError("Không tìm thấy quy tắc để xóa. Kiểm tra rule_type, match_field và match_value.")
+
+    label = f"{rule_type} ({match_field}={match_value})"
+    return label, deleted
+
+
 def _quick_edit_json_response(ok: bool, message: str, action: str = "", label: str = "", status: int = 200):
     return jsonify({"ok": ok, "message": message, "action": action, "label": label}), status
 
@@ -1082,6 +1149,84 @@ def admin_imports_quick_rule():
             True,
             f"Đã {verb} thành công dữ liệu của {label}",
             action=action,
+            label=label,
+        )
+    except ValueError as e:
+        return _quick_edit_json_response(False, str(e), status=400)
+    except Exception as e:
+        return _quick_edit_json_response(False, f"Lỗi: {e}", status=500)
+    finally:
+        conn.close()
+
+
+@app.route("/admin/imports/quick-product/delete", methods=["POST"])
+def admin_imports_quick_product_delete():
+    guard = _require_admin_api()
+    if guard is not None:
+        return guard
+
+    actor = _current_actor()
+    conn = get_connection()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                label, deleted = _delete_single_product(cur, request.values)
+                _insert_import_job(
+                    cur,
+                    dataset="products",
+                    mode="quick_delete",
+                    status="success",
+                    filename=None,
+                    row_count=1,
+                    inserted_count=0,
+                    updated_count=0,
+                    deleted_count=deleted,
+                    created_by=actor,
+                    meta={"label": label, "code": _norm(request.values.get("code")), "brand": _norm(request.values.get("brand"))},
+                )
+        return _quick_edit_json_response(
+            True,
+            f"Đã xóa thành công {deleted} dòng: {label}",
+            action="deleted",
+            label=label,
+        )
+    except ValueError as e:
+        return _quick_edit_json_response(False, str(e), status=400)
+    except Exception as e:
+        return _quick_edit_json_response(False, f"Lỗi: {e}", status=500)
+    finally:
+        conn.close()
+
+
+@app.route("/admin/imports/quick-rule/delete", methods=["POST"])
+def admin_imports_quick_rule_delete():
+    guard = _require_admin_api()
+    if guard is not None:
+        return guard
+
+    actor = _current_actor()
+    conn = get_connection()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                label, deleted = _delete_single_regulatory_rule(cur, request.values)
+                _insert_import_job(
+                    cur,
+                    dataset="regulatory_rules",
+                    mode="quick_delete",
+                    status="success",
+                    filename=None,
+                    row_count=1,
+                    inserted_count=0,
+                    updated_count=0,
+                    deleted_count=deleted,
+                    created_by=actor,
+                    meta={"label": label},
+                )
+        return _quick_edit_json_response(
+            True,
+            f"Đã xóa thành công quy tắc: {label}",
+            action="deleted",
             label=label,
         )
     except ValueError as e:

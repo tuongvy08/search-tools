@@ -187,6 +187,17 @@
       padding: 12px 22px;
     }
     .btn-success:hover { filter: brightness(1.05); }
+    .btn-danger {
+      background: var(--danger);
+      color: #fff;
+    }
+    .btn-danger:hover { filter: brightness(1.08); }
+    .quick-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
     .btn-ghost {
       background: transparent;
       color: var(--muted);
@@ -333,7 +344,7 @@
 
     <div class="card quick-card">
       <h2><span class="badge">✎</span> Thêm/Sửa nhanh dữ liệu lẻ</h2>
-      <p class="hint">Dùng khi cần sửa sai tên, CAS, size hoặc thêm 1–2 dòng mà không cần file Excel. Hệ thống <strong>UPSERT</strong>: nếu đã có thì cập nhật, chưa có thì thêm mới.</p>
+      <p class="hint">Dùng khi cần sửa sai tên, CAS, size, thêm 1–2 dòng, hoặc <strong>xóa</strong> sản phẩm/quy tắc không còn dùng — không cần file Excel. Thêm/sửa dùng <strong>UPSERT</strong> (đã có thì cập nhật, chưa có thì thêm mới).</p>
 
       <div class="tabs" role="tablist">
         <button type="button" class="tab-btn active" data-tab="quick-product" role="tab" aria-selected="true">Sản phẩm (Products)</button>
@@ -341,7 +352,7 @@
       </div>
 
       <div id="quick-product" class="tab-panel active" role="tabpanel">
-        <p class="hint" style="margin-top:0;">Khóa trùng: <code>code</code> + <code>brand</code> (không phân biệt hoa thường).</p>
+        <p class="hint" style="margin-top:0;">Khóa trùng khi thêm/sửa: <code>code</code> + <code>brand</code>. Xóa: bắt buộc <code>code</code> + <code>brand</code>; điền thêm <code>size</code> nếu chỉ muốn xóa một quy cách.</p>
         <form id="formQuickProduct" class="quick-form" autocomplete="off">
           <div class="quick-grid">
             <div class="field"><span class="lbl">Name</span><input type="text" name="name" placeholder="Tên sản phẩm" /></div>
@@ -353,12 +364,15 @@
             <div class="field"><span class="lbl">Price</span><input type="text" name="price" placeholder="Đơn giá" /></div>
             <div class="field field-wide"><span class="lbl">Note</span><textarea name="note" placeholder="Ghi chú"></textarea></div>
           </div>
-          <button type="submit" class="btn btn-success">Cập nhật trực tiếp vào Database</button>
+          <div class="quick-actions">
+            <button type="submit" class="btn btn-success">Cập nhật trực tiếp vào Database</button>
+            <button type="button" class="btn btn-danger" id="btnDeleteQuickProduct">Xóa sản phẩm</button>
+          </div>
         </form>
       </div>
 
       <div id="quick-rule" class="tab-panel" role="tabpanel">
-        <p class="hint" style="margin-top:0;">Khóa trùng: <code>rule_type</code> + <code>match_field</code> + <code>match_value</code>.</p>
+        <p class="hint" style="margin-top:0;">Khóa khi thêm/sửa/xóa: <code>rule_type</code> + <code>match_field</code> + <code>match_value</code>.</p>
         <form id="formQuickRule" class="quick-form" autocomplete="off">
           <div class="quick-grid">
             <div class="field">
@@ -387,7 +401,10 @@
             </div>
             <div class="field field-wide"><span class="lbl">Note</span><textarea name="note" placeholder="Ghi chú compliance"></textarea></div>
           </div>
-          <button type="submit" class="btn btn-success">Cập nhật trực tiếp vào Database</button>
+          <div class="quick-actions">
+            <button type="submit" class="btn btn-success">Cập nhật trực tiếp vào Database</button>
+            <button type="button" class="btn btn-danger" id="btnDeleteQuickRule">Xóa quy tắc</button>
+          </div>
         </form>
       </div>
     </div>
@@ -552,11 +569,13 @@
       ruleLabelEl.value = RULE_LABELS[ruleTypeEl.value] || '';
     }
 
-    async function submitQuickForm(form, url) {
-      const btn = form.querySelector('button[type="submit"]');
+    async function submitQuickForm(form, url, triggerBtn) {
+      const btn = triggerBtn || form.querySelector('button[type="submit"]');
       const oldText = btn.textContent;
       btn.disabled = true;
-      btn.textContent = 'Đang ghi…';
+      const allBtns = form.closest('.tab-panel')?.querySelectorAll('.quick-actions button') || [btn];
+      allBtns.forEach((b) => { b.disabled = true; });
+      btn.textContent = url.includes('/delete') ? 'Đang xóa…' : 'Đang ghi…';
       try {
         const body = new FormData(form);
         if (form.id === 'formQuickRule') {
@@ -566,16 +585,37 @@
         const res = await fetch(url, { method: 'POST', body, credentials: 'same-origin' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.ok) {
-          showToast(data.message || 'Cập nhật thất bại.', false);
+          showToast(data.message || 'Thao tác thất bại.', false);
           return;
         }
         showToast(data.message || 'Đã cập nhật thành công.', true);
       } catch (err) {
         showToast('Lỗi kết nối: ' + (err && err.message ? err.message : 'unknown'), false);
       } finally {
-        btn.disabled = false;
+        allBtns.forEach((b) => { b.disabled = false; });
         btn.textContent = oldText;
       }
+    }
+
+    function validateQuickDeleteProduct() {
+      const form = document.getElementById('formQuickProduct');
+      const code = (form.querySelector('[name="code"]')?.value || '').trim();
+      const brand = (form.querySelector('[name="brand"]')?.value || '').trim();
+      if (!code || !brand) {
+        showToast('Xóa sản phẩm: cần điền Code và Brand.', false);
+        return false;
+      }
+      return true;
+    }
+
+    function validateQuickDeleteRule() {
+      const form = document.getElementById('formQuickRule');
+      const matchValue = (form.querySelector('[name="match_value"]')?.value || '').trim();
+      if (!matchValue) {
+        showToast('Xóa quy tắc: cần điền Match Value.', false);
+        return false;
+      }
+      return true;
     }
 
     const formProduct = document.getElementById('formQuickProduct');
@@ -587,12 +627,37 @@
       });
     }
 
+    const btnDeleteProduct = document.getElementById('btnDeleteQuickProduct');
+    if (btnDeleteProduct && formProduct) {
+      btnDeleteProduct.addEventListener('click', () => {
+        if (!validateQuickDeleteProduct()) return;
+        const code = formProduct.querySelector('[name="code"]').value.trim();
+        const brand = formProduct.querySelector('[name="brand"]').value.trim();
+        const size = (formProduct.querySelector('[name="size"]')?.value || '').trim();
+        const target = size ? `${code} / ${brand} / ${size}` : `${code} / ${brand}`;
+        if (!confirm(`Xóa sản phẩm "${target}" khỏi database? Thao tác không hoàn tác tự động.`)) return;
+        submitQuickForm(formProduct, '/admin/imports/quick-product/delete', btnDeleteProduct);
+      });
+    }
+
     const formRule = document.getElementById('formQuickRule');
     if (formRule) {
       formRule.addEventListener('submit', (ev) => {
         ev.preventDefault();
         if (!formRule.reportValidity()) return;
         submitQuickForm(formRule, '/admin/imports/quick-rule');
+      });
+    }
+
+    const btnDeleteRule = document.getElementById('btnDeleteQuickRule');
+    if (btnDeleteRule && formRule) {
+      btnDeleteRule.addEventListener('click', () => {
+        if (!validateQuickDeleteRule()) return;
+        const ruleType = formRule.querySelector('[name="rule_type"]').value;
+        const matchField = formRule.querySelector('[name="match_field"]').value;
+        const matchValue = formRule.querySelector('[name="match_value"]').value.trim();
+        if (!confirm(`Xóa quy tắc ${ruleType} (${matchField}=${matchValue})? Thao tác không hoàn tác tự động.`)) return;
+        submitQuickForm(formRule, '/admin/imports/quick-rule/delete', btnDeleteRule);
       });
     }
 

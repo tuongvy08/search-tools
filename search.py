@@ -1005,40 +1005,68 @@ def _upsert_single_regulatory_rule(cur, row: dict) -> tuple[str, str]:
 
 
 def _delete_single_product(cur, row: dict) -> tuple[str, int]:
-    """Xóa sản phẩm theo code + brand; nếu có size thì chỉ xóa đúng size đó."""
-    code = _norm(row.get("code"))
+    """Xóa sản phẩm theo brand + (code | cas | name); size tuỳ chọn để thu hẹp."""
     brand = _norm(row.get("brand"))
+    code = _norm(row.get("code"))
+    cas = _norm(row.get("cas"))
+    name = _norm(row.get("name"))
     size = _norm(row.get("size"))
-    if not code or not brand:
-        raise ValueError("Trường code và brand là bắt buộc để xóa.")
 
-    if size:
-        cur.execute(
-            """
-            DELETE FROM products
-            WHERE UPPER(TRIM(code)) = UPPER(TRIM(%s))
-              AND UPPER(TRIM(brand)) = UPPER(TRIM(%s))
-              AND UPPER(TRIM(COALESCE(size, ''))) = UPPER(TRIM(%s))
-            """,
-            (code, brand, size),
+    if not brand:
+        raise ValueError("Trường brand là bắt buộc để xóa.")
+    if not code and not cas and not name:
+        raise ValueError(
+            "Cần điền brand và ít nhất một trong: code, CAS hoặc name. "
+            "Sản phẩm legacy (vd. CẤM NHẬP không có code) có thể xóa bằng brand + CAS."
         )
-        label = f"{code} / {brand} / {size}"
+
+    size_clause = " AND UPPER(TRIM(COALESCE(size, ''))) = UPPER(TRIM(%s))" if size else ""
+    size_params = (size,) if size else ()
+
+    if code:
+        cur.execute(
+            f"""
+            DELETE FROM products
+            WHERE UPPER(TRIM(brand)) = UPPER(TRIM(%s))
+              AND UPPER(TRIM(code)) = UPPER(TRIM(%s))
+              {size_clause}
+            """,
+            (brand, code) + size_params,
+        )
+        label = f"{code} / {brand}" + (f" / {size}" if size else "")
+    elif cas:
+        name_clause = " AND UPPER(TRIM(name)) = UPPER(TRIM(%s))" if name else ""
+        name_params = (name,) if name else ()
+        cur.execute(
+            f"""
+            DELETE FROM products
+            WHERE UPPER(TRIM(brand)) = UPPER(TRIM(%s))
+              AND UPPER(TRIM(cas)) = UPPER(TRIM(%s))
+              {name_clause}
+              {size_clause}
+            """,
+            (brand, cas) + name_params + size_params,
+        )
+        label = f"{brand} / CAS {cas}" + (f" / {name}" if name else "") + (f" / {size}" if size else "")
     else:
         cur.execute(
-            """
+            f"""
             DELETE FROM products
-            WHERE UPPER(TRIM(code)) = UPPER(TRIM(%s))
-              AND UPPER(TRIM(brand)) = UPPER(TRIM(%s))
+            WHERE UPPER(TRIM(brand)) = UPPER(TRIM(%s))
+              AND UPPER(TRIM(name)) = UPPER(TRIM(%s))
+              {size_clause}
             """,
-            (code, brand),
+            (brand, name) + size_params,
         )
-        label = f"{code} / {brand}"
+        label = f"{brand} / {name}" + (f" / {size}" if size else "")
 
     deleted = cur.rowcount
     if deleted <= 0:
         raise ValueError(
-            "Không tìm thấy sản phẩm để xóa. Kiểm tra lại code, brand"
-            + (" và size." if size else " (hoặc thử điền thêm size để xóa chính xác).")
+            "Không tìm thấy sản phẩm để xóa. Kiểm tra brand"
+            + (" + code" if code else " + CAS" if cas else " + name")
+            + (" + size" if size else "")
+            + ". Với dòng không có code, thử brand + CAS (vd. CẤM NHẬP + 634-90-2)."
         )
     return label, deleted
 

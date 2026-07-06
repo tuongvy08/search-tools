@@ -352,13 +352,13 @@
       </div>
 
       <div id="quick-product" class="tab-panel active" role="tabpanel">
-        <p class="hint" style="margin-top:0;">Khóa trùng khi thêm/sửa: <code>code</code> + <code>brand</code>. Xóa: bắt buộc <code>code</code> + <code>brand</code>; điền thêm <code>size</code> nếu chỉ muốn xóa một quy cách.</p>
+        <p class="hint" style="margin-top:0;">Thêm/sửa: khóa <code>code</code> + <code>brand</code>. Xóa: bắt buộc <code>brand</code> + một trong <code>code</code> / <code>CAS</code> / <code>name</code> — dùng <strong>brand + CAS</strong> cho dòng legacy không có code (vd. <code>CẤM NHẬP</code> + <code>634-90-2</code>). Thêm <code>size</code> nếu cần xóa đúng một quy cách.</p>
         <form id="formQuickProduct" class="quick-form" autocomplete="off">
           <div class="quick-grid">
             <div class="field"><span class="lbl">Name</span><input type="text" name="name" placeholder="Tên sản phẩm" /></div>
-            <div class="field"><span class="lbl req">Code</span><input type="text" name="code" required placeholder="Mã SP" /></div>
-            <div class="field"><span class="lbl">CAS</span><input type="text" name="cas" placeholder="vd. 67-64-1" /></div>
-            <div class="field"><span class="lbl req">Brand</span><input type="text" name="brand" required placeholder="vd. Sigma" /></div>
+            <div class="field"><span class="lbl req">Code</span><input type="text" name="code" placeholder="Mã SP (bắt buộc khi thêm/sửa)" /></div>
+            <div class="field"><span class="lbl">CAS</span><input type="text" name="cas" placeholder="vd. 634-90-2" /></div>
+            <div class="field"><span class="lbl req">Brand</span><input type="text" name="brand" required placeholder="vd. Sigma hoặc CẤM NHẬP" /></div>
             <div class="field"><span class="lbl">Size</span><input type="text" name="size" placeholder="vd. 100mg" /></div>
             <div class="field"><span class="lbl">Ship</span><input type="text" name="ship" placeholder="Hệ số ship" /></div>
             <div class="field"><span class="lbl">Price</span><input type="text" name="price" placeholder="Đơn giá" /></div>
@@ -601,11 +601,35 @@
       const form = document.getElementById('formQuickProduct');
       const code = (form.querySelector('[name="code"]')?.value || '').trim();
       const brand = (form.querySelector('[name="brand"]')?.value || '').trim();
-      if (!code || !brand) {
-        showToast('Xóa sản phẩm: cần điền Code và Brand.', false);
+      const cas = (form.querySelector('[name="cas"]')?.value || '').trim();
+      const name = (form.querySelector('[name="name"]')?.value || '').trim();
+      if (!brand) {
+        showToast('Xóa sản phẩm: cần điền Brand.', false);
+        return false;
+      }
+      if (!code && !cas && !name) {
+        showToast('Xóa sản phẩm: cần Brand + Code, hoặc Brand + CAS (không có code), hoặc Brand + Name.', false);
         return false;
       }
       return true;
+    }
+
+    function describeQuickDeleteProduct(form) {
+      const code = (form.querySelector('[name="code"]')?.value || '').trim();
+      const brand = (form.querySelector('[name="brand"]')?.value || '').trim();
+      const cas = (form.querySelector('[name="cas"]')?.value || '').trim();
+      const name = (form.querySelector('[name="name"]')?.value || '').trim();
+      const size = (form.querySelector('[name="size"]')?.value || '').trim();
+      if (code) {
+        return size ? `${code} / ${brand} / ${size}` : `${code} / ${brand}`;
+      }
+      if (cas) {
+        let s = `${brand} / CAS ${cas}`;
+        if (name) s += ` / ${name}`;
+        if (size) s += ` / ${size}`;
+        return s;
+      }
+      return size ? `${brand} / ${name} / ${size}` : `${brand} / ${name}`;
     }
 
     function validateQuickDeleteRule() {
@@ -622,6 +646,12 @@
     if (formProduct) {
       formProduct.addEventListener('submit', (ev) => {
         ev.preventDefault();
+        const code = (formProduct.querySelector('[name="code"]')?.value || '').trim();
+        const brand = (formProduct.querySelector('[name="brand"]')?.value || '').trim();
+        if (!brand || !code) {
+          showToast('Thêm/sửa sản phẩm: cần điền Code và Brand.', false);
+          return;
+        }
         if (!formProduct.reportValidity()) return;
         submitQuickForm(formProduct, '/admin/imports/quick-product');
       });
@@ -631,10 +661,7 @@
     if (btnDeleteProduct && formProduct) {
       btnDeleteProduct.addEventListener('click', () => {
         if (!validateQuickDeleteProduct()) return;
-        const code = formProduct.querySelector('[name="code"]').value.trim();
-        const brand = formProduct.querySelector('[name="brand"]').value.trim();
-        const size = (formProduct.querySelector('[name="size"]')?.value || '').trim();
-        const target = size ? `${code} / ${brand} / ${size}` : `${code} / ${brand}`;
+        const target = describeQuickDeleteProduct(formProduct);
         if (!confirm(`Xóa sản phẩm "${target}" khỏi database? Thao tác không hoàn tác tự động.`)) return;
         submitQuickForm(formProduct, '/admin/imports/quick-product/delete', btnDeleteProduct);
       });

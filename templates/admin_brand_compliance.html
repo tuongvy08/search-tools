@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Manual compliance theo brand</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 1100px; margin: 24px auto; padding: 0 12px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin-bottom: 16px; background: #fff; }
+    .ok { color: #0b7a0b; }
+    .err { color: #b00020; white-space: pre-wrap; margin-bottom: 12px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+    th, td { border: 1px solid #ddd; padding: 8px 10px; text-align: left; vertical-align: middle; }
+    th { background: #f4f7fe; color: #2e45b6; }
+    code { background: #f6f6f6; padding: 1px 4px; border-radius: 4px; word-break: break-word; }
+    .nav a { margin-right: 12px; }
+    .muted { color: #555; font-size: 0.95rem; }
+    .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+    .toolbar input[type="search"] {
+      flex: 1 1 220px;
+      min-width: 180px;
+      padding: 8px 10px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-family: inherit;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .badge.on { background: #dcfce7; color: #166534; }
+    .badge.off { background: #f3f4f6; color: #4b5563; }
+    .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .brand-cell { word-break: break-word; min-width: 120px; }
+    .norm-cell { font-size: 0.9rem; color: #666; word-break: break-all; }
+    .toggle-form { margin: 0; }
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 48px;
+      height: 28px;
+      flex-shrink: 0;
+    }
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      inset: 0;
+      background: #d1d5db;
+      border-radius: 999px;
+      transition: background 0.2s ease;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 22px;
+      width: 22px;
+      left: 3px;
+      bottom: 3px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.2s ease;
+      box-shadow: 0 1px 2px rgb(0 0 0 / 20%);
+    }
+    .switch input:checked + .slider { background: #2563eb; }
+    .switch input:focus-visible + .slider { outline: 2px solid #93c5fd; outline-offset: 2px; }
+    .switch input:checked + .slider:before { transform: translateX(20px); }
+    .switch input:disabled + .slider { opacity: 0.6; cursor: wait; }
+    .updated-at { font-size: 0.85rem; color: #666; white-space: nowrap; }
+    .empty-filter { display: none; padding: 12px 0; color: #666; }
+    @media (max-width: 640px) {
+      body { margin: 16px auto; }
+      th, td { padding: 8px; font-size: 0.95rem; }
+      .updated-at { white-space: normal; }
+    }
+  </style>
+</head>
+<body>
+  <div class="nav" style="margin-bottom: 12px;">
+    <a href="/">Search</a>
+    <a href="/admin/imports">Imports</a>
+    <a href="/admin/quote-templates">Mẫu báo giá</a>
+    <a href="/admin/exchange-rates">Tỷ giá</a>
+    <a href="/admin/network">Mạng / IP</a>
+    <a href="/admin/users">Users</a>
+    <a href="/admin/brand-compliance"><b>Manual compliance</b></a>
+  </div>
+
+  <h1 style="margin-top:0;">Manual compliance theo brand</h1>
+  <p class="muted">
+    Bật để <code>/search</code> ưu tiên <code>manual_compliance</code> trên sản phẩm (nhập qua Excel).
+    Không có dòng trong <code>brand_compliance_settings</code> hoặc toggle tắt = dùng quy tắc legacy.
+  </p>
+
+  {% if message %}<p class="ok">{{ message }}</p>{% endif %}
+  {% if error %}<p class="err">{{ error }}</p>{% endif %}
+
+  <div class="card">
+    <div class="toolbar">
+      <input id="brandFilter" type="search" placeholder="Lọc brand hoặc brand_norm..." aria-label="Lọc brand" />
+      <span class="muted"><strong>{{ enabled_count }}</strong> / <strong>{{ brand_count }}</strong> brand đang bật</span>
+    </div>
+
+    {% if rows %}
+    <div class="table-wrap">
+      <table id="brandTable">
+        <thead>
+          <tr>
+            <th>Brand</th>
+            <th>brand_norm</th>
+            <th>Trạng thái</th>
+            <th>Bật / tắt</th>
+            <th>Cập nhật</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for r in rows %}
+          <tr data-brand="{{ r.brand|lower }}" data-norm="{{ r.brand_norm|lower }}">
+            <td class="brand-cell">{{ r.brand }}</td>
+            <td class="norm-cell"><code>{{ r.brand_norm }}</code></td>
+            <td>
+              {% if r.manual_enabled %}
+                <span class="badge on">Đang bật</span>
+              {% else %}
+                <span class="badge off">Đang tắt</span>
+              {% endif %}
+            </td>
+            <td>
+              <form class="toggle-form" method="post" action="/admin/brand-compliance">
+                <input type="hidden" name="brand_norm" value="{{ r.brand_norm }}" />
+                <input type="hidden" name="action" value="{% if r.manual_enabled %}disable{% else %}enable{% endif %}" />
+                <label class="switch" title="{% if r.manual_enabled %}Tắt{% else %}Bật{% endif %} manual compliance cho {{ r.brand }}">
+                  <input type="checkbox" {% if r.manual_enabled %}checked{% endif %} onchange="this.form.submit(); this.disabled=true;" />
+                  <span class="slider"></span>
+                </label>
+              </form>
+            </td>
+            <td class="updated-at">{% if r.setting_updated_at %}{{ r.setting_updated_at }}{% else %}—{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p id="emptyFilter" class="empty-filter">Không có brand khớp bộ lọc.</p>
+    {% else %}
+    <p class="muted">Chưa có brand nào trong bảng <code>products</code>.</p>
+    {% endif %}
+  </div>
+
+  <script>
+    (function () {
+      const input = document.getElementById('brandFilter');
+      const table = document.getElementById('brandTable');
+      const empty = document.getElementById('emptyFilter');
+      if (!input || !table) return;
+      const rows = Array.from(table.querySelectorAll('tbody tr'));
+      function applyFilter() {
+        const q = (input.value || '').trim().toLowerCase();
+        let visible = 0;
+        rows.forEach((row) => {
+          const match = !q || row.dataset.brand.includes(q) || row.dataset.norm.includes(q);
+          row.style.display = match ? '' : 'none';
+          if (match) visible += 1;
+        });
+        if (empty) empty.style.display = visible === 0 ? 'block' : 'none';
+      }
+      input.addEventListener('input', applyFilter);
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mẫu báo giá — Admin</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
+  <style>
+    :root {
+      --bg: #f1f5f9;
+      --card: #fff;
+      --text: #0f172a;
+      --muted: #64748b;
+      --border: #e2e8f0;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --success: #059669;
+      --danger: #dc2626;
+      --warning: #b45309;
+      --radius: 8px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px 16px 48px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      line-height: 1.5;
+    }
+    .wrap { max-width: 1100px; margin: 0 auto; }
+    header { margin-bottom: 18px; }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 1.5rem;
+      letter-spacing: -0.02em;
+    }
+    .sub { margin: 0; color: var(--muted); font-size: 0.95rem; }
+    .nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      margin-top: 12px;
+      font-size: 0.95rem;
+    }
+    .nav a { color: var(--primary); text-decoration: none; font-weight: 500; }
+    .nav a:hover { text-decoration: underline; }
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 2px rgb(15 23 42 / 5%);
+    }
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+      margin-bottom: 12px;
+    }
+    .panel h2 {
+      margin: 0;
+      font-size: 1.05rem;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .hint { margin: 4px 0 0; color: var(--muted); font-size: 0.9rem; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .badge.active { background: #dcfce7; color: #166534; }
+    .badge.inactive { background: #f1f5f9; color: #475569; }
+    .badge.warn { background: #fef3c7; color: #92400e; }
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px 14px;
+    }
+    .meta-item { min-width: 0; }
+    .meta-label {
+      display: block;
+      color: var(--muted);
+      font-size: 0.76rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 2px;
+    }
+    .meta-value {
+      display: block;
+      min-height: 1.5rem;
+      overflow-wrap: anywhere;
+    }
+    .empty-state {
+      color: var(--muted);
+      border-left: 3px solid var(--border);
+      padding-left: 12px;
+    }
+    .upload-form {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) auto auto;
+      gap: 12px;
+      align-items: end;
+    }
+    label { font-weight: 600; }
+    input[type="file"] {
+      width: 100%;
+      font: inherit;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 8px;
+      background: #fff;
+    }
+    .check {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #334155;
+      white-space: nowrap;
+      min-height: 38px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 38px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+      padding: 8px 12px;
+      white-space: nowrap;
+    }
+    .btn:hover { background: #f8fafc; }
+    .btn-primary {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #fff;
+    }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-danger {
+      background: var(--danger);
+      border-color: var(--danger);
+      color: #fff;
+    }
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+    .icon-btn {
+      width: 38px;
+      padding: 8px;
+    }
+    .upload-status {
+      min-height: 1.4rem;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .upload-status.ok { color: #065f46; }
+    .upload-status.err { color: #991b1b; }
+    .upload-status.loading { color: #1e3a8a; font-weight: 600; }
+    .mapping-grid {
+      display: grid;
+      grid-template-columns: minmax(200px, 0.8fr) minmax(260px, 1.2fr);
+      gap: 12px;
+      align-items: start;
+    }
+    .facts,
+    .mapping-table,
+    .history-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: middle;
+    }
+    th { background: #f8fafc; color: #334155; font-weight: 700; }
+    code {
+      background: #f8fafc;
+      border: 1px solid #e5e7eb;
+      border-radius: 4px;
+      padding: 1px 5px;
+    }
+    .table-wrap {
+      width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .history-table { min-width: 880px; }
+    .filename-cell {
+      max-width: 260px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: nowrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .alert {
+      display: none;
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      margin-bottom: 12px;
+      font-size: 0.92rem;
+    }
+    .alert.ok { display: block; background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+    .alert.err { display: block; background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+    dialog {
+      width: min(440px, calc(100vw - 32px));
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0;
+      color: var(--text);
+      box-shadow: 0 20px 50px rgb(15 23 42 / 20%);
+    }
+    dialog::backdrop { background: rgb(15 23 42 / 45%); }
+    .dialog-body { padding: 18px; }
+    .dialog-body h2 { margin: 0 0 8px; font-size: 1.05rem; }
+    .dialog-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 16px;
+    }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    @media (max-width: 760px) {
+      body { padding: 16px 10px 36px; }
+      .panel { padding: 14px; }
+      .panel-head { flex-direction: column; }
+      .meta-grid { grid-template-columns: 1fr; }
+      .upload-form { grid-template-columns: 1fr; }
+      .check { white-space: normal; }
+      .mapping-grid { grid-template-columns: 1fr; }
+      .filename-cell { max-width: 180px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Mẫu báo giá</h1>
+      <p class="sub">Quản lý phiên bản workbook báo giá do admin upload. Profile hiện tại: <code>BG_V1</code>.</p>
+      <nav class="nav" aria-label="Admin navigation">
+        <a href="/">Search</a>
+        <a href="/admin/imports">Imports</a>
+        <a href="/admin/quote-templates"><b>Mẫu báo giá</b></a>
+        <a href="/admin/exchange-rates">Tỷ giá</a>
+        <a href="/admin/network">Mạng / IP</a>
+        <a href="/admin/users">Users</a>
+        <a href="/admin/brand-compliance">Manual compliance</a>
+      </nav>
+    </header>
+
+    <div id="qtPageAlert" class="alert" role="status" aria-live="polite"></div>
+
+    <section class="panel" aria-labelledby="qtActiveTitle">
+      <div class="panel-head">
+        <div>
+          <h2 id="qtActiveTitle"><i class="fas fa-check-circle" aria-hidden="true"></i> Mẫu đang sử dụng</h2>
+          <p class="hint">Template active được dùng cho workflow export ở phase tiếp theo.</p>
+        </div>
+        <span id="qtActiveBadge" class="badge inactive" data-active-label="Đang sử dụng">Chưa có mẫu</span>
+      </div>
+      <div id="qtEmptyActive" class="empty-state">
+        <strong>Chưa có mẫu báo giá.</strong>
+        <div>Upload mẫu <code>.xlsx</code> đầu tiên và giữ tùy chọn kích hoạt để bắt đầu quản lý phiên bản.</div>
+      </div>
+      <div id="qtActiveMeta" class="meta-grid" hidden>
+        <div class="meta-item"><span class="meta-label">Filename</span><span id="qtActiveFilename" class="meta-value"></span></div>
+        <div class="meta-item"><span class="meta-label">Profile</span><span id="qtActiveProfile" class="meta-value"></span></div>
+        <div class="meta-item"><span class="meta-label">Dung lượng</span><span id="qtActiveSize" class="meta-value"></span></div>
+        <div class="meta-item"><span class="meta-label">Ngày upload</span><span id="qtActiveCreated" class="meta-value"></span></div>
+        <div class="meta-item"><span class="meta-label">Ngày kích hoạt</span><span id="qtActiveActivated" class="meta-value"></span></div>
+        <div class="meta-item"><span class="meta-label">Người upload</span><span id="qtActiveUploader" class="meta-value"></span></div>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="qtUploadTitle">
+      <div class="panel-head">
+        <div>
+          <h2 id="qtUploadTitle"><i class="fas fa-upload" aria-hidden="true"></i> Upload phiên bản mới</h2>
+          <p class="hint">Chỉ nhận Excel Workbook <code>.xlsx</code>, tối đa 10 MB. Backend tự kiểm tra và gán <code>BG_V1</code>.</p>
+        </div>
+      </div>
+      <form id="qtUploadForm" class="upload-form" enctype="multipart/form-data" novalidate>
+        <div>
+          <label for="qtWorkbook">File mẫu báo giá</label>
+          <input id="qtWorkbook" name="workbook" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+        </div>
+        <label class="check" for="qtActivate">
+          <input id="qtActivate" name="activate" type="checkbox" checked />
+          Kích hoạt ngay sau khi upload
+        </label>
+        <button id="qtUploadBtn" type="submit" class="btn btn-primary">
+          <i class="fas fa-upload" aria-hidden="true"></i>
+          <span>Tải lên</span>
+        </button>
+      </form>
+      <div id="qtUploadStatus" class="upload-status">Chưa chọn file.</div>
+    </section>
+
+    <section class="panel" aria-labelledby="qtMappingTitle">
+      <div class="panel-head">
+        <div>
+          <h2 id="qtMappingTitle"><i class="fas fa-map" aria-hidden="true"></i> Mapping được kiểm tra</h2>
+          <p class="hint">Profile cố định <code>BG_V1</code>, chưa phải mapping tùy chỉnh.</p>
+        </div>
+        <span class="badge warn">Read-only</span>
+      </div>
+      <div class="mapping-grid">
+        <table class="facts" aria-label="BG_V1 facts">
+          <tbody>
+            <tr><th>Sheet</th><td><code>BG</code></td></tr>
+            <tr><th>Header row</th><td><code>16</code></td></tr>
+            <tr><th>Data start row</th><td><code>17</code></td></tr>
+            <tr><th>Footer label</th><td><code>Tổng giá</code></td></tr>
+          </tbody>
+        </table>
+        <div class="table-wrap">
+          <table class="mapping-table" aria-label="BG_V1 column mapping">
+            <thead><tr><th>Cột</th><th>Trường</th></tr></thead>
+            <tbody>
+              <tr><td><code>A</code></td><td>STT</td></tr>
+              <tr><td><code>B</code></td><td>Name</td></tr>
+              <tr><td><code>C</code></td><td>Code</td></tr>
+              <tr><td><code>D</code></td><td>CAS</td></tr>
+              <tr><td><code>E</code></td><td>Brand</td></tr>
+              <tr><td><code>F</code></td><td>Size</td></tr>
+              <tr><td><code>M</code></td><td>Note</td></tr>
+              <tr><td><code>N</code></td><td>Compliance + Compliance Note</td></tr>
+              <tr><td><code>P</code></td><td>Unit Price</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="qtHistoryTitle">
+      <div class="panel-head">
+        <div>
+          <h2 id="qtHistoryTitle"><i class="fas fa-history" aria-hidden="true"></i> Lịch sử phiên bản</h2>
+          <p class="hint">Có thể tải lại file hoặc kích hoạt phiên bản cũ để rollback.</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="qtHistoryTable" class="history-table">
+          <thead>
+            <tr>
+              <th>ID/phiên bản</th>
+              <th>Filename</th>
+              <th>Profile</th>
+              <th>Dung lượng</th>
+              <th>Người upload</th>
+              <th>Ngày upload</th>
+              <th>Trạng thái</th>
+              <th>Thao tác</th>
+            </tr>
+          </thead>
+          <tbody id="qtHistoryBody">
+            <tr><td colspan="8">Đang tải lịch sử...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <dialog id="qtActivateDialog" aria-labelledby="qtActivateDialogTitle">
+    <div class="dialog-body">
+      <h2 id="qtActivateDialogTitle">Kích hoạt phiên bản này?</h2>
+      <p id="qtActivateDialogText">Template được chọn sẽ thay thế mẫu đang sử dụng.</p>
+      <div class="dialog-actions">
+        <button id="qtActivateCancel" type="button" class="btn">Hủy</button>
+        <button id="qtActivateConfirm" type="button" class="btn btn-primary">Kích hoạt</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="{{ url_for('static', filename='admin_quote_templates.js', v='20260827a') }}"></script>
+</body>
+</html>

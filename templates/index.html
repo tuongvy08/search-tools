@@ -2,9 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Product Search</title>
     <!-- Include stylesheets -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260706a') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260829b') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -14,6 +15,7 @@
         <button class="nav-button" id="btnCheckLicense" type="button">Check license</button>
         <button class="nav-button" id="btnFindCode" type="button">Find Code</button>
         <button class="nav-button" id="btnAdvancedSearch" type="button">Advanced Search</button>
+        <a class="nav-button nav-button-link" href="{{ url_for('quick_quote') }}">Quick Quote</a>
         <button class="nav-button btn-export" id="btnCopySelected" type="button"
                 title="Sao chép các dòng đã chọn (dán vào Excel/Google Sheet bằng Ctrl/Cmd+V)"
                 aria-label="Copy Selected">
@@ -89,6 +91,7 @@
         </div>
     </div>
 
+    <div class="results-table-wrap">
     <table id="results">
         <thead>
             <tr>
@@ -103,14 +106,16 @@
                 <th>Unit_Price</th>
                 <th>Note</th>
                 <th>Compliance</th>
+                <th>Compliance Note</th>
             </tr>
         </thead>
         <tbody>
         </tbody>
     </table>
+    </div>
 
     <!-- Include necessary scripts -->
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>    
-    <script src="{{ url_for('static', filename='script.js', v='20260706a') }}"></script>
+    <script src="{{ url_for('static', filename='script.js', v='20260827f') }}"></script>
 </body>
 </html>

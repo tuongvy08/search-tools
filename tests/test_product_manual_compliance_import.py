@@ -14,6 +14,7 @@ from openpyxl import Workbook
 load_dotenv(dotenv_path=".env")
 
 import search  # noqa: E402
+from auth_test_helpers import auth_db_patch  # noqa: E402
 from product_import_manual import (  # noqa: E402
     HEADER_COMPLIANCE,
     HEADER_MODE_ABSENT,
@@ -799,16 +800,21 @@ class ManualComplianceImportIntegrationTests(unittest.TestCase):
         with search.app.test_client() as client:
             with client.session_transaction() as sess:
                 sess["authenticated"] = True
+                sess["user_id"] = 1
+                sess["auth_version"] = 1
                 sess["is_admin"] = True
-            response = client.post(
-                "/admin/imports/preview",
-                data={
-                    "dataset": "products",
-                    "mode": "upsert",
-                    "file": (bio, "partial.xlsx"),
-                },
-                content_type="multipart/form-data",
-            )
+            # Phase 5D2A: stub the per-request session-liveness DB check
+            # with an in-memory fake (no real Postgres touched).
+            with auth_db_patch(user_id=1, auth_version=1):
+                response = client.post(
+                    "/admin/imports/preview",
+                    data={
+                        "dataset": "products",
+                        "mode": "upsert",
+                        "file": (bio, "partial.xlsx"),
+                    },
+                    content_type="multipart/form-data",
+                )
         self.assertEqual(response.status_code, 302)
         self.assertIn("Compliance_Note", response.headers.get("Location", ""))
 

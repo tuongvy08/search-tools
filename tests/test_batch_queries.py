@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=".env")
 
 import search  # noqa: E402
+from auth_test_helpers import start_auth_db_patch  # noqa: E402
 
 
 def _local_dsn():
@@ -101,6 +102,14 @@ class BatchQueryRegressionTests(unittest.TestCase):
             cls._cleanup_fixture()
         finally:
             cls.conn.close()
+
+    def setUp(self):
+        # Phase 5D2A: `enforce_session_validity` needs `user_id` + a
+        # matching `auth_version`; stub the DB it checks with an in-memory
+        # fake (never touches `products_local`/real Postgres) so this real
+        # DB test class's business-logic queries -- recorded via
+        # `RecordingConnection` -- stay isolated from the auth check.
+        start_auth_db_patch(self)
 
     @classmethod
     def _ensure_schema(cls):
@@ -262,6 +271,8 @@ class BatchQueryRegressionTests(unittest.TestCase):
             with search.app.test_client() as client:
                 with client.session_transaction() as sess:
                     sess["authenticated"] = True
+                    sess["user_id"] = 1
+                    sess["auth_version"] = 1
                     sess["is_admin"] = is_admin
                     if team_id is not None:
                         sess["team_id"] = team_id

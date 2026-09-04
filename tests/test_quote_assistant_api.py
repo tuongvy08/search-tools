@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=".env")
 
 import search  # noqa: E402
+from auth_test_helpers import auth_db_patch, start_auth_db_patch  # noqa: E402
 
 
 def _local_dsn():
@@ -36,12 +37,15 @@ class QuoteAssistantUnitTests(unittest.TestCase):
         with search.app.test_client() as client:
             with client.session_transaction() as sess:
                 sess["authenticated"] = True
+                sess["user_id"] = 1
+                sess["auth_version"] = 1
                 sess["is_admin"] = False
                 sess["team_id"] = 123
-            response = client.post(
-                "/api/quote-assistant/match",
-                json={"rows": [{"requested_name": "Display only"}]},
-            )
+            with auth_db_patch(user_id=1, auth_version=1):
+                response = client.post(
+                    "/api/quote-assistant/match",
+                    json={"rows": [{"requested_name": "Display only"}]},
+                )
         self.assertEqual(response.status_code, 200)
         data = response.get_json()
         self.assertEqual(data["row_count"], 1)
@@ -165,6 +169,15 @@ class QuoteAssistantApiTests(unittest.TestCase):
         cls.conn.autocommit = True
         cls._ensure_schema()
         cls._reset_fixture()
+
+    def setUp(self):
+        # Phase 5D2A: every authenticated session now needs a `user_id` +
+        # `auth_version` matching an ACTIVE `app_users` row. This class's
+        # sessions are all local, throwaway `is_admin`/`team_id` fixtures --
+        # not real accounts -- so a single permissive in-memory fake (never
+        # touching real Postgres/`products_local`) stands in for that
+        # per-request check across every test in this class.
+        start_auth_db_patch(self)
 
     @classmethod
     def tearDownClass(cls):
@@ -329,10 +342,12 @@ class QuoteAssistantApiTests(unittest.TestCase):
                 if authenticated:
                     with client.session_transaction() as sess:
                         sess["authenticated"] = True
+                        sess["user_id"] = 1
+                        sess["auth_version"] = 1
                         sess["is_admin"] = is_admin
                         if team_id is not None:
                             sess["team_id"] = team_id
-                response = client.post("/api/quote-assistant/match", json=payload)
+            response = client.post("/api/quote-assistant/match", json=payload)
         return response, recorder
 
     def test_auth_and_payload_limits(self):
@@ -830,6 +845,7 @@ class QuoteAssistantApiTests(unittest.TestCase):
                 sess["authenticated"] = True
                 sess["username"] = "admin"
                 sess["user_id"] = 1
+                sess["auth_version"] = 1
                 sess["is_admin"] = True
 
             payload = {
@@ -887,6 +903,7 @@ class QuoteAssistantApiTests(unittest.TestCase):
                 sess["authenticated"] = True
                 sess["username"] = "user"
                 sess["user_id"] = 2
+                sess["auth_version"] = 1
                 sess["is_admin"] = False
                 sess["team_id"] = self.team_id
 

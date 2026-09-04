@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import search  # noqa: E402
+from auth_test_helpers import start_auth_db_patch  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 QUICK_QUOTE_HTML = ROOT / "templates" / "quick_quote.html"
@@ -1122,10 +1123,15 @@ class QuickQuoteRouteTests(unittest.TestCase):
     def setUp(self):
         search.app.testing = True
         self.client = search.app.test_client()
+        # Phase 5D2A: stub the per-request session-liveness DB check with an
+        # in-memory fake (no real Postgres touched) for every test here.
+        start_auth_db_patch(self)
 
     def _auth(self, admin=True):
         with self.client.session_transaction() as sess:
             sess["authenticated"] = True
+            sess["user_id"] = 1
+            sess["auth_version"] = 1
             sess["is_admin"] = admin
             if not admin:
                 sess["team_id"] = 1

@@ -9,6 +9,7 @@ from xml.etree import ElementTree as ET
 
 import search
 import quote_workbook_export as qwe
+from auth_test_helpers import start_auth_db_patch
 
 
 NS = {"m": qwe.NS_MAIN}
@@ -490,6 +491,14 @@ class RealTemplateExportTests(unittest.TestCase):
             cls.raw = fh.read()
         cls.before = _zip_entries(cls.raw)
 
+    def setUp(self):
+        # Phase 5D2A: `enforce_session_validity` now needs a `user_id` +
+        # `auth_version` matching an ACTIVE `app_users` row for any
+        # authenticated session; stub that check with an in-memory fake
+        # (never touches real Postgres) so this class's one HTTP-level test
+        # keeps exercising the real export code path end to end.
+        start_auth_db_patch(self)
+
     def _export(self, count):
         return qwe.export_quick_quote_workbook(self.raw, [product(i) for i in range(1, count + 1)])
 
@@ -551,6 +560,8 @@ class RealTemplateExportTests(unittest.TestCase):
         client = search.app.test_client()
         with client.session_transaction() as sess:
             sess["authenticated"] = True
+            sess["user_id"] = 1
+            sess["auth_version"] = 1
             sess["is_admin"] = False
             sess["team_id"] = 7
         with patch.object(
@@ -625,6 +636,9 @@ class FakeConnection:
 
 
 class QuoteWorkbookExportApiTests(unittest.TestCase):
+    def setUp(self):
+        start_auth_db_patch(self)
+
     def _post(self, rows, selections, *, authenticated=True, is_admin=True, team_id=1):
         fake_conn = FakeConnection(rows)
         search.app.testing = True
@@ -635,6 +649,8 @@ class QuoteWorkbookExportApiTests(unittest.TestCase):
                 if authenticated:
                     with client.session_transaction() as sess:
                         sess["authenticated"] = True
+                        sess["user_id"] = 1
+                        sess["auth_version"] = 1
                         sess["is_admin"] = is_admin
                         if team_id is not None:
                             sess["team_id"] = team_id
@@ -694,6 +710,9 @@ def _export_items_payload(items):
 class QuoteWorkbookExportV2ApiTests(unittest.TestCase):
     """Phase 1 export_items v2: identity-preserving, re-fetched, sorted, STT labels."""
 
+    def setUp(self):
+        start_auth_db_patch(self)
+
     def _post_items(self, rows, items, *, authenticated=True, is_admin=True, team_id=1, include_selections=False):
         fake_conn = FakeConnection(rows)
         search.app.testing = True
@@ -704,6 +723,8 @@ class QuoteWorkbookExportV2ApiTests(unittest.TestCase):
                 if authenticated:
                     with client.session_transaction() as sess:
                         sess["authenticated"] = True
+                        sess["user_id"] = 1
+                        sess["auth_version"] = 1
                         sess["is_admin"] = is_admin
                         if team_id is not None:
                             sess["team_id"] = team_id
@@ -1031,6 +1052,8 @@ class QuoteWorkbookExportV2ApiTests(unittest.TestCase):
             with search.app.test_client() as client:
                 with client.session_transaction() as sess:
                     sess["authenticated"] = True
+                    sess["user_id"] = 1
+                    sess["auth_version"] = 1
                     sess["is_admin"] = True
                     sess["team_id"] = 1
                 response = client.post(
@@ -1063,6 +1086,8 @@ class QuoteWorkbookExportV2ApiTests(unittest.TestCase):
             with search.app.test_client() as client:
                 with client.session_transaction() as sess:
                     sess["authenticated"] = True
+                    sess["user_id"] = 1
+                    sess["auth_version"] = 1
                     sess["is_admin"] = True
                     sess["team_id"] = 1
                 response = client.post(

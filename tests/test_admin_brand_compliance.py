@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=".env")
 
 import search  # noqa: E402
+from auth_test_helpers import start_auth_db_patch  # noqa: E402
 from search import _BRAND_COMPLIANCE_LIST_SQL  # noqa: E402
 
 
@@ -117,6 +118,9 @@ class AdminBrandComplianceTests(unittest.TestCase):
     def setUp(self):
         self._cleanup_fixture()
         self._reset_fixture()
+        # Phase 5D2A: stub the per-request session-liveness DB check with an
+        # in-memory fake (no real Postgres touched) for every test here.
+        start_auth_db_patch(self)
 
     def tearDown(self):
         self._cleanup_fixture()
@@ -127,6 +131,8 @@ class AdminBrandComplianceTests(unittest.TestCase):
         if authenticated:
             with client.session_transaction() as sess:
                 sess["authenticated"] = True
+                sess["user_id"] = 1
+                sess["auth_version"] = 1
                 sess["is_admin"] = is_admin
         return client
 

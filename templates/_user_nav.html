@@ -1,0 +1,65 @@
+{% if session.get('authenticated') %}
+<div class="sq-user-nav">
+  <div class="sq-user-nav-who">
+    <span class="sq-user-nav-name">{{ session.get('username') or 'Người dùng' }}</span>
+    <span class="sq-user-nav-role">{{ session.get('role') or 'user' }}</span>
+  </div>
+  <nav class="sq-user-nav-links">
+    <a href="{{ url_for('home') }}">Search</a>
+    <a href="{{ url_for('quick_quote') }}">Quick Quote</a>
+    {% if session.get('is_admin') %}
+    <a href="{{ url_for('admin_imports') }}">Quản trị</a>
+    <a href="{{ url_for('admin_quote_templates_page') }}">Mẫu báo giá</a>
+    <a href="{{ url_for('admin_users') }}">Người dùng</a>
+    <a href="{{ url_for('admin_login_history.index') }}">Lịch sử đăng nhập</a>
+    {% endif %}
+  </nav>
+  <form method="post" action="{{ url_for('session_security.logout') }}" class="sq-user-nav-logout">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit">Đăng xuất</button>
+  </form>
+</div>
+<style>
+  .sq-user-nav {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    background: #0f172a;
+    color: #e2e8f0;
+    padding: 8px 16px;
+    font-family: system-ui, sans-serif;
+    font-size: 0.85rem;
+    box-sizing: border-box;
+  }
+  .sq-user-nav-who { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .sq-user-nav-name { font-weight: 600; word-break: break-all; }
+  .sq-user-nav-role {
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+    background: #1e293b;
+    padding: 2px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .sq-user-nav-links { display: flex; flex-wrap: wrap; gap: 10px; margin-left: auto; }
+  .sq-user-nav-links a { color: #93c5fd; text-decoration: none; }
+  .sq-user-nav-links a:hover { text-decoration: underline; }
+  .sq-user-nav-logout { margin: 0; }
+  .sq-user-nav-logout button {
+    background: transparent;
+    color: #fca5a5;
+    border: 1px solid #7f1d1d;
+    border-radius: 6px;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .sq-user-nav-logout button:hover { background: #7f1d1d; color: #fff; }
+  @media (max-width: 480px) {
+    .sq-user-nav { justify-content: flex-start; }
+    .sq-user-nav-links { margin-left: 0; }
+  }
+</style>
+{% endif %}

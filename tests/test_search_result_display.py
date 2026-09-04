@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=".env")
 
 import search  # noqa: E402
+from auth_test_helpers import start_auth_db_patch  # noqa: E402
 from compliance_resolver import resolve_compliance_precedence  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -378,6 +379,9 @@ class SearchDisplayIntegrationTests(unittest.TestCase):
 
     def setUp(self):
         self._reset_fixture()
+        # Phase 5D2A: stub the per-request session-liveness DB check with an
+        # in-memory fake (no real Postgres touched) for every test here.
+        start_auth_db_patch(self)
 
     def tearDown(self):
         self._cleanup_fixture()
@@ -387,6 +391,8 @@ class SearchDisplayIntegrationTests(unittest.TestCase):
         with search.app.test_client() as client:
             with client.session_transaction() as sess:
                 sess["authenticated"] = True
+                sess["user_id"] = 1
+                sess["auth_version"] = 1
                 sess["is_admin"] = True
             response = client.get("/search", query_string={"query": self.CODE})
         self.assertEqual(response.status_code, 200)

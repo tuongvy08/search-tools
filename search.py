@@ -19,6 +19,12 @@ from psycopg2 import Binary, IntegrityError
 from psycopg2.errors import UndefinedTable
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from werkzeug.middleware.proxy_fix import ProxyFix
+
+import admin_google_users
+import admin_login_history
+import auth_google
+import session_security
 from compliance_resolver import compliance_css_type, resolve_compliance_precedence
 from db import get_connection
 from middleware_access import register_ip_access_control
@@ -38,10 +44,44 @@ load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-only-change-me")
+
+app.secret_key = os.environ.get("FLASK_SECRET_KEY")
+if not app.secret_key:
+    raise RuntimeError(
+        "FLASK_SECRET_KEY environment variable is required (no default is provided)."
+    )
+
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=auth_google.strict_bool_env("SESSION_COOKIE_SECURE", False),
+)
+
+# Gunicorn binds to loopback behind exactly one Nginx hop in this deployment;
+# only trust one hop for each forwarded header (never an arbitrary count).
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=0)
 
 base_path = os.environ.get("ACCESS_CONTROL_BASE_PATH", "/home/deploy/myapps")
 register_ip_access_control(app, base_path=base_path)
+
+# Registers /auth/google + /auth/google/callback. No-op (no secrets/network)
+# unless GOOGLE_AUTH_ENABLED=true; raises at startup if enabled+misconfigured.
+auth_google.init_app(app)
+
+# Registers POST /logout + the per-request session-liveness check (Phase
+# 5D2A): revoked/suspended/deleted accounts and bumped auth_version are
+# rejected on the very next request, not just at next login.
+session_security.init_app(app)
+
+# Registers the POST /admin/users/google/* actions (Phase 5D2B): approve /
+# invite / suspend / reactivate / revoke-sessions for Google Workspace
+# accounts. The GET page itself stays on admin_users() below (same
+# /admin/users route as the existing LOCAL/legacy user management).
+app.register_blueprint(admin_google_users.admin_google_users_bp)
+
+# Registers GET /admin/login-history (Phase 5D3): read-only admin screen
+# over `login_audit_events`. Admin-only; never writes anything.
+app.register_blueprint(admin_login_history.admin_login_history_bp)
 
 
 @app.after_request
@@ -57,8 +97,14 @@ def _static_no_cache_js_css(response):
     return response
 
 
-MANAGER_PASSWORD = os.environ.get("APP_PASSWORD_MANAGER", "Truong@2004")
-STAFF_PASSWORD = os.environ.get("APP_PASSWORD_STAFF", "Truong@123")
+ENABLE_LEGACY_PASSWORD_LOGIN = auth_google.strict_bool_env("ENABLE_LEGACY_PASSWORD_LOGIN", False)
+MANAGER_PASSWORD = os.environ.get("APP_PASSWORD_MANAGER", "")
+STAFF_PASSWORD = os.environ.get("APP_PASSWORD_STAFF", "")
+if ENABLE_LEGACY_PASSWORD_LOGIN and not (MANAGER_PASSWORD and STAFF_PASSWORD):
+    raise RuntimeError(
+        "ENABLE_LEGACY_PASSWORD_LOGIN=true requires BOTH APP_PASSWORD_MANAGER and "
+        "APP_PASSWORD_STAFF to be set explicitly (no defaults)."
+    )
 
 IMPORT_PREVIEWS = {}
 
@@ -2304,15 +2350,16 @@ def login():
             try:
                 with conn.cursor() as cur:
                     cur.execute(
-                        "SELECT id, password_hash, team_id, is_admin, ip_bypass_allowlist "
-                        "FROM app_users WHERE username = %s",
+                        "SELECT id, password_hash, team_id, is_admin, ip_bypass_allowlist, "
+                        "account_status, auth_version "
+                        "FROM app_users WHERE username = %s AND auth_provider = 'LOCAL'",
                         (username,),
                     )
                     row = cur.fetchone()
             finally:
                 conn.close()
 
-            if row and check_password_hash(row[1], password):
+            if row and row[1] and check_password_hash(row[1], password) and row[5] == "ACTIVE":
                 session.clear()
                 session["authenticated"] = True
                 session["username"] = username
@@ -2321,10 +2368,12 @@ def login():
                 session["is_admin"] = bool(row[3])
                 session["ip_bypass_allowlist"] = bool(row[4])
                 session["role"] = "admin" if row[3] else "user"
+                session["auth_provider"] = "LOCAL"
+                session["auth_version"] = row[6]
                 return redirect(url_for("home"))
-            return render_template("login.html", error="Sai tên đăng nhập hoặc mật khẩu."), 401
+            return render_template("login.html", error="Sai tên đăng nhập hoặc mật khẩu.", google_auth_enabled=auth_google.google_auth_enabled()), 401
 
-        if password == MANAGER_PASSWORD:
+        if ENABLE_LEGACY_PASSWORD_LOGIN and MANAGER_PASSWORD and password == MANAGER_PASSWORD:
             session.clear()
             session["authenticated"] = True
             session["username"] = "__legacy_manager__"
@@ -2332,7 +2381,7 @@ def login():
             session["ip_bypass_allowlist"] = False
             session["role"] = "manager"
             return redirect(url_for("home"))
-        if password == STAFF_PASSWORD:
+        if ENABLE_LEGACY_PASSWORD_LOGIN and STAFF_PASSWORD and password == STAFF_PASSWORD:
             session.clear()
             session["authenticated"] = True
             session["username"] = "__legacy_staff__"
@@ -2342,9 +2391,13 @@ def login():
             session["team_id"] = team_id
             session["role"] = "staff"
             return redirect(url_for("home"))
-        return render_template("login.html", error="Sai mật khẩu."), 403
+        return render_template("login.html", error="Sai mật khẩu.", google_auth_enabled=auth_google.google_auth_enabled()), 403
 
-    return render_template("login.html")
+    return render_template(
+        "login.html",
+        error=session_security.pop_login_notice(),
+        google_auth_enabled=auth_google.google_auth_enabled(),
+    )
 
 
 @app.route("/")
@@ -3563,6 +3616,11 @@ def admin_users():
     msg = err = None
 
     if request.method == "POST":
+        # Phase 5D2B.1: every legacy mutation here must be CSRF-checked
+        # server-side, same as the newer Google-account actions.
+        if not session_security.verify_csrf_token(request.form.get("csrf_token", "")):
+            return "Yêu cầu không hợp lệ.", 400
+
         action = (request.form.get("action") or "").strip()
 
         if action == "create_user":
@@ -3589,16 +3647,34 @@ def admin_users():
                 try:
                     with conn:
                         with conn.cursor() as cur:
+                            # Phase 5D2B Final: every admin user-management
+                            # mutation (this file + admin_google_users.py)
+                            # now uniformly acquires the shared advisory
+                            # lock and revalidates the ACTING admin's own
+                            # DB row FIRST, before reading/locking any
+                            # target row -- see acquire_last_admin_lock's
+                            # and revalidate_actor's docstrings for why.
+                            admin_google_users.acquire_last_admin_lock(cur)
+                            admin_google_users.revalidate_actor(
+                                cur, session.get("user_id"), session.get("auth_version")
+                            )
+
                             cur.execute("SELECT id FROM app_users WHERE username = %s", (username,))
                             if cur.fetchone():
                                 raise ValueError(f"Username đã tồn tại: {username}")
 
                             password_hash = generate_password_hash(password)
                             if is_admin:
+                                # auth_provider/account_status set EXPLICITLY
+                                # (not just relying on column DEFAULTs) --
+                                # this legacy form only ever creates LOCAL,
+                                # already-ACTIVE accounts.
                                 cur.execute(
                                     """
-                                    INSERT INTO app_users (username, password_hash, team_id, is_admin, ip_bypass_allowlist)
-                                    VALUES (%s, %s, NULL, TRUE, %s)
+                                    INSERT INTO app_users
+                                        (username, password_hash, team_id, is_admin, ip_bypass_allowlist,
+                                         auth_provider, account_status)
+                                    VALUES (%s, %s, NULL, TRUE, %s, 'LOCAL', 'ACTIVE')
                                     """,
                                     (username, password_hash, ip_bypass_allowlist),
                                 )
@@ -3616,8 +3692,10 @@ def admin_users():
                                 team_id = cur.fetchone()[0]
                                 cur.execute(
                                     """
-                                    INSERT INTO app_users (username, password_hash, team_id, is_admin, ip_bypass_allowlist)
-                                    VALUES (%s, %s, %s, FALSE, %s)
+                                    INSERT INTO app_users
+                                        (username, password_hash, team_id, is_admin, ip_bypass_allowlist,
+                                         auth_provider, account_status)
+                                    VALUES (%s, %s, %s, FALSE, %s, 'LOCAL', 'ACTIVE')
                                     """,
                                     (username, password_hash, team_id, ip_bypass_allowlist),
                                 )
@@ -3655,12 +3733,57 @@ def admin_users():
 
                     with conn:
                         with conn.cursor() as cur:
-                            cur.execute("SELECT username, team_id, is_admin FROM app_users WHERE id = %s", (user_id,))
+                            # Phase 5D2B.1: consistent global lock order with
+                            # admin_google_users.suspend() -- acquired
+                            # unconditionally, before any per-row lock, by
+                            # every path that could reduce the ACTIVE-admin
+                            # count. See _LAST_ADMIN_LOCK_KEY there.
+                            admin_google_users.acquire_last_admin_lock(cur)
+                            # Phase 5D2B.2: re-read the ACTING admin's own
+                            # row fresh, after the lock, in case they were
+                            # suspended/demoted/revoked by someone else
+                            # while this request was waiting for the lock.
+                            admin_google_users.revalidate_actor(
+                                cur, session.get("user_id"), session.get("auth_version")
+                            )
+
+                            # This legacy form can only ever target a LOCAL
+                            # account: a GOOGLE account id (real or a forged
+                            # hidden-field value) simply will not match this
+                            # WHERE clause and is treated identically to "no
+                            # such user" below. This form also never reads
+                            # or writes auth_provider, google_sub,
+                            # account_status, or is_break_glass -- those
+                            # columns are exclusively managed by
+                            # admin_google_users.py's own validated actions.
+                            cur.execute(
+                                "SELECT username, team_id, is_admin FROM app_users "
+                                "WHERE id = %s AND auth_provider = 'LOCAL' FOR UPDATE",
+                                (user_id,),
+                            )
                             row = cur.fetchone()
                             if not row:
                                 raise ValueError("Không tìm thấy user.")
 
-                            username, team_id, _old_is_admin = row
+                            username, team_id, old_is_admin = row
+                            demoting = bool(old_is_admin) and not set_is_admin
+
+                            if demoting and user_id == session.get("user_id"):
+                                raise ValueError("Không thể tự hạ quyền admin của chính mình.")
+
+                            if demoting:
+                                # Same invariant admin_google_users.suspend()
+                                # enforces, checked AFTER the advisory lock
+                                # above -- counts across the whole system
+                                # (LOCAL + GOOGLE), not just this table.
+                                cur.execute(
+                                    "SELECT COUNT(*) FROM app_users "
+                                    "WHERE is_admin = TRUE AND account_status = 'ACTIVE' AND id <> %s",
+                                    (user_id,),
+                                )
+                                (other_active_admins,) = cur.fetchone()
+                                if other_active_admins == 0:
+                                    raise ValueError("Không thể hạ quyền admin đang hoạt động cuối cùng.")
 
                             if password.strip():
                                 cur.execute(
@@ -3670,7 +3793,8 @@ def admin_users():
 
                             if set_is_admin:
                                 cur.execute(
-                                    "UPDATE app_users SET is_admin = TRUE, team_id = NULL, ip_bypass_allowlist = %s WHERE id = %s",
+                                    "UPDATE app_users SET is_admin = TRUE, team_id = NULL, "
+                                    "ip_bypass_allowlist = %s, auth_version = auth_version + 1 WHERE id = %s",
                                     (set_ip_bypass_allowlist, user_id),
                                 )
                             else:
@@ -3689,7 +3813,8 @@ def admin_users():
                                     team_id = cur.fetchone()[0]
 
                                 cur.execute(
-                                    "UPDATE app_users SET is_admin = FALSE, team_id = %s, ip_bypass_allowlist = %s WHERE id = %s",
+                                    "UPDATE app_users SET is_admin = FALSE, team_id = %s, "
+                                    "ip_bypass_allowlist = %s, auth_version = auth_version + 1 WHERE id = %s",
                                     (team_id, set_ip_bypass_allowlist, user_id),
                                 )
 
@@ -3725,6 +3850,7 @@ def admin_users():
                 SELECT a.id, a.username, a.is_admin, a.team_id, t.name, a.ip_bypass_allowlist
                 FROM app_users a
                 LEFT JOIN teams t ON t.id = a.team_id
+                WHERE a.auth_provider = 'LOCAL'
                 ORDER BY a.id DESC
                 """
             )
@@ -3758,17 +3884,32 @@ def admin_users():
             cur.execute("SELECT DISTINCT brand FROM products ORDER BY brand")
             distinct_brands = [r[0] for r in cur.fetchall() if r[0] is not None]
 
+        # Phase 5D2B: Google Workspace account lifecycle section (same
+        # connection, no extra round-trip). Never includes google_sub,
+        # password_hash, or audit rows.
+        with conn.cursor() as cur:
+            google_users, google_teams = admin_google_users.fetch_google_admin_context(cur)
+
     except Exception as e:
         users = []
         distinct_brands = []
+        google_users = []
+        google_teams = []
         err = str(e)
     finally:
         conn.close()
+
+    google_allowed_domains = sorted(
+        auth_google.parse_allowed_domains(os.environ.get("GOOGLE_WORKSPACE_ALLOWED_DOMAINS", ""))
+    )
 
     return render_template(
         "admin_users.html",
         users=users,
         distinct_brands=distinct_brands,
+        google_users=google_users,
+        google_teams=google_teams,
+        google_allowed_domains=google_allowed_domains,
         message=msg or request.args.get("msg"),
         error=err or request.args.get("err"),
     )

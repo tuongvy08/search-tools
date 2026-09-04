@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import search
+from auth_test_helpers import start_auth_db_patch
 from quote_workbook_export import WorkbookExportError
 try:
     from tests.test_quote_workbook_export import make_workbook, product
@@ -266,10 +267,16 @@ class QuoteTemplateAdminApiTests(unittest.TestCase):
     def setUp(self):
         search.app.testing = True
         self.client = search.app.test_client()
+        # Phase 5D2A: `enforce_session_validity` needs `user_id` + matching
+        # `auth_version`; stub the DB it checks with an in-memory fake (no
+        # real Postgres touched) for every test in this class.
+        start_auth_db_patch(self)
 
     def _auth(self, admin=True):
         with self.client.session_transaction() as sess:
             sess["authenticated"] = True
+            sess["user_id"] = 1
+            sess["auth_version"] = 1
             sess["is_admin"] = admin
             sess["role"] = "admin" if admin else "user"
             if not admin:
@@ -294,7 +301,12 @@ class QuoteTemplateAdminApiTests(unittest.TestCase):
         self.assertEqual(data["filename"], "From_BG_V2.xlsx")
         self.assertTrue(data["is_active"])
         self.assertEqual(data["profile_version"], "BG_V1")
-        self.assertEqual(conn.templates[0]["uploaded_by"], "admin")
+        # Phase 5D2A: a real session always carries `user_id`, so
+        # `_current_actor()` now attributes uploads to `user:<id>` (more
+        # precise than the old role-string fallback, which only ever
+        # applies to anonymous/legacy break-glass sessions without a
+        # `user_id`).
+        self.assertEqual(conn.templates[0]["uploaded_by"], "user:1")
 
     def test_invalid_uploads_rejected_before_db_write(self):
         self._auth(admin=True)
@@ -386,8 +398,11 @@ class QuoteTemplateAssistantApiTests(unittest.TestCase):
     def setUp(self):
         search.app.testing = True
         self.client = search.app.test_client()
+        start_auth_db_patch(self)
         with self.client.session_transaction() as sess:
             sess["authenticated"] = True
+            sess["user_id"] = 1
+            sess["auth_version"] = 1
             sess["is_admin"] = False
             sess["team_id"] = 123
 

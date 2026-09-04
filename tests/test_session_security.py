@@ -4,6 +4,17 @@ navigation. Companion to `tests/test_google_oidc_auth.py`.
 No real DB is used — a tiny in-memory fake stands in for `app_users` /
 `login_audit_events`, matching only the exact SQL `session_security.py`
 issues.
+
+This file is about SESSION liveness/CSRF/nav, not IP/team policy, and
+several sessions here intentionally predate the team model (no
+`team_id`). `middleware_access.py`'s `before_request` hook is also
+registered on `search.app` and would otherwise try to resolve a real
+team IP policy for those non-admin sessions (Phase 6A-Fix1: an
+authenticated non-admin session with no usable `team_id` now fails
+closed, by design -- see `tests/test_middleware_access.py` for that
+behaviour). Disable it here via the documented `DISABLE_IP_ALLOWLIST`
+escape hatch so this file keeps testing exactly what it says it tests,
+without depending on the real `office_ip_allowlist`/`teams` tables.
 """
 import os
 import unittest
@@ -75,6 +86,9 @@ class _ClientTestCase(unittest.TestCase):
     def setUp(self):
         search.app.testing = True
         self.client = search.app.test_client()
+        env_patcher = mock.patch.dict(os.environ, {"DISABLE_IP_ALLOWLIST": "1"})
+        env_patcher.start()
+        self.addCleanup(env_patcher.stop)
 
     def _set_session(self, **kwargs):
         with self.client.session_transaction() as sess:

@@ -1,8 +1,23 @@
-"""Regression checks for batch endpoint SQL (local DB only)."""
+"""Regression checks for batch endpoint SQL (local DB only).
+
+Phase 6A -- Local Release Gate: `setUpClass` used to connect straight to
+whatever `DATABASE_URL` pointed at (in practice `products_local`, per
+`.env`) and write `CURSOR_*`-prefixed fixture rows there. It now creates
+its own throwaway, uniquely-named database (see `tests/pg_temp_db.py`) and
+patches `DATABASE_URL` to point at it for the whole class, so every DB
+entrypoint the app itself uses during a test request -- not just this
+file's own fixture connection and `RecordingConnection` -- resolves to the
+temp DB: `search.get_connection`/`middleware_access.get_connection`/
+`db.get_connection` all read `DATABASE_URL` fresh on every call, with no
+separate patch needed per module. `_local_dsn()` below is unchanged code;
+it simply now reads back the patched (temp DB) value instead of whatever
+the real environment/`.env` set.
+"""
 
 import os
 import re
 import unittest
+from unittest import mock
 from unittest.mock import patch
 from urllib.parse import urlparse
 
@@ -13,6 +28,12 @@ load_dotenv(dotenv_path=".env")
 
 import search  # noqa: E402
 from auth_test_helpers import start_auth_db_patch  # noqa: E402
+from pg_temp_db import (  # noqa: E402
+    apply_sql_file_statement_by_statement,
+    create_full_schema_temp_db,
+    drop_temp_db,
+    probe_postgres_reachable,
+)
 
 
 def _local_dsn():
@@ -77,7 +98,7 @@ class RecordingConnection:
         self._conn.close()
 
 
-@unittest.skipUnless(_local_dsn(), "local DATABASE_URL required")
+@unittest.skipUnless(probe_postgres_reachable(), "local Postgres required")
 class BatchQueryRegressionTests(unittest.TestCase):
     CODE_MAIN = "CURSOR_BATCH_CODE"
     CODE_NOCAS = "CURSOR_BATCH_NOCAS"
@@ -91,17 +112,30 @@ class BatchQueryRegressionTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.conn = psycopg2.connect(_local_dsn())
-        cls.conn.autocommit = True
-        cls._ensure_schema()
-        cls._reset_fixture()
+        cls.db_name, cls.dsn = create_full_schema_temp_db()
+        # unittest does NOT call tearDownClass if setUpClass raises --
+        # anything below that fails would otherwise leak this temp DB
+        # forever, so clean up ourselves on any exception past this point.
+        try:
+            cls._env_patch = mock.patch.dict("os.environ", {"DATABASE_URL": cls.dsn})
+            cls._env_patch.start()
+            cls.conn = psycopg2.connect(_local_dsn())
+            cls.conn.autocommit = True
+            cls._reset_fixture()
+            cls._seed_perf_index_prerequisites()
+        except Exception:
+            drop_temp_db(cls.db_name)
+            raise
 
     @classmethod
     def tearDownClass(cls):
         try:
-            cls._cleanup_fixture()
-        finally:
             cls.conn.close()
+        finally:
+            try:
+                drop_temp_db(cls.db_name)
+            finally:
+                cls._env_patch.stop()
 
     def setUp(self):
         # Phase 5D2A: `enforce_session_validity` needs `user_id` + a
@@ -112,28 +146,40 @@ class BatchQueryRegressionTests(unittest.TestCase):
         start_auth_db_patch(self)
 
     @classmethod
-    def _ensure_schema(cls):
+    def _seed_perf_index_prerequisites(cls):
+        """`test_advanced_search_plan_uses_normalized_cas_index` and
+        `test_batch_endpoint_plans_use_normalized_indexes_for_late_matches`
+        assert the query PLANNER actually chooses
+        `idx_products_code_upper_trim`/`idx_products_cas_upper_trim`
+        (migrations 007/008) over a sequential scan. That's a genuine
+        cost-based decision Postgres makes from real table statistics --
+        on a table with only the handful of fixture rows this class
+        inserts, a seq scan is always cheaper regardless of whether the
+        index exists, so a temp DB needs BOTH the indexes AND enough rows
+        for the index to actually win, or these two plan-shape assertions
+        would be testing the temp DB's smallness rather than the app's
+        indexing. Neither of `migration_007`/`migration_008` write CAS/code
+        values that could collide with this class's own `CURSOR_*`-prefixed
+        fixtures. `CREATE INDEX CONCURRENTLY` requires autocommit (already
+        set above) and no surrounding explicit transaction.
+        """
         with cls.conn.cursor() as cur:
+            for name in (
+                "migration_007_products_code_upper_trim_index.sql",
+                "migration_008_check_cas_perf_indexes.sql",
+            ):
+                path = os.path.join(os.path.dirname(__file__), "..", "sql", name)
+                apply_sql_file_statement_by_statement(cur, path)
             cur.execute(
                 """
-                SELECT 1
-                FROM information_schema.columns
-                WHERE table_name = 'products'
-                  AND column_name IN ('manual_compliance', 'manual_compliance_note')
-                HAVING COUNT(*) = 2
+                INSERT INTO products (name, code, cas, brand, size, ship, price, note)
+                SELECT 'Perf decoy ' || g, 'PERF-DECOY-CODE-' || g, 'PERF-DECOY-CAS-' || g,
+                       'PERF_DECOY_BRAND', '1g', '1', '1000', ''
+                FROM generate_series(1, 8000) AS g
                 """
             )
-            if cur.fetchone() is None:
-                raise unittest.SkipTest("Run sql/migration_011_manual_compliance.sql on local DB first.")
-            cur.execute(
-                """
-                SELECT 1
-                FROM information_schema.tables
-                WHERE table_name = 'brand_compliance_settings'
-                """
-            )
-            if cur.fetchone() is None:
-                raise unittest.SkipTest("Run sql/migration_011_manual_compliance.sql on local DB first.")
+            cur.execute("ANALYZE products")
+            cur.execute("ANALYZE regulatory_rules")
 
     @classmethod
     def _cleanup_fixture(cls):

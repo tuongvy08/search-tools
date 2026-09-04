@@ -1,11 +1,17 @@
-"""Tests for optional Compliance / Compliance_Note product import (Phase 008A)."""
+"""Tests for optional Compliance / Compliance_Note product import (Phase 008A).
 
-import os
+Phase 6A -- Local Release Gate: `ManualComplianceImportIntegrationTests`
+used to connect straight to whatever `DATABASE_URL` pointed at (in practice
+`products_local`, per `.env`); it now creates its own throwaway,
+uniquely-named database (see `tests/pg_temp_db.py`) and patches
+`DATABASE_URL` for the whole class, never touching `products_local`.
+"""
+
 import unittest
 from io import BytesIO
 from pathlib import Path
+from unittest import mock
 from unittest.mock import patch
-from urllib.parse import urlparse
 
 import psycopg2
 from dotenv import load_dotenv
@@ -15,6 +21,7 @@ load_dotenv(dotenv_path=".env")
 
 import search  # noqa: E402
 from auth_test_helpers import auth_db_patch  # noqa: E402
+from pg_temp_db import create_full_schema_temp_db, drop_temp_db, probe_postgres_reachable  # noqa: E402
 from product_import_manual import (  # noqa: E402
     HEADER_COMPLIANCE,
     HEADER_MODE_ABSENT,
@@ -31,16 +38,6 @@ from product_import_manual import (  # noqa: E402
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def _local_dsn():
-    dsn = os.environ.get("DATABASE_URL")
-    if not dsn:
-        return None
-    host = urlparse(dsn).hostname or ""
-    if host not in {"127.0.0.1", "localhost", "::1"}:
-        return None
-    return dsn
 
 
 def _xlsx_bytes(headers, rows):
@@ -112,7 +109,7 @@ class ManualComplianceValidationTests(unittest.TestCase):
             validate_product_import_rows(rows, {"brand", "code", HEADER_PREPARATION_TYPE})
 
 
-@unittest.skipUnless(_local_dsn(), "local DATABASE_URL required")
+@unittest.skipUnless(probe_postgres_reachable(), "local Postgres required")
 class ManualComplianceImportIntegrationTests(unittest.TestCase):
     BRAND_A = "CURSOR_MANUAL_BRAND_A"
     BRAND_B = "CURSOR_MANUAL_BRAND_B"
@@ -120,39 +117,33 @@ class ManualComplianceImportIntegrationTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.conn = psycopg2.connect(_local_dsn())
-        cls.conn.autocommit = True
-        cls._ensure_schema()
-        cls._reset_rows()
+        cls.db_name, cls.dsn = create_full_schema_temp_db()
+        # unittest does NOT call tearDownClass if setUpClass raises --
+        # anything below that fails would otherwise leak this temp DB
+        # forever, so clean up ourselves on any exception past this point.
+        try:
+            # `test_preview_rejects_partial_headers` hits a real Flask
+            # route (`/admin/imports/preview`) via `search.get_connection()`
+            # == `db.get_connection()`, which reads `DATABASE_URL` fresh on
+            # every call -- patch it for the whole class.
+            cls._env_patch = mock.patch.dict("os.environ", {"DATABASE_URL": cls.dsn})
+            cls._env_patch.start()
+            cls.conn = psycopg2.connect(cls.dsn)
+            cls.conn.autocommit = True
+            cls._reset_rows()
+        except Exception:
+            drop_temp_db(cls.db_name)
+            raise
 
     @classmethod
     def tearDownClass(cls):
         try:
-            cls._reset_rows()
-        finally:
             cls.conn.close()
-
-    @classmethod
-    def _ensure_schema(cls):
-        with cls.conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT 1
-                FROM information_schema.columns
-                WHERE table_name = 'products' AND column_name = 'manual_compliance'
-                """
-            )
-            if cur.fetchone() is None:
-                raise unittest.SkipTest("Run sql/migration_011_manual_compliance.sql on local DB first.")
-            cur.execute(
-                """
-                SELECT 1
-                FROM information_schema.columns
-                WHERE table_name = 'products' AND column_name = 'preparation_type'
-                """
-            )
-            if cur.fetchone() is None:
-                raise unittest.SkipTest("Run sql/migration_012_product_preparation_type.sql on local DB first.")
+        finally:
+            try:
+                drop_temp_db(cls.db_name)
+            finally:
+                cls._env_patch.stop()
 
     @classmethod
     def _reset_rows(cls):

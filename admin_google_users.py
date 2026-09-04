@@ -57,6 +57,7 @@ _ERR_NOT_PENDING = "Tài khoản không còn ở trạng thái chờ phê duyệ
 _ERR_NOT_ACTIVE = "Tài khoản không ở trạng thái đang hoạt động."
 _ERR_NOT_SUSPENDED = "Tài khoản không ở trạng thái đã tạm khoá."
 _ERR_SELF_SUSPEND = "Không thể tự khoá tài khoản của chính mình."
+_ERR_SELF_DEMOTE = "Không thể tự hạ quyền admin của chính mình."
 _ERR_LAST_ADMIN = "Không thể khoá admin đang hoạt động cuối cùng."
 _ERR_BAD_EMAIL_DOMAIN = "Email phải thuộc một trong các domain được phép."
 _ERR_DUPLICATE_INVITE = "Email này đã có tài khoản hoặc đã được mời."
@@ -151,21 +152,71 @@ def _parse_user_id():
     return parsed
 
 
+def write_permission_audit(cur, *, actor_user_id, reason_code, target_user_id=None,
+                            target_provider=None, target_team_id=None, outcome="SUCCESS"):
+    """Phase 6A: general-purpose audit insert, shared by every admin
+    permission-change mutation in this module, `search.py`'s legacy LOCAL
+    user form, AND `admin_teams.py`'s team CRUD/permission-preview flow --
+    so all of them write to the exact same audit shape (migration 015 adds
+    `target_team_id`). `target_user_id`/`target_provider` identify an
+    affected USER (LOCAL or GOOGLE, e.g. "this user's team/role changed");
+    `target_team_id` identifies an affected TEAM instead, for actions that
+    are not "about" any single user (e.g. a team's brand set changed).
+    Never logs `google_sub`, `password_hash`, tokens, or raw DB error text.
+    `admin_teams.py` imports this rather than duplicating it, to avoid a
+    circular import (that module already needs `acquire_last_admin_lock`/
+    `revalidate_actor` from here too).
+    """
+    provider = target_provider or (session.get("auth_provider") or "LOCAL")
+    cur.execute(
+        """
+        INSERT INTO login_audit_events (user_id, actor_user_id, provider, outcome, reason_code, target_team_id)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """,
+        (target_user_id, actor_user_id, provider, outcome, reason_code, target_team_id),
+    )
+
+
 def _write_admin_audit(cur, *, actor_user_id, target_user_id, outcome, reason_code):
     """Minimal audit insert: identifies actor + target only. No email, no
     sub, no token -- those are never needed for these admin-action events.
+    Thin wrapper over `write_permission_audit`, fixing `target_provider`
+    to 'GOOGLE' -- every call site in THIS module only ever targets a
+    Google-provisioned account.
     """
-    cur.execute(
-        """
-        INSERT INTO login_audit_events (user_id, actor_user_id, provider, outcome, reason_code)
-        VALUES (%s, %s, 'GOOGLE', %s, %s)
-        """,
-        (target_user_id, actor_user_id, outcome, reason_code),
-    )
+    write_permission_audit(cur, actor_user_id=actor_user_id, target_user_id=target_user_id,
+                            target_provider="GOOGLE", reason_code=reason_code, outcome=outcome)
 
 
 def _allowed_invite_domains() -> set:
     return parse_allowed_domains(os.environ.get("GOOGLE_WORKSPACE_ALLOWED_DOMAINS", ""))
+
+
+def touch_team_updated_at(cur, *team_ids) -> None:
+    """Phase 6A-Fix2: bump `teams.updated_at` for every real (non-None) team
+    id in `team_ids`, deduplicated. Called by every path that changes WHO
+    belongs to a team -- this module's `approve()`/`update()` and
+    `search.py`'s legacy LOCAL `create_user`/`update_user` branches --
+    whenever a user's `team_id` is set/changed, for both the team being
+    LEFT and the team being JOINED.
+
+    `admin_teams.py`'s permission-change preview/confirm flow treats
+    `teams.updated_at` as the single authoritative "has anything about
+    this team changed since the preview was captured" stamp (see its
+    module docstring). Before this, only THIS module's own brand/ip_policy
+    writes bumped it -- a team's *membership* could change (a user moved
+    in or out) without that being reflected, so a stale preview's "affected
+    members" list could silently drift without being caught at confirm
+    time. Bumping it here closes that gap using the exact same mechanism,
+    rather than inventing a second, parallel staleness signal.
+
+    Must be called inside the same transaction as the `app_users` write
+    that changes team_id, so a rollback of one rolls back the other too.
+    """
+    ids = sorted({tid for tid in team_ids if tid is not None})
+    if not ids:
+        return
+    cur.execute("UPDATE teams SET updated_at = NOW() WHERE id = ANY(%s)", (ids,))
 
 
 # --------------------------------------------------------------------------
@@ -279,6 +330,7 @@ def approve():
                     """,
                     (is_admin_role, team_id, admin_id, target_id),
                 )
+                touch_team_updated_at(cur, team_id)
                 _write_admin_audit(cur, actor_user_id=admin_id, target_user_id=target_id,
                                     outcome="SUCCESS", reason_code="USER_APPROVED")
     except _ActionError as e:
@@ -453,6 +505,96 @@ def reactivate():
     finally:
         conn.close()
     return _redirect_result(msg="Đã kích hoạt lại tài khoản.")
+
+
+@admin_google_users_bp.route("/admin/users/google/update", methods=["POST"])
+def update():
+    """Phase 6A: change role/team/IP-exception for an already-ACTIVE Google
+    account -- the counterpart of search.py's legacy LOCAL `update_user`
+    action, so LOCAL and GOOGLE accounts share the same team/role
+    management surface post-approval (approve() only sets these ONCE, at
+    approval time; there was previously no way to revisit them).
+    """
+    admin_id, err = _current_admin_actor()
+    if err:
+        return err
+    if not _check_csrf():
+        return _ERR_CSRF, 400
+
+    expected_auth_version = session.get("auth_version")
+    target_id = _parse_user_id()
+    role = (request.form.get("role") or "").strip().lower()
+    team_id_raw = (request.form.get("team_id") or "").strip()
+    ip_bypass_allowlist = (request.form.get("ip_bypass_allowlist") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+    conn = get_connection()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                acquire_last_admin_lock(cur)
+                revalidate_actor(cur, admin_id, expected_auth_version)
+
+                if target_id is None or role not in _VALID_ROLES:
+                    raise _ActionError(_ERR_BAD_ROLE)
+
+                cur.execute(
+                    "SELECT account_status, is_admin, team_id FROM app_users "
+                    "WHERE id = %s AND auth_provider = 'GOOGLE' FOR UPDATE",
+                    (target_id,),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    raise _ActionError(_ERR_GENERIC)
+                target_status, target_is_admin, old_team_id = row
+                if target_status != "ACTIVE":
+                    raise _ActionError(_ERR_NOT_ACTIVE)
+
+                is_admin_role = role == "admin"
+                demoting = bool(target_is_admin) and not is_admin_role
+                if demoting and target_id == admin_id:
+                    raise _ActionError(_ERR_SELF_DEMOTE)
+
+                team_id = None
+                if not is_admin_role:
+                    try:
+                        candidate_team_id = int(team_id_raw)
+                    except (TypeError, ValueError):
+                        raise _ActionError(_ERR_STAFF_NEEDS_TEAM)
+                    cur.execute("SELECT id FROM teams WHERE id = %s", (candidate_team_id,))
+                    if cur.fetchone() is None:
+                        raise _ActionError(_ERR_STAFF_NEEDS_TEAM)
+                    team_id = candidate_team_id
+
+                if demoting:
+                    # Same invariant every other admin-count-reducing path
+                    # enforces, checked under the shared advisory lock.
+                    cur.execute(
+                        "SELECT COUNT(*) FROM app_users "
+                        "WHERE is_admin = TRUE AND account_status = 'ACTIVE' AND id <> %s",
+                        (target_id,),
+                    )
+                    (other_active_admins,) = cur.fetchone()
+                    if other_active_admins == 0:
+                        raise _ActionError(_ERR_LAST_ADMIN)
+
+                cur.execute(
+                    "UPDATE app_users SET is_admin = %s, team_id = %s, ip_bypass_allowlist = %s, "
+                    "auth_version = auth_version + 1 WHERE id = %s",
+                    (is_admin_role, team_id, ip_bypass_allowlist, target_id),
+                )
+                # Bump BOTH the team being left and the team being joined
+                # (a no-op UPDATE ... WHERE id = ANY([]) if team_id didn't
+                # actually change) -- see touch_team_updated_at's docstring.
+                touch_team_updated_at(cur, old_team_id, team_id)
+                write_permission_audit(cur, actor_user_id=admin_id, target_user_id=target_id,
+                                        target_provider="GOOGLE", reason_code="USER_TEAM_UPDATED")
+    except _ActionError as e:
+        return _redirect_result(err=str(e))
+    except Exception:
+        return _redirect_result(err=_ERR_GENERIC)
+    finally:
+        conn.close()
+    return _redirect_result(msg="Đã cập nhật quyền tài khoản.")
 
 
 @admin_google_users_bp.route("/admin/users/google/revoke-sessions", methods=["POST"])

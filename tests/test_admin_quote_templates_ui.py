@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import search
 from auth_test_helpers import start_auth_db_patch
@@ -28,6 +29,17 @@ class AdminQuoteTemplatesRouteTests(unittest.TestCase):
         # Phase 5D2A: stub the per-request session-liveness DB check with an
         # in-memory fake (no real Postgres touched) for every test here.
         start_auth_db_patch(self)
+        # Phase 6A-UAT gap fix: this file's non-admin case uses a plain
+        # team_id=1 session, and the real Fix1 IP/team-policy middleware
+        # now issues a real `teams.ip_policy` query for any such session
+        # instead of being exempt -- unrelated to what this file tests
+        # (route-level admin auth + template/asset shape). Disable it
+        # explicitly, same pattern as test_admin_teams.py.
+        self._disable_ip_patch = mock.patch.dict(
+            "os.environ", {"DISABLE_IP_ALLOWLIST": "1"}
+        )
+        self._disable_ip_patch.start()
+        self.addCleanup(self._disable_ip_patch.stop)
 
     def _auth(self, admin=True):
         with self.client.session_transaction() as sess:

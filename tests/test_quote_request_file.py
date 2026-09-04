@@ -2,6 +2,7 @@ import io
 import json
 import unittest
 import zipfile
+from unittest import mock
 from unittest.mock import patch
 
 from openpyxl import Workbook
@@ -35,12 +36,31 @@ def post_file(client, path, raw, filename, mapping=None, extra=None):
 
 
 class QuoteRequestFileApiTests(unittest.TestCase):
+    """Phase 6A -- Local Release Gate: several tests here use non-admin
+    sessions (`team_id=None`, `team_id=7`, `team_id=3`) purely to exercise
+    `search.py`'s own 401/403/200 auth-guard business logic (e.g.
+    `test_auth_team_guard`), not IP policy. Without this,
+    `middleware_access.py`'s REAL `teams.ip_policy` lookup runs against
+    whatever `DATABASE_URL` is ambient (`products_local`, missing
+    migration_015's `ip_policy` column) and returns a 503 that has nothing
+    to do with the auth-guard behaviour under test -- and even with the
+    column present, team_id=7/3 don't exist as real rows, which would
+    still deny for the wrong reason. Scope `DISABLE_IP_ALLOWLIST` to just
+    this class (same pattern as `test_quote_assistant_api.py`'s
+    `QuoteAssistantUnitTests`) rather than mocking
+    `middleware_access.get_connection` for a policy this class never
+    exercises either way.
+    """
+
     def setUp(self):
         search.app.testing = True
         self.client = search.app.test_client()
         # Phase 5D2A: stub the per-request session-liveness DB check with an
         # in-memory fake (no real Postgres touched) for every test here.
         start_auth_db_patch(self)
+        self._disable_ip_patch = mock.patch.dict("os.environ", {"DISABLE_IP_ALLOWLIST": "1"})
+        self._disable_ip_patch.start()
+        self.addCleanup(self._disable_ip_patch.stop)
 
     def auth(self, *, admin=True, team_id=1):
         with self.client.session_transaction() as sess:

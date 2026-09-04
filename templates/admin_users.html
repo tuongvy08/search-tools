@@ -46,14 +46,16 @@
     <a href="/admin/quote-templates">Mẫu báo giá</a>
     <a href="/admin/exchange-rates">Tỷ giá</a>
     <a href="/admin/network">Mạng / IP</a>
+    <a href="/admin/teams">Teams</a>
     <a href="/admin/users">Users</a>
     <a href="/admin/brand-compliance">Manual compliance</a>
   </div>
 
-  <h1 style="margin-top:0;">Quản lý Users & Gán Brand</h1>
+  <h1 style="margin-top:0;">Quản lý Users</h1>
   <p class="muted">
-    Với user thường: hệ thống lọc dữ liệu theo <code>team_brands</code> (brand bạn gán).
-    Admin thì nhìn thấy toàn bộ (không cần gán brand).
+    Brand hiển thị cho từng user (LOCAL và Google) là brand được gán cho team của họ
+    (xem/chỉnh ở <a href="/admin/teams">trang Team</a>). Trang này chỉ chọn team cho user,
+    không chỉnh brand trực tiếp nữa. Admin nhìn thấy toàn bộ (không cần team).
   </p>
 
   {% if message %}<p class="ok">{{ message }}</p>{% endif %}
@@ -119,6 +121,21 @@
                   <button class="primary" type="submit">Phê duyệt</button>
                 </form>
               {% elif gu.account_status == 'ACTIVE' %}
+                <form method="post" action="{{ url_for('admin_google_users.update') }}" class="gu-inline-form gu-update-form">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="user_id" value="{{ gu.id }}">
+                  <select name="role" class="gu-approve-role" required>
+                    <option value="staff" {{ 'selected' if gu.role != 'admin' else '' }}>Staff</option>
+                    <option value="admin" {{ 'selected' if gu.role == 'admin' else '' }}>Admin</option>
+                  </select>
+                  <select name="team_id" class="gu-approve-team">
+                    <option value="">-- Chọn team --</option>
+                    {% for t in google_teams %}
+                      <option value="{{ t.id }}" {{ 'selected' if t.id == gu.team_id else '' }}>{{ t.name }}</option>
+                    {% endfor %}
+                  </select>
+                  <button type="submit">Đổi team/role</button>
+                </form>
                 <form method="post" action="{{ url_for('admin_google_users.suspend') }}" class="gu-inline-form">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <input type="hidden" name="user_id" value="{{ gu.id }}">
@@ -189,17 +206,22 @@
         <div class="row" style="margin-bottom:10px;">
           <div class="field">
             <label>Role</label>
-            <select name="role">
+            <select name="role" class="cu-role">
               <option value="user" selected>User thường</option>
               <option value="admin">Admin</option>
             </select>
           </div>
-          <div class="field" style="flex:1;">
-            <label>Brands (dùng cho user thường)</label>
-            <textarea name="brands" placeholder="Mỗi dòng 1 brand hoặc dùng dấu phẩy"></textarea>
-            <div class="brand-tips">
-              Ví dụ: <code>Sigma</code>, <code>Merck</code>, <code>CẤM NHẬP</code>
-            </div>
+          <div class="field">
+            <label>Team (bắt buộc với user thường)</label>
+            <select name="team_id" class="cu-team">
+              <option value="">-- Chọn team --</option>
+              {% for t in teams %}
+                <option value="{{ t.id }}">{{ t.name }}</option>
+              {% endfor %}
+            </select>
+            {% if not teams %}
+              <div class="small err" style="margin:0;">Chưa có team nào -- <a href="/admin/teams">tạo team trước</a>.</div>
+            {% endif %}
           </div>
         </div>
 
@@ -213,12 +235,6 @@
             Cho phép truy cập từ mọi IP (bỏ qua allowlist)
           </label>
         </div>
-
-        {% if distinct_brands %}
-          <div class="small">
-            (Tuỳ chọn) Có thể dùng brands đã tồn tại trong DB: <code>{{ distinct_brands[:10]|join(', ') }}{% if distinct_brands|length > 10 %}, ...{% endif %}</code>
-          </div>
-        {% endif %}
       </form>
     </div>
 
@@ -226,8 +242,8 @@
       <h2 style="margin-top:0;">Lưu ý vận hành</h2>
       <ul class="muted" style="padding-left:18px; margin:10px 0;">
         <li>Nếu đổi role sang admin: user sẽ xem toàn bộ.</li>
-        <li>Nếu đổi role sang user thường: cần gán brands để lọc dữ liệu.</li>
-        <li>Nếu bạn muốn xoá quyền/thu hẹp brand: sửa lại textarea Brands.</li>
+        <li>Nếu đổi role sang user thường: cần chọn 1 team đã tồn tại.</li>
+        <li>Brand mà user thấy được là brand đã gán cho team đó -- chỉnh ở <a href="/admin/teams">trang Team</a>, không chỉnh ở đây.</li>
       </ul>
       <div class="small" style="margin-top:12px;">
         Username đăng nhập mới có thể dùng luôn ở trang <code>/login</code>.
@@ -237,6 +253,7 @@
 
   <div class="card">
     <h2 style="margin-top:0;">Danh sách users</h2>
+    <div class="gu-table-scroll">
     <table>
       <thead>
         <tr>
@@ -244,7 +261,7 @@
           <th>Username</th>
           <th>Role</th>
           <th>Bypass IP</th>
-          <th>Brand đã gán</th>
+          <th>Team &amp; brand kế thừa</th>
           <th>Cập nhật</th>
         </tr>
       </thead>
@@ -255,19 +272,18 @@
             <td><code>{{ u.username }}</code></td>
             <td>{{ 'Admin' if u.is_admin else 'User' }}</td>
             <td>{{ 'Có' if u.ip_bypass_allowlist else 'Không' }}</td>
-            <td>
+            <td style="min-width: 220px;">
               {% if u.is_admin %}
-                <div class="muted" style="margin-bottom:6px;">Admin: tất cả brands</div>
-                <textarea
-                  form="form_update_{{ u.id }}"
-                  name="brands"
-                  style="min-width: 280px; min-height: 90px;"
-                  placeholder="Nhập brands để chuyển sang user (mỗi dòng 1 brand)"
-                >{{ u.brands_text }}</textarea>
+                <div class="muted">Admin: tất cả brands</div>
               {% else %}
-                <div class="muted">Team: {{ u.team_id }}</div>
-                <div class="small" style="margin-top:6px;">{{ u.brands_count }} brands</div>
-                <textarea form="form_update_{{ u.id }}" name="brands" style="min-width: 280px; min-height: 90px;">{{ u.brands_text }}</textarea>
+                <div class="muted">Team: {{ u.team_name or '(chưa gán)' }}</div>
+                <div class="small" style="margin-top:4px;">
+                  {{ u.inherited_brands_count }} brand{{ 's' if u.inherited_brands_count != 1 else '' }} kế thừa
+                  {% if u.inherited_brands %}
+                    (<code>{{ u.inherited_brands[:6]|join(', ') }}{% if u.inherited_brands|length > 6 %}, ...{% endif %}</code>)
+                  {% endif %}
+                </div>
+                <div class="small muted" style="margin-top:4px;">Chỉnh brand ở <a href="/admin/teams">trang Team</a>.</div>
               {% endif %}
             </td>
             <td style="min-width: 320px;">
@@ -278,9 +294,19 @@
 
                 <div class="field" style="margin-bottom:8px;">
                   <label>Role</label>
-                  <select name="role">
+                  <select name="role" class="uu-role">
                     <option value="user" {{ 'selected' if not u.is_admin else '' }}>User</option>
                     <option value="admin" {{ 'selected' if u.is_admin else '' }}>Admin</option>
+                  </select>
+                </div>
+
+                <div class="field" style="margin-bottom:8px;">
+                  <label>Team</label>
+                  <select name="team_id" class="uu-team">
+                    <option value="">-- Chọn team --</option>
+                    {% for t in teams %}
+                      <option value="{{ t.id }}" {{ 'selected' if t.id == u.team_id else '' }}>{{ t.name }}</option>
+                    {% endfor %}
                   </select>
                 </div>
 
@@ -296,10 +322,6 @@
                   </label>
                 </div>
 
-                {% if u.is_admin %}
-                  <div class="muted small">Đang là admin nên không cần brands (nếu chuyển sang user sẽ dùng Brands ở ô bên trái).</div>
-                {% endif %}
-
                 <button class="primary" type="submit" style="margin-top:8px;">Lưu thay đổi</button>
               </form>
             </td>
@@ -307,6 +329,7 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
   </div>
 
   <script>
@@ -339,19 +362,26 @@
 
     // Admin role => team is always NULL server-side regardless of this
     // selection; this only spares the admin from picking a team that will
-    // be ignored anyway.
+    // be ignored anyway. Same toggle re-used for: Google approve/update
+    // forms (.gu-approve-role/.gu-approve-team), LOCAL create-user form
+    // (.cu-role/.cu-team), and LOCAL per-user update form (.uu-role/.uu-team).
     (function () {
-      document.querySelectorAll('.gu-approve-role').forEach(function (roleSelect) {
-        var form = roleSelect.closest('form');
-        var teamSelect = form ? form.querySelector('.gu-approve-team') : null;
-        if (!teamSelect) return;
-        function sync() {
-          var isAdmin = roleSelect.value === 'admin';
-          teamSelect.disabled = isAdmin;
-          teamSelect.required = !isAdmin;
-        }
-        roleSelect.addEventListener('change', sync);
-        sync();
+      var pairs = [['.gu-approve-role', '.gu-approve-team'],
+                   ['.cu-role', '.cu-team'],
+                   ['.uu-role', '.uu-team']];
+      pairs.forEach(function (pair) {
+        document.querySelectorAll(pair[0]).forEach(function (roleSelect) {
+          var form = roleSelect.closest('form');
+          var teamSelect = form ? form.querySelector(pair[1]) : null;
+          if (!teamSelect) return;
+          function sync() {
+            var isAdmin = roleSelect.value === 'admin';
+            teamSelect.disabled = isAdmin;
+            teamSelect.required = !isAdmin;
+          }
+          roleSelect.addEventListener('change', sync);
+          sync();
+        });
       });
     })();
   </script>

@@ -23,6 +23,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 import admin_google_users
 import admin_login_history
+import admin_teams
 import auth_google
 import session_security
 from compliance_resolver import compliance_css_type, resolve_compliance_precedence
@@ -61,17 +62,23 @@ app.config.update(
 # only trust one hop for each forwarded header (never an arbitrary count).
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=0)
 
-base_path = os.environ.get("ACCESS_CONTROL_BASE_PATH", "/home/deploy/myapps")
-register_ip_access_control(app, base_path=base_path)
-
 # Registers /auth/google + /auth/google/callback. No-op (no secrets/network)
 # unless GOOGLE_AUTH_ENABLED=true; raises at startup if enabled+misconfigured.
 auth_google.init_app(app)
 
 # Registers POST /logout + the per-request session-liveness check (Phase
 # 5D2A): revoked/suspended/deleted accounts and bumped auth_version are
-# rejected on the very next request, not just at next login.
+# rejected on the very next request, not just at next login. Phase 6A:
+# MUST be registered before `register_ip_access_control` below -- Flask
+# runs `before_request` hooks in registration order, and the IP/team
+# policy check needs to trust `session.get(...)` (team_id/is_admin/
+# ip_bypass_allowlist), which is only safe once this hook has already
+# confirmed the session's account is still ACTIVE and auth_version still
+# matches (or rejected/cleared it). See middleware_access.py's docstring.
 session_security.init_app(app)
+
+base_path = os.environ.get("ACCESS_CONTROL_BASE_PATH", "/home/deploy/myapps")
+register_ip_access_control(app, base_path=base_path)
 
 # Registers the POST /admin/users/google/* actions (Phase 5D2B): approve /
 # invite / suspend / reactivate / revoke-sessions for Google Workspace
@@ -82,6 +89,12 @@ app.register_blueprint(admin_google_users.admin_google_users_bp)
 # Registers GET /admin/login-history (Phase 5D3): read-only admin screen
 # over `login_audit_events`. Admin-only; never writes anything.
 app.register_blueprint(admin_login_history.admin_login_history_bp)
+
+# Registers GET/POST /admin/teams (Phase 6A): team CRUD (create/rename),
+# brand assignment (from existing product brands, not free text), and the
+# 3-mode IP policy, gated behind the preview -> confirm flow described in
+# that module's docstring.
+app.register_blueprint(admin_teams.admin_teams_bp)
 
 
 @app.after_request
@@ -3629,18 +3642,22 @@ def admin_users():
             role = (request.form.get("role") or "user").strip().lower()
             is_admin = role in {"admin", "1", "true", "yes", "on"}
             ip_bypass_allowlist = (request.form.get("ip_bypass_allowlist") or "").strip().lower() in {"1", "true", "yes", "on"}
-            brands_text = request.form.get("brands") or ""
-            brands = _brands_from_text(brands_text)
+            # Phase 6A: team is SELECTED (from an existing team, managed on
+            # /admin/teams), never typed as free-text brands and never
+            # auto-created here. See admin_teams.py for team CRUD.
+            team_id_s = (request.form.get("team_id") or "").strip()
 
             if not username:
                 err = "Thiếu username."
             elif not password:
                 err = "Thiếu mật khẩu."
-            elif is_admin:
-                brands = []
-            else:
-                if not brands:
-                    err = "User thường cần gán ít nhất 1 brand (để lọc dữ liệu)."
+
+            team_id = None
+            if not err and not is_admin:
+                try:
+                    team_id = int(team_id_s)
+                except (TypeError, ValueError):
+                    err = "Vui lòng chọn team hợp lệ cho nhân viên."
 
             if not err:
                 conn = get_connection()
@@ -3663,51 +3680,36 @@ def admin_users():
                             if cur.fetchone():
                                 raise ValueError(f"Username đã tồn tại: {username}")
 
+                            if not is_admin:
+                                cur.execute("SELECT id FROM teams WHERE id = %s", (team_id,))
+                                if cur.fetchone() is None:
+                                    raise ValueError("Team đã chọn không còn tồn tại.")
+
                             password_hash = generate_password_hash(password)
-                            if is_admin:
-                                # auth_provider/account_status set EXPLICITLY
-                                # (not just relying on column DEFAULTs) --
-                                # this legacy form only ever creates LOCAL,
-                                # already-ACTIVE accounts.
-                                cur.execute(
-                                    """
-                                    INSERT INTO app_users
-                                        (username, password_hash, team_id, is_admin, ip_bypass_allowlist,
-                                         auth_provider, account_status)
-                                    VALUES (%s, %s, NULL, TRUE, %s, 'LOCAL', 'ACTIVE')
-                                    """,
-                                    (username, password_hash, ip_bypass_allowlist),
-                                )
-                            else:
-                                team_name = f"User:{username}"
-                                cur.execute(
-                                    """
-                                    INSERT INTO teams (name)
-                                    VALUES (%s)
-                                    ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-                                    RETURNING id
-                                    """,
-                                    (team_name,),
-                                )
-                                team_id = cur.fetchone()[0]
-                                cur.execute(
-                                    """
-                                    INSERT INTO app_users
-                                        (username, password_hash, team_id, is_admin, ip_bypass_allowlist,
-                                         auth_provider, account_status)
-                                    VALUES (%s, %s, %s, FALSE, %s, 'LOCAL', 'ACTIVE')
-                                    """,
-                                    (username, password_hash, team_id, ip_bypass_allowlist),
-                                )
-                                for b in brands:
-                                    cur.execute(
-                                        """
-                                        INSERT INTO team_brands (team_id, brand)
-                                        VALUES (%s, %s)
-                                        ON CONFLICT (team_id, brand) DO NOTHING
-                                        """,
-                                        (team_id, b),
-                                    )
+                            # auth_provider/account_status set EXPLICITLY
+                            # (not just relying on column DEFAULTs) -- this
+                            # legacy form only ever creates LOCAL,
+                            # already-ACTIVE accounts.
+                            cur.execute(
+                                """
+                                INSERT INTO app_users
+                                    (username, password_hash, team_id, is_admin, ip_bypass_allowlist,
+                                     auth_provider, account_status)
+                                VALUES (%s, %s, %s, %s, %s, 'LOCAL', 'ACTIVE')
+                                RETURNING id
+                                """,
+                                (username, password_hash, None if is_admin else team_id,
+                                 is_admin, ip_bypass_allowlist),
+                            )
+                            (new_user_id,) = cur.fetchone()
+                            admin_google_users.touch_team_updated_at(
+                                cur, None if is_admin else team_id
+                            )
+                            admin_google_users.write_permission_audit(
+                                cur, actor_user_id=session.get("user_id"),
+                                target_user_id=new_user_id, target_provider="LOCAL",
+                                reason_code="USER_CREATED",
+                            )
                     msg = "Tạo user thành công."
                 except Exception as e:
                     err = str(e)
@@ -3723,13 +3725,18 @@ def admin_users():
                 else:
                     user_id = int(user_id_s)
                     password = request.form.get("password") or ""
-                    brands = _brands_from_text(request.form.get("brands") or "")
                     role = (request.form.get("role") or "user").strip().lower()
                     set_is_admin = role in {"admin", "1", "true", "yes", "on"}
                     set_ip_bypass_allowlist = (request.form.get("ip_bypass_allowlist") or "").strip().lower() in {"1", "true", "yes", "on"}
-
-                    if (not set_is_admin) and not brands:
-                        raise ValueError("User thường cần gán ít nhất 1 brand.")
+                    # Phase 6A: team is SELECTED from an existing team; this
+                    # form never creates a team or edits team_brands.
+                    new_team_id_s = (request.form.get("team_id") or "").strip()
+                    new_team_id = None
+                    if not set_is_admin:
+                        try:
+                            new_team_id = int(new_team_id_s)
+                        except (TypeError, ValueError):
+                            raise ValueError("Vui lòng chọn team hợp lệ cho nhân viên.")
 
                     with conn:
                         with conn.cursor() as cur:
@@ -3797,38 +3804,33 @@ def admin_users():
                                     "ip_bypass_allowlist = %s, auth_version = auth_version + 1 WHERE id = %s",
                                     (set_ip_bypass_allowlist, user_id),
                                 )
+                                final_team_id = None
                             else:
-                                # Nếu trước đó là admin (team_id NULL) thì tạo team riêng theo username.
-                                if not team_id:
-                                    team_name = f"User:{username}"
-                                    cur.execute(
-                                        """
-                                        INSERT INTO teams (name)
-                                        VALUES (%s)
-                                        ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-                                        RETURNING id
-                                        """,
-                                        (team_name,),
-                                    )
-                                    team_id = cur.fetchone()[0]
-
+                                cur.execute("SELECT id FROM teams WHERE id = %s", (new_team_id,))
+                                if cur.fetchone() is None:
+                                    raise ValueError("Team đã chọn không còn tồn tại.")
                                 cur.execute(
                                     "UPDATE app_users SET is_admin = FALSE, team_id = %s, "
                                     "ip_bypass_allowlist = %s, auth_version = auth_version + 1 WHERE id = %s",
-                                    (team_id, set_ip_bypass_allowlist, user_id),
+                                    (new_team_id, set_ip_bypass_allowlist, user_id),
                                 )
+                                final_team_id = new_team_id
 
-                                # Thay toàn bộ brands đã gán cho team này
-                                cur.execute("DELETE FROM team_brands WHERE team_id = %s", (team_id,))
-                                for b in brands:
-                                    cur.execute(
-                                        """
-                                        INSERT INTO team_brands (team_id, brand)
-                                        VALUES (%s, %s)
-                                        ON CONFLICT (team_id, brand) DO NOTHING
-                                        """,
-                                        (team_id, b),
-                                    )
+                            # Bump BOTH the team being left (old `team_id`,
+                            # read above before this UPDATE) and the team
+                            # being joined -- a no-op if neither actually
+                            # changed. Phase 6A-Fix2: this is what makes an
+                            # in-flight team permission-change preview
+                            # correctly go stale when membership changes,
+                            # not just when brands/ip_policy change -- see
+                            # admin_teams.py's module docstring.
+                            admin_google_users.touch_team_updated_at(cur, team_id, final_team_id)
+
+                            admin_google_users.write_permission_audit(
+                                cur, actor_user_id=session.get("user_id"),
+                                target_user_id=user_id, target_provider="LOCAL",
+                                reason_code="USER_TEAM_UPDATED",
+                            )
 
                     msg = "Cập nhật user thành công."
             except Exception as e:
@@ -3858,13 +3860,16 @@ def admin_users():
 
             users = []
             for (uid, username, is_admin, team_id, team_name, ip_bypass_allowlist) in user_rows:
-                assigned_brands = []
+                # Phase 6A: brands are shown READ-ONLY here (inherited from
+                # the assigned team, managed on /admin/teams) -- this page
+                # never edits team_brands directly anymore.
+                inherited_brands = []
                 if (not is_admin) and team_id:
                     cur.execute(
                         "SELECT brand FROM team_brands WHERE team_id = %s ORDER BY brand",
                         (team_id,),
                     )
-                    assigned_brands = [r[0] for r in cur.fetchall()]
+                    inherited_brands = [r[0] for r in cur.fetchall()]
 
                 users.append(
                     {
@@ -3874,8 +3879,8 @@ def admin_users():
                         "ip_bypass_allowlist": bool(ip_bypass_allowlist),
                         "team_id": team_id,
                         "team_name": team_name,
-                        "brands_text": "\n".join(assigned_brands),
-                        "brands_count": len(assigned_brands),
+                        "inherited_brands": inherited_brands,
+                        "inherited_brands_count": len(inherited_brands),
                     }
                 )
 
@@ -3907,6 +3912,7 @@ def admin_users():
         "admin_users.html",
         users=users,
         distinct_brands=distinct_brands,
+        teams=google_teams,  # [{"id":.., "name":..}], same query shape needed by the LOCAL team-select
         google_users=google_users,
         google_teams=google_teams,
         google_allowed_domains=google_allowed_domains,

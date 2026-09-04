@@ -35,6 +35,7 @@ import search
 import session_security
 
 MIGRATION_014_PATH = os.path.join(os.path.dirname(__file__), "..", "sql", "migration_014_google_oidc.sql")
+MIGRATION_006_PATH = os.path.join(os.path.dirname(__file__), "..", "sql", "migration_006_office_ip_allowlist.sql")
 
 _REAL_DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
@@ -105,6 +106,17 @@ _TEST_DB_PREFIX = "sd3_pgtest_"
 with open(MIGRATION_014_PATH, "r", encoding="utf-8") as _f:
     _MIGRATION_014_SQL = _f.read()
 
+# Phase 6A-Fix1: middleware_access.py's before_request hook also runs on
+# every `search.app.test_client()` request below (every session here is
+# an admin session -> INHERIT -> reads `office_ip_allowlist`). Fix1 made a
+# failed/missing-table read of that table a hard 503 instead of silently
+# swallowing to "no rules" -- so this temp-DB fixture must actually create
+# the table for these read-only login-history tests to keep exercising
+# real admin-route behaviour instead of being short-circuited by IP
+# middleware.
+with open(MIGRATION_006_PATH, "r", encoding="utf-8") as _f:
+    _MIGRATION_006_SQL = _f.read()
+
 _MINIMAL_BASE_SCHEMA_SQL = """
 CREATE TABLE teams (
     id SERIAL PRIMARY KEY,
@@ -132,6 +144,15 @@ class AccessControlTests(unittest.TestCase):
         patcher = mock.patch.object(session_security, "get_connection", _passthrough_session_connection)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # This class's own contract is "no real DB touched at all" (see
+        # module docstring). middleware_access.py's before_request hook
+        # would otherwise try to resolve the staff session's real team IP
+        # policy against `products_local` (not migrated for Phase 6A) --
+        # disable it via its documented escape hatch to keep that contract
+        # true; this class only tests the admin/staff/anonymous role guard.
+        env_patcher = mock.patch.dict(os.environ, {"DISABLE_IP_ALLOWLIST": "1"})
+        env_patcher.start()
+        self.addCleanup(env_patcher.stop)
 
     def test_anonymous_redirected_to_login(self):
         resp = self.client.get("/admin/login-history")
@@ -188,6 +209,7 @@ class _RealPgTestBase(unittest.TestCase):
                 with conn.cursor() as cur:
                     cur.execute(_MINIMAL_BASE_SCHEMA_SQL)
                     cur.execute(_MIGRATION_014_SQL)
+                    cur.execute(_MIGRATION_006_SQL)
         finally:
             conn.close()
 

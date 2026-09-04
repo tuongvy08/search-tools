@@ -75,34 +75,26 @@ class FakeCursor:
             self._result = [(match[0]["id"],)] if match else []
 
         elif s.startswith("INSERT INTO app_users") and "auth_provider" in s:
-            if "NULL, TRUE" in s:
-                username, password_hash, ip_bypass = params
-                uid = db._next_user_id
-                db._next_user_id += 1
-                db.users[uid] = {
-                    "id": uid, "username": username, "password_hash": password_hash,
-                    "is_admin": True, "team_id": None, "ip_bypass_allowlist": ip_bypass,
-                    "auth_provider": "LOCAL", "account_status": "ACTIVE", "auth_version": 1,
-                }
-            else:
-                username, password_hash, team_id, ip_bypass = params
-                uid = db._next_user_id
-                db._next_user_id += 1
-                db.users[uid] = {
-                    "id": uid, "username": username, "password_hash": password_hash,
-                    "is_admin": False, "team_id": team_id, "ip_bypass_allowlist": ip_bypass,
-                    "auth_provider": "LOCAL", "account_status": "ACTIVE", "auth_version": 1,
-                }
-            self._result = []
+            # Phase 6A: create_user() now issues ONE unified INSERT for
+            # both admin and staff (team_id is NULL for admin, an already-
+            # SELECTed existing team id for staff) -- no more auto-created
+            # "User:{username}" team.
+            username, password_hash, team_id, is_admin, ip_bypass = params
+            uid = db._next_user_id
+            db._next_user_id += 1
+            db.users[uid] = {
+                "id": uid, "username": username, "password_hash": password_hash,
+                "is_admin": bool(is_admin), "team_id": team_id, "ip_bypass_allowlist": ip_bypass,
+                "auth_provider": "LOCAL", "account_status": "ACTIVE", "auth_version": 1,
+            }
+            self._result = [(uid,)]  # RETURNING id
 
-        elif s.startswith("INSERT INTO teams"):
-            (team_name,) = params
-            tid = db.team_id_by_name(team_name)
-            if tid is None:
-                tid = db._next_team_id
-                db._next_team_id += 1
-                db.teams[tid] = team_name
-            self._result = [(tid,)]
+        elif s.startswith("SELECT id FROM teams WHERE id = %s"):
+            # Phase 6A: both create_user() (staff) and update_user()
+            # (demote to staff) now validate the SELECTED team exists --
+            # no more auto-creating a team here.
+            (team_id,) = params
+            self._result = [(team_id,)] if team_id in db.teams else []
 
         elif s.startswith("SELECT username, team_id, is_admin FROM app_users WHERE id = %s AND auth_provider = 'LOCAL' FOR UPDATE"):
             (uid,) = params
@@ -147,17 +139,18 @@ class FakeCursor:
             u["auth_version"] = u.get("auth_version", 1) + 1
             self._result = []
 
-        elif s.startswith("DELETE FROM team_brands WHERE team_id = %s"):
-            (team_id,) = params
-            db.team_brands[team_id] = set()
-            self._result = []
-
-        elif s.startswith("INSERT INTO team_brands"):
-            team_id, brand = params
-            db.team_brands.setdefault(team_id, set()).add(brand)
+        elif s.startswith("UPDATE teams SET updated_at = NOW() WHERE id = ANY(%s)"):
+            # Phase 6A-Fix2: admin_google_users.touch_team_updated_at --
+            # bumps the old/new team's `updated_at` stamp so an in-flight
+            # team-permission-change preview also goes stale on a
+            # membership change. This fake DB doesn't model `updated_at`
+            # at all (nothing else here reads it); just accept the call.
             self._result = []
 
         elif s.startswith("SELECT brand FROM team_brands WHERE team_id = %s"):
+            # Phase 6A: search.py's admin_users() GET still reads this for
+            # the READ-ONLY "inherited brands" display -- create_user()/
+            # update_user() no longer WRITE to team_brands at all.
             (team_id,) = params
             self._result = [(b,) for b in sorted(db.team_brands.get(team_id, set()))]
 
@@ -468,7 +461,7 @@ class LegacySelfAndLastAdminGuardTests(_ClientTestCase):
         p1, p2 = self._patch_both(db)
         with p1, p2:
             resp = self.client.post("/admin/users", data=self._csrf_form(
-                action="update_user", user_id="1", role="staff", brands="Sigma",
+                action="update_user", user_id="1", role="staff", team_id="1",
             ))
         self.assertEqual(resp.status_code, 302)
         self.assertIn("err=", resp.headers["Location"])
@@ -492,7 +485,7 @@ class LegacySelfAndLastAdminGuardTests(_ClientTestCase):
         p1, p2 = self._patch_both(db)
         with p1, p2:
             resp = self.client.post("/admin/users", data=self._csrf_form(
-                action="update_user", user_id="2", role="staff", brands="Sigma",
+                action="update_user", user_id="2", role="staff", team_id="1",
             ))
         self.assertEqual(resp.status_code, 302)
         self.assertIn("err=", resp.headers["Location"])
@@ -526,7 +519,7 @@ class LegacySelfAndLastAdminGuardTests(_ClientTestCase):
         p1, p2 = self._patch_both(db)
         with p1, p2:
             resp = self.client.post("/admin/users", data=self._csrf_form(
-                action="update_user", user_id="2", role="staff", brands="Sigma",
+                action="update_user", user_id="2", role="staff", team_id="1",
             ))
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(resp.headers["Location"], "/login")
@@ -543,7 +536,7 @@ class LegacySelfAndLastAdminGuardTests(_ClientTestCase):
         p1, p2 = self._patch_both(db)
         with p1, p2:
             resp = self.client.post("/admin/users", data=self._csrf_form(
-                action="update_user", user_id="2", role="staff", brands="Sigma",
+                action="update_user", user_id="2", role="staff", team_id="1",
             ))
         self.assertEqual(resp.status_code, 302)
         self.assertIn("msg=", resp.headers["Location"])
@@ -567,7 +560,7 @@ class AdvisoryLockWiringTests(_ClientTestCase):
         p1, p2 = self._patch_both(db)
         with p1, p2:
             self.client.post("/admin/users", data=self._csrf_form(
-                action="update_user", user_id="2", role="staff", brands="Sigma",
+                action="update_user", user_id="2", role="staff", team_id="1",
             ))
         self.assertGreaterEqual(db.advisory_lock_calls, 1)
 

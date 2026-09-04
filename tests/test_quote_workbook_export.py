@@ -4,6 +4,7 @@ import os
 import re
 import unittest
 import zipfile
+from unittest import mock
 from unittest.mock import patch
 from xml.etree import ElementTree as ET
 
@@ -638,6 +639,18 @@ class FakeConnection:
 class QuoteWorkbookExportApiTests(unittest.TestCase):
     def setUp(self):
         start_auth_db_patch(self)
+        # Phase 6A-UAT gap fix: this class's non-admin cases use a plain
+        # `team_id=123` session and mock `search.get_connection` for the
+        # product/export queries only. Fix1's real IP/team-policy
+        # middleware now issues a real `SELECT ip_policy FROM teams ...`
+        # for any non-admin session, which is unrelated to what this file
+        # tests -- disable it explicitly (same pattern as
+        # test_admin_teams.py) instead of letting it fail with a stray 503.
+        self._disable_ip_patch = mock.patch.dict(
+            "os.environ", {"DISABLE_IP_ALLOWLIST": "1"}
+        )
+        self._disable_ip_patch.start()
+        self.addCleanup(self._disable_ip_patch.stop)
 
     def _post(self, rows, selections, *, authenticated=True, is_admin=True, team_id=1):
         fake_conn = FakeConnection(rows)

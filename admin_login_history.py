@@ -66,16 +66,27 @@ VALID_OUTCOMES = ("SUCCESS", "FAILURE", "PENDING_APPROVAL", "DENIED")
 # Never defaulted to "AUTH" -- see `_classify_event_type`.
 VALID_EVENT_TYPES = ("ALL", "AUTH", "ADMIN", "OTHER")
 
-# The exact 5 reason codes `admin_google_users._write_admin_audit` writes
-# for an admin lifecycle action (read directly from that module, not
-# guessed). This is the ONLY signal used to classify a row as "ADMIN" --
-# see the module docstring for why `actor_user_id` alone is unsafe.
+# The exact reason codes written by an admin lifecycle/permission action
+# -- `admin_google_users._write_admin_audit` (5 original Phase 5D2B codes),
+# `admin_google_users.update()`, `search.py`'s legacy LOCAL user form, and
+# `admin_teams.py`'s team CRUD/permission-confirm flow (all via the shared
+# `admin_google_users.write_permission_audit`, Phase 6A) -- read directly
+# from those call sites, never guessed. This is the ONLY signal used to
+# classify a row as "ADMIN" -- see the module docstring for why
+# `actor_user_id` alone is unsafe.
 _ADMIN_ACTION_REASON_CODES = frozenset({
     "USER_APPROVED",
     "USER_INVITED",
     "USER_SUSPENDED",
     "USER_REACTIVATED",
     "USER_SESSIONS_REVOKED",
+    # Phase 6A: team/role management (LOCAL + GOOGLE share these codes).
+    "USER_CREATED",
+    "USER_TEAM_UPDATED",
+    "TEAM_CREATED",
+    "TEAM_RENAMED",
+    "TEAM_BRANDS_UPDATED",
+    "TEAM_IP_POLICY_UPDATED",
 })
 
 # Every reason code `auth_google.py` (login attempts) and
@@ -160,6 +171,13 @@ _REASON_LABELS = {
     "USER_SUSPENDED": "Quản trị: tạm khoá tài khoản",
     "USER_REACTIVATED": "Quản trị: kích hoạt lại tài khoản",
     "USER_SESSIONS_REVOKED": "Quản trị: vô hiệu hoá phiên đăng nhập cũ",
+    # Phase 6A -- team/role management (LOCAL + GOOGLE share these codes).
+    "USER_CREATED": "Quản trị: tạo tài khoản mới",
+    "USER_TEAM_UPDATED": "Quản trị: đổi team/vai trò tài khoản",
+    "TEAM_CREATED": "Quản trị: tạo team mới",
+    "TEAM_RENAMED": "Quản trị: đổi tên team",
+    "TEAM_BRANDS_UPDATED": "Quản trị: đổi brand được phép của team",
+    "TEAM_IP_POLICY_UPDATED": "Quản trị: đổi chính sách IP của team",
 }
 
 _EVENT_TYPE_LABELS = {

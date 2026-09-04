@@ -34,13 +34,23 @@ _GENERIC_SESSION_INVALID_MESSAGE = "Phiên đăng nhập đã hết hiệu lực
 # Requests to these endpoints are exempt from the per-request DB validation:
 # Flask's own static file handler, and every endpoint someone must be able
 # to reach *before* they have a valid/authenticated session.
-_EXEMPT_ENDPOINTS = {
+#
+# Phase 6A: also imported by `middleware_access.py` (the IP-allowlist
+# before_request hook) so BOTH pre-auth-reachability checks agree on the
+# exact same set of endpoints -- login/logout/Google entry+callback must
+# stay reachable to authenticate or end a session even when the caller's
+# team/IP policy would otherwise deny it (see that module's docstring).
+# Public name (no leading underscore) precisely because it is now a
+# cross-module contract, not a private implementation detail of this file.
+PRE_AUTH_EXEMPT_ENDPOINTS = {
     "static",
     "login",
     "session_security.logout",
     "auth_google.google_login",
     "auth_google.google_callback",
 }
+# Backward-compatible alias for any in-module reference.
+_EXEMPT_ENDPOINTS = PRE_AUTH_EXEMPT_ENDPOINTS
 
 
 def get_csrf_token() -> str:

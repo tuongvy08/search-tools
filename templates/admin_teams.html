@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quản lý Team</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 1100px; margin: 24px auto; padding: 0 12px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin-bottom: 16px; background: #fff; }
+    .ok { color: #0b7a0b; }
+    .err { color: #b00020; white-space: pre-wrap; margin-bottom: 12px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+    th, td { border: 1px solid #ddd; padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #f4f7fe; color: #2e45b6; }
+    code { background: #f6f6f6; padding: 1px 4px; border-radius: 4px; }
+    .nav a { margin-right: 12px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    input[type="text"], input[type="password"], select {
+      padding: 8px 10px; border: 1px solid #ddd; border-radius: 8px; background: #fff; font-family: inherit;
+      min-width: 200px;
+    }
+    button { padding: 10px 14px; border-radius: 8px; border: 1px solid #ddd; background: #fff; cursor: pointer; font-weight: 600; }
+    button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+    button.danger { background: #dc2626; color: #fff; border-color: #dc2626; }
+    .muted { color: #555; font-size: 0.95rem; }
+    .small { font-size: 0.9rem; color: #666; }
+    .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; background: #eef2ff; color: #3730a3; font-size: 0.8rem; }
+    .brand-picker { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; margin: 8px 0; background: #fafafa; }
+    .brand-filter { width: 100%; box-sizing: border-box; margin-bottom: 8px; min-width: 0; }
+    .brand-checkbox-list { max-height: 220px; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+    .brand-check-row { display: flex; align-items: center; gap: 6px; font-size: 0.9rem; white-space: nowrap; }
+    details > summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
+    .diff-added { color: #0b7a0b; }
+    .diff-removed { color: #b00020; text-decoration: line-through; }
+    .preview-card { border: 2px solid #2563eb; }
+    .stale-banner { background: #fef3c7; border: 1px solid #f59e0b; padding: 10px; border-radius: 8px; margin-bottom: 10px; color: #92400e; }
+    @media (max-width: 600px) {
+      .row { flex-direction: column; align-items: stretch; }
+      input[type="text"], select { min-width: 0; width: 100%; }
+      table, thead, tbody, th, td, tr { display: block; }
+      thead { display: none; }
+      tr { border: 1px solid #ddd; border-radius: 8px; margin-bottom: 10px; padding: 6px; }
+      td { border: none; padding: 4px 6px; }
+      td::before { content: attr(data-label); display: block; font-weight: 600; color: #2e45b6; font-size: 0.75rem; }
+    }
+  </style>
+</head>
+<body>
+  {% include "_user_nav.html" %}
+  <div class="nav" style="margin-bottom: 12px;">
+    <a href="/">Search</a>
+    <a href="/admin/imports">Imports</a>
+    <a href="/admin/network">Mạng / IP</a>
+    <a href="/admin/teams"><b>Teams</b></a>
+    <a href="/admin/users">Users</a>
+    <a href="/admin/brand-compliance">Manual compliance</a>
+  </div>
+
+  <h1 style="margin-top:0;">Quản lý Team</h1>
+  <p class="muted">
+    Team là nơi quản lý brand được phép thấy và chính sách IP. Gán user vào team ở
+    <a href="/admin/users">trang Users</a>. Team không có brand nào thì thành viên của team đó
+    không thấy sản phẩm nào.
+  </p>
+
+  {% if message %}<p class="ok">{{ message }}</p>{% endif %}
+  {% if error %}<p class="err">{{ error }}</p>{% endif %}
+
+  {% if preview_result %}
+  <div class="card preview-card">
+    <h2 style="margin-top:0;">Xem trước thay đổi quyền -- team "{{ preview_result.team_name }}"</h2>
+
+    {% if preview_result.stale %}
+      <div class="stale-banner">
+        <b>Dữ liệu team đã thay đổi</b> kể từ khi bạn xem trước (có thể do admin khác vừa sửa).
+        Vui lòng đóng xem trước này và chọn "Chỉnh brand / IP" lại để xem trước phiên bản mới nhất.
+      </div>
+    {% endif %}
+
+    <table>
+      <tbody>
+        <tr>
+          <td data-label="Brand thêm"><b>Brand sẽ thêm</b></td>
+          <td data-label="">
+            {% if preview_result.brands_added %}
+              {% for b in preview_result.brands_added %}<span class="diff-added">+ {{ b }}</span><br>{% endfor %}
+            {% else %}<span class="muted">Không có</span>{% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td data-label="Brand bớt"><b>Brand sẽ bớt</b></td>
+          <td data-label="">
+            {% if preview_result.brands_removed %}
+              {% for b in preview_result.brands_removed %}<span class="diff-removed">- {{ b }}</span><br>{% endfor %}
+            {% else %}<span class="muted">Không có</span>{% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td data-label="Chính sách IP"><b>Chính sách IP</b></td>
+          <td data-label="">
+            {% if preview_result.ip_policy_changed %}
+              <span class="diff-removed">{{ preview_result.current_ip_policy_label }}</span>
+              &rarr;
+              <span class="diff-added">{{ preview_result.new_ip_policy_label }}</span>
+            {% else %}
+              Giữ nguyên: {{ preview_result.current_ip_policy_label }}
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td data-label="Thành viên bị ảnh hưởng"><b>Thành viên bị ảnh hưởng ({{ preview_result.affected_members|length }})</b></td>
+          <td data-label="">
+            {% if preview_result.affected_members %}
+              {% for m in preview_result.affected_members %}
+                <span class="pill">{{ m.label }} ({{ m.auth_provider }}, {{ m.account_status }})</span>
+              {% endfor %}
+            {% else %}<span class="muted">Chưa có thành viên nào trong team này.</span>{% endif %}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="row" style="margin-top:12px;">
+      {% if not preview_result.stale %}
+        <form method="post" action="{{ url_for('admin_teams.confirm_permissions') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="preview_token" value="{{ preview_result.token }}">
+          <button class="primary" type="submit">Xác nhận áp dụng</button>
+        </form>
+      {% endif %}
+      <a href="/admin/teams"><button type="button">Đóng xem trước</button></a>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h2 style="margin-top:0;">Tạo team mới</h2>
+    <form method="post" action="{{ url_for('admin_teams.create_team') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <div class="row" style="margin-bottom:8px;">
+        <div class="field">
+          <label>Tên team</label>
+          <input type="text" name="name" required placeholder="vd: Team Sales HN" />
+        </div>
+        <div class="field">
+          <label>Chính sách IP</label>
+          <select name="ip_policy">
+            {% for p in ip_policies %}
+              <option value="{{ p }}" {{ 'selected' if p == 'INHERIT' else '' }}>{{ ip_policy_labels[p] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label>Brand cho phép (tìm kiếm rồi tick chọn -- không nhập tay)</label>
+        <div class="brand-picker" data-picker="create">
+          <input type="text" class="brand-filter" placeholder="Tìm brand..." />
+          <div class="brand-checkbox-list">
+            {% for b in distinct_brands %}
+              <label class="brand-check-row" data-brand-label="{{ b|lower }}">
+                <input type="checkbox" name="brands" value="{{ b }}"> {{ b }}
+              </label>
+            {% endfor %}
+          </div>
+        </div>
+        {% if not distinct_brands %}<div class="small muted">Chưa có brand nào trong dữ liệu sản phẩm.</div>{% endif %}
+      </div>
+      <button class="primary" type="submit" style="margin-top:10px;">Tạo team</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Danh sách team</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Tên</th>
+          <th>Số thành viên</th>
+          <th>Brand được phép</th>
+          <th>Chính sách IP</th>
+          <th>Hành động</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in teams %}
+        <tr>
+          <td data-label="Tên"><b>{{ t.name }}</b></td>
+          <td data-label="Số thành viên">{{ t.member_count }}</td>
+          <td data-label="Brand được phép">
+            {% if t.brands %}
+              {{ t.brands|length }} brand
+              <div class="small muted">{{ t.brands[:8]|join(', ') }}{% if t.brands|length > 8 %}, ...{% endif %}</div>
+            {% else %}
+              <span class="err small">0 brand -- thành viên không thấy sản phẩm nào</span>
+            {% endif %}
+          </td>
+          <td data-label="Chính sách IP">{{ t.ip_policy_label }}</td>
+          <td data-label="Hành động" style="min-width: 260px;">
+            <form method="post" action="{{ url_for('admin_teams.rename_team') }}" style="display:flex; gap:6px; margin-bottom:8px;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="team_id" value="{{ t.id }}">
+              <input type="text" name="name" value="{{ t.name }}" style="min-width:140px;">
+              <button type="submit">Đổi tên</button>
+            </form>
+
+            <details>
+              <summary>Chỉnh brand / chính sách IP</summary>
+              <form method="post" action="{{ url_for('admin_teams.preview_permissions') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="team_id" value="{{ t.id }}">
+
+                <div class="field" style="margin:8px 0;">
+                  <label>Chính sách IP</label>
+                  <select name="ip_policy">
+                    {% for p in ip_policies %}
+                      <option value="{{ p }}" {{ 'selected' if p == t.ip_policy else '' }}>{{ ip_policy_labels[p] }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+
+                <div class="brand-picker" data-picker="edit-{{ t.id }}">
+                  <input type="text" class="brand-filter" placeholder="Tìm brand..." />
+                  <div class="brand-checkbox-list">
+                    {% for b in distinct_brands %}
+                      <label class="brand-check-row" data-brand-label="{{ b|lower }}">
+                        <input type="checkbox" name="brands" value="{{ b }}" {{ 'checked' if b in t.brands else '' }}> {{ b }}
+                      </label>
+                    {% endfor %}
+                  </div>
+                </div>
+
+                <button class="primary" type="submit" style="margin-top:8px;">Xem trước thay đổi</button>
+              </form>
+            </details>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="muted">Chưa có team nào -- tạo team ở form phía trên.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    // Pure DOM filter (no innerHTML, nothing DB-sourced ever written into
+    // markup here beyond what Jinja already rendered/escaped above) --
+    // same technique as admin_users.html's Google-account status filter.
+    (function () {
+      document.querySelectorAll('.brand-picker').forEach(function (picker) {
+        var input = picker.querySelector('.brand-filter');
+        var rows = picker.querySelectorAll('.brand-check-row');
+        if (!input) return;
+        input.addEventListener('input', function () {
+          var needle = input.value.trim().toLowerCase();
+          rows.forEach(function (row) {
+            var label = row.getAttribute('data-brand-label') || '';
+            row.style.display = (!needle || label.indexOf(needle) !== -1) ? '' : 'none';
+          });
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

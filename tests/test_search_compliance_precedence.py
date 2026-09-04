@@ -1,8 +1,18 @@
-"""End-to-end /search compliance precedence checks (local DB only)."""
+"""End-to-end /search compliance precedence checks (local DB only).
+
+Phase 6A -- Local Release Gate: `setUpClass` used to connect straight to
+whatever `DATABASE_URL` pointed at (in practice `products_local`, per
+`.env`); it now creates its own throwaway, uniquely-named database (see
+`tests/pg_temp_db.py`) and patches `DATABASE_URL` to point at it for the
+whole class, so `_local_dsn()` below (used both by this class's own
+fixture connection and by `RecordingConnection` inside `_call_search`)
+resolves to the temp DB instead of the real environment/`.env` value.
+"""
 
 import os
 import re
 import unittest
+from unittest import mock
 from unittest.mock import patch
 from urllib.parse import urlparse
 
@@ -13,6 +23,12 @@ load_dotenv(dotenv_path=".env")
 
 import search  # noqa: E402
 from auth_test_helpers import start_auth_db_patch  # noqa: E402
+from pg_temp_db import (  # noqa: E402
+    apply_sql_file_statement_by_statement,
+    create_full_schema_temp_db,
+    drop_temp_db,
+    probe_postgres_reachable,
+)
 
 
 def _local_dsn():
@@ -59,7 +75,7 @@ class RecordingConnection:
         self._conn.close()
 
 
-@unittest.skipUnless(_local_dsn(), "local DATABASE_URL required")
+@unittest.skipUnless(probe_postgres_reachable(), "local Postgres required")
 class SearchCompliancePrecedenceTests(unittest.TestCase):
     PREFIX = "CURSOR_PRECEDENCE"
     BRAND_ENABLED = "CURSOR_PRECEDENCE_ENABLED"
@@ -70,17 +86,30 @@ class SearchCompliancePrecedenceTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.conn = psycopg2.connect(_local_dsn())
-        cls.conn.autocommit = True
-        cls._ensure_schema()
-        cls._reset_fixture()
+        cls.db_name, cls.dsn = create_full_schema_temp_db()
+        # unittest does NOT call tearDownClass if setUpClass raises --
+        # anything below that fails would otherwise leak this temp DB
+        # forever, so clean up ourselves on any exception past this point.
+        try:
+            cls._env_patch = mock.patch.dict("os.environ", {"DATABASE_URL": cls.dsn})
+            cls._env_patch.start()
+            cls.conn = psycopg2.connect(_local_dsn())
+            cls.conn.autocommit = True
+            cls._reset_fixture()
+            cls._seed_trgm_index_prerequisite()
+        except Exception:
+            drop_temp_db(cls.db_name)
+            raise
 
     @classmethod
     def tearDownClass(cls):
         try:
-            cls._cleanup_fixture()
-        finally:
             cls.conn.close()
+        finally:
+            try:
+                drop_temp_db(cls.db_name)
+            finally:
+                cls._env_patch.stop()
 
     def setUp(self):
         # Phase 5D2A: stub the per-request session-liveness DB check with an
@@ -88,28 +117,21 @@ class SearchCompliancePrecedenceTests(unittest.TestCase):
         start_auth_db_patch(self)
 
     @classmethod
-    def _ensure_schema(cls):
+    def _seed_trgm_index_prerequisite(cls):
+        """`test_specific_search_plan_uses_trigram_index` forces
+        `enable_seqscan = off` and asserts the planner falls back to one of
+        migration_010's trigram indexes -- unlike the plan-shape assertions
+        in `test_batch_queries.py`, this doesn't depend on data volume (the
+        `enable_seqscan=off` GUC rules out seq scan regardless of table
+        size), it just needs the index to actually exist, which the base
+        `pg_temp_db` schema set deliberately doesn't include (not every
+        caller needs it). `CREATE INDEX CONCURRENTLY` needs autocommit
+        (already set) and one statement per `execute()` call -- see
+        `test_batch_queries.py`'s `_seed_perf_index_prerequisites` for why.
+        """
+        path = os.path.join(os.path.dirname(__file__), "..", "sql", "migration_010_search_trgm_indexes.sql")
         with cls.conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT 1
-                FROM information_schema.columns
-                WHERE table_name = 'products'
-                  AND column_name IN ('manual_compliance', 'manual_compliance_note')
-                HAVING COUNT(*) = 2
-                """
-            )
-            if cur.fetchone() is None:
-                raise unittest.SkipTest("Run sql/migration_011_manual_compliance.sql on local DB first.")
-            cur.execute(
-                """
-                SELECT 1
-                FROM information_schema.tables
-                WHERE table_name = 'brand_compliance_settings'
-                """
-            )
-            if cur.fetchone() is None:
-                raise unittest.SkipTest("Run sql/migration_011_manual_compliance.sql on local DB first.")
+            apply_sql_file_statement_by_statement(cur, path)
 
     @classmethod
     def _cleanup_fixture(cls):

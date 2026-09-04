@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import unittest
 from pathlib import Path
+from unittest import mock
 from unittest.mock import MagicMock, patch
 
 import search  # noqa: E402
@@ -1120,12 +1121,29 @@ class QuickQuoteHelperMirrorTests(QuickQuoteMirrorHelpers, unittest.TestCase):
 
 
 class QuickQuoteRouteTests(unittest.TestCase):
+    """Phase 6A -- Local Release Gate: `test_team_render_includes_brand_fixture`
+    below is the only test in this class using a non-admin session
+    (`team_id=1`), and it's testing template rendering of the team's brand
+    fixture, not IP policy. Without this, it would fall through
+    `middleware_access.py`'s REAL `teams.ip_policy` lookup against whatever
+    `DATABASE_URL` is ambient (`products_local`, which doesn't have
+    migration_015's `ip_policy` column applied) and get a 503 that has
+    nothing to do with what the test actually verifies. Scope
+    `DISABLE_IP_ALLOWLIST` to just this class (same pattern as
+    `test_quote_assistant_api.py`'s `QuoteAssistantUnitTests`) rather than
+    mocking `middleware_access.get_connection` for a policy this class never
+    exercises either way.
+    """
+
     def setUp(self):
         search.app.testing = True
         self.client = search.app.test_client()
         # Phase 5D2A: stub the per-request session-liveness DB check with an
         # in-memory fake (no real Postgres touched) for every test here.
         start_auth_db_patch(self)
+        self._disable_ip_patch = mock.patch.dict("os.environ", {"DISABLE_IP_ALLOWLIST": "1"})
+        self._disable_ip_patch.start()
+        self.addCleanup(self._disable_ip_patch.stop)
 
     def _auth(self, admin=True):
         with self.client.session_transaction() as sess:

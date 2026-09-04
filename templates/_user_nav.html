@@ -10,6 +10,7 @@
     {% if session.get('is_admin') %}
     <a href="{{ url_for('admin_imports') }}">Quản trị</a>
     <a href="{{ url_for('admin_quote_templates_page') }}">Mẫu báo giá</a>
+    <a href="{{ url_for('admin_teams.index') }}">Team</a>
     <a href="{{ url_for('admin_users') }}">Người dùng</a>
     <a href="{{ url_for('admin_login_history.index') }}">Lịch sử đăng nhập</a>
     {% endif %}

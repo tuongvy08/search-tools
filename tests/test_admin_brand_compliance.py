@@ -1,9 +1,21 @@
-"""Admin brand manual compliance toggle tests (local DB only)."""
+"""Admin brand manual compliance toggle tests (local DB only).
 
-import os
+Phase 6A -- Local Release Gate: this class used to `psycopg2.connect()`
+directly to whatever `DATABASE_URL` pointed at (in practice the real local
+app database, `products_local`, per `.env`) and write a `CURSOR_*`-prefixed
+fixture there, cleaning it up in tearDown. That was an acceptable pattern
+before Phase 6A's always-on IP/team-policy middleware existed; now a real
+Flask request through an authenticated session also triggers a real policy
+read against whatever `teams`/`office_ip_allowlist` rows happen to be in
+the target database, which `products_local` has no business influencing or
+being influenced by. Runs against its own throwaway, uniquely-named
+database instead -- see `tests/pg_temp_db.py` for the schema/isolation
+contract; never touches `products_local`.
+"""
+
 import re
 import unittest
-from urllib.parse import urlparse
+from unittest import mock
 
 import psycopg2
 from dotenv import load_dotenv
@@ -12,20 +24,11 @@ load_dotenv(dotenv_path=".env")
 
 import search  # noqa: E402
 from auth_test_helpers import start_auth_db_patch  # noqa: E402
+from pg_temp_db import create_full_schema_temp_db, drop_temp_db, probe_postgres_reachable  # noqa: E402
 from search import _BRAND_COMPLIANCE_LIST_SQL  # noqa: E402
 
 
-def _local_dsn():
-    dsn = os.environ.get("DATABASE_URL")
-    if not dsn:
-        return None
-    host = urlparse(dsn).hostname or ""
-    if host not in {"127.0.0.1", "localhost", "::1"}:
-        return None
-    return dsn
-
-
-@unittest.skipUnless(_local_dsn(), "local DATABASE_URL required")
+@unittest.skipUnless(probe_postgres_reachable(), "local Postgres required")
 class AdminBrandComplianceTests(unittest.TestCase):
     PREFIX = "CURSOR_ADMIN_BRAND"
     BRAND_DISPLAY = " Cursor Admin Brand "
@@ -35,30 +38,47 @@ class AdminBrandComplianceTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.conn = psycopg2.connect(_local_dsn())
-        cls.conn.autocommit = True
-        cls._ensure_schema()
-        cls._reset_fixture()
+        cls.db_name, cls.dsn = create_full_schema_temp_db()
+        # unittest does NOT call tearDownClass if setUpClass raises --
+        # anything below that fails would otherwise leak this temp DB
+        # forever, so clean up ourselves on any exception past this point.
+        try:
+            # The Flask routes under test (via `self._client(...)`) call
+            # `search.get_connection()` == `db.get_connection()`, which
+            # reads `DATABASE_URL` fresh from the environment on every
+            # call -- patch it for the whole class so the app's OWN
+            # queries during a test request land in the same temp DB as
+            # this class's own fixture connection, never `products_local`.
+            cls._env_patch = mock.patch.dict("os.environ", {"DATABASE_URL": cls.dsn})
+            cls._env_patch.start()
+            cls.conn = psycopg2.connect(cls.dsn)
+            cls.conn.autocommit = True
+            cls._reset_fixture()
+            # Phase 6A team model: a non-admin session MUST carry a real
+            # `team_id` (staff without one is a data/session inconsistency
+            # that middleware_access.py now correctly fail-closes on --
+            # see `_load_team_ip_policy`'s docstring). This class predates
+            # the team model and only needs SOME valid team to exercise
+            # its own admin-only route guard, not team-scoped brand
+            # visibility.
+            with cls.conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO teams (name, ip_policy) VALUES ('Brand Compliance Test Team', 'INHERIT') RETURNING id"
+                )
+                cls.team_id = cur.fetchone()[0]
+        except Exception:
+            drop_temp_db(cls.db_name)
+            raise
 
     @classmethod
     def tearDownClass(cls):
         try:
-            cls._cleanup_fixture()
-        finally:
             cls.conn.close()
-
-    @classmethod
-    def _ensure_schema(cls):
-        with cls.conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT 1
-                FROM information_schema.tables
-                WHERE table_name = 'brand_compliance_settings'
-                """
-            )
-            if cur.fetchone() is None:
-                raise unittest.SkipTest("Run sql/migration_011_manual_compliance.sql on local DB first.")
+        finally:
+            try:
+                drop_temp_db(cls.db_name)
+            finally:
+                cls._env_patch.stop()
 
     @classmethod
     def _cleanup_fixture(cls):
@@ -134,6 +154,10 @@ class AdminBrandComplianceTests(unittest.TestCase):
                 sess["user_id"] = 1
                 sess["auth_version"] = 1
                 sess["is_admin"] = is_admin
+                if not is_admin:
+                    # Real middleware now requires a real team_id for any
+                    # authenticated non-admin session -- see setUpClass.
+                    sess["team_id"] = self.team_id
         return client
 
     def _post_toggle(self, client, *, brand_norm, action):

@@ -49,7 +49,9 @@ import admin_google_users
 import search
 import session_security
 
+MIGRATION_006_PATH = os.path.join(os.path.dirname(__file__), "..", "sql", "migration_006_office_ip_allowlist.sql")
 MIGRATION_014_PATH = os.path.join(os.path.dirname(__file__), "..", "sql", "migration_014_google_oidc.sql")
+MIGRATION_015_PATH = os.path.join(os.path.dirname(__file__), "..", "sql", "migration_015_team_policy.sql")
 
 _REAL_DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
@@ -89,6 +91,28 @@ _TEST_DB_PREFIX = "sd2b2_pgtest_"
 
 with open(MIGRATION_014_PATH, "r", encoding="utf-8") as _f:
     _MIGRATION_014_SQL = _f.read()
+
+# Phase 6A: teams.ip_policy / teams.updated_at / login_audit_events.target_team_id
+# -- write_permission_audit() now always inserts target_team_id, and
+# middleware_access._load_team_ip_policy() reads teams.ip_policy, so this
+# fixture schema must have both for the real-Postgres flows exercised below
+# to behave like a fully-migrated app DB (never applied to products_local).
+with open(MIGRATION_015_PATH, "r", encoding="utf-8") as _f:
+    _MIGRATION_015_SQL = _f.read()
+
+# Phase 6A-Fix1: `middleware_access._restrict_office_ip` runs as a REAL
+# `before_request` hook on `search.app` for every request this file makes
+# (every test here uses `search.app.test_client()`, and `DATABASE_URL` is
+# patched to point at this file's own temp DB -- see `_env_patch` below --
+# so `middleware_access.get_connection()` also lands on THIS DB, not
+# `products_local`). Fix1 made a failed/missing-table read of
+# `office_ip_allowlist` a hard 503 instead of silently swallowing to "no
+# rules" -- so this fixture must actually create that table (every
+# session here is an admin session -> INHERIT -> reads this table) for
+# these concurrency/lock tests to keep exercising real admin-route
+# behaviour instead of being short-circuited by the IP middleware.
+with open(MIGRATION_006_PATH, "r", encoding="utf-8") as _f:
+    _MIGRATION_006_SQL = _f.read()
 
 _MINIMAL_BASE_SCHEMA_SQL = """
 CREATE TABLE teams (
@@ -138,6 +162,8 @@ class _RealPgTestBase(unittest.TestCase):
                 with conn.cursor() as cur:
                     cur.execute(_MINIMAL_BASE_SCHEMA_SQL)
                     cur.execute(_MIGRATION_014_SQL)
+                    cur.execute(_MIGRATION_015_SQL)
+                    cur.execute(_MIGRATION_006_SQL)
         finally:
             conn.close()
 
@@ -218,6 +244,22 @@ class _RealPgTestBase(unittest.TestCase):
         finally:
             conn.close()
         return uid
+
+    def _insert_team(self, name="Team A"):
+        """Phase 6A: `update_user`'s staff/non-admin branch now requires an
+        existing, real `team_id` (no more auto-created "User:{username}"
+        team) -- tests that demote/keep an admin as staff need one to
+        exist first.
+        """
+        conn = self._connect()
+        try:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute("INSERT INTO teams (name) VALUES (%s) RETURNING id", (name,))
+                    (tid,) = cur.fetchone()
+        finally:
+            conn.close()
+        return tid
 
     def _fetch_user(self, uid):
         conn = self._connect()
@@ -401,6 +443,7 @@ class RealConcurrencyTests(_RealPgTestBase):
                                 auth_provider="GOOGLE", google_sub="sub-g1",
                                 is_admin=True, account_status="ACTIVE")
         l1 = self._insert_user(username="l1_admin", is_admin=True, account_status="ACTIVE")
+        demote_team_id = self._insert_team("Demote Target Team")
 
         barrier = threading.Barrier(2)
         results = {}
@@ -420,7 +463,7 @@ class RealConcurrencyTests(_RealPgTestBase):
             resp = client.post(
                 "/admin/users",
                 data={"action": "update_user", "user_id": str(l1), "role": "staff",
-                      "brands": "Sigma", "csrf_token": "the-real-token"},
+                      "team_id": str(demote_team_id), "csrf_token": "the-real-token"},
             )
             results["demote"] = resp.status_code
 
@@ -579,6 +622,7 @@ class RealConcurrencyTests(_RealPgTestBase):
                                 is_admin=True, account_status="ACTIVE")
         l_actor = self._insert_user(username="l_actor", is_admin=True, account_status="ACTIVE")
         l_target = self._insert_user(username="l_target", is_admin=True, account_status="ACTIVE")
+        demote_team_id = self._insert_team("Demote Target Team")
 
         holder_conn = psycopg2.connect(self.test_dsn)
         holder_conn.autocommit = False
@@ -600,7 +644,7 @@ class RealConcurrencyTests(_RealPgTestBase):
             resp = local_client.post(
                 "/admin/users",
                 data={"action": "update_user", "user_id": str(l_target), "role": "staff",
-                      "brands": "Sigma", "csrf_token": "the-real-token"},
+                      "team_id": str(demote_team_id), "csrf_token": "the-real-token"},
             )
             results["local"] = resp.status_code
 

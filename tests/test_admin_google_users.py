@@ -187,6 +187,13 @@ class FakeCursor:
             uid = db.insert_invited(email)
             self._result = [(uid,)]
 
+        elif s.startswith("UPDATE teams SET updated_at = NOW() WHERE id = ANY(%s)"):
+            # Phase 6A-Fix2: admin_google_users.touch_team_updated_at,
+            # called from approve()/update() whenever a user's team_id is
+            # set/changed. This fake DB doesn't model `updated_at` at all;
+            # just accept the call.
+            self._result = []
+
         elif s.startswith("INSERT INTO login_audit_events"):
             db.audits.append(params)
             self._result = []
@@ -245,6 +252,16 @@ class _ClientTestCase(unittest.TestCase):
         patcher = mock.patch.object(session_security, "get_connection", _passthrough_session_connection)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # This file is about the admin-vs-staff ROLE guard and the Google
+        # user actions themselves, not IP/team policy. Some sessions here
+        # (e.g. staff without a team_id) would otherwise now be denied by
+        # middleware_access.py's own (correct, Phase 6A-Fix1) fail-closed
+        # behaviour before ever reaching the role guard under test --
+        # disable the IP allowlist middleware here via its documented
+        # escape hatch so this file keeps testing exactly what it says.
+        env_patcher = mock.patch.dict(os.environ, {"DISABLE_IP_ALLOWLIST": "1"})
+        env_patcher.start()
+        self.addCleanup(env_patcher.stop)
 
     def _set_session(self, **kwargs):
         with self.client.session_transaction() as sess:
@@ -354,7 +371,7 @@ class ApproveTests(_ClientTestCase):
         self.assertFalse(db.users[5]["is_admin"])
         self.assertEqual(db.users[5]["approved_by"], 1)
         self.assertEqual(db.users[5]["auth_version"], 2)
-        self.assertEqual(db.audits[-1][3], "USER_APPROVED")
+        self.assertEqual(db.audits[-1][4], "USER_APPROVED")
 
     def test_approve_admin_role_forces_team_null_even_if_team_sent(self):
         self._admin_session(user_id=1)
@@ -475,7 +492,7 @@ class InviteTests(_ClientTestCase):
         self.assertEqual(created[0]["account_status"], "INVITED")
         self.assertIsNone(created[0]["google_sub"])
         self.assertEqual(created[0]["auth_provider"], "GOOGLE")
-        self.assertEqual(db.audits[-1][3], "USER_INVITED")
+        self.assertEqual(db.audits[-1][4], "USER_INVITED")
 
     def test_invite_disallowed_domain_rejected(self):
         self._admin_session(user_id=1)
@@ -530,7 +547,7 @@ class SuspendTests(_ClientTestCase):
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(db.users[5]["account_status"], "SUSPENDED")
         self.assertEqual(db.users[5]["auth_version"], 5)
-        self.assertEqual(db.audits[-1][3], "USER_SUSPENDED")
+        self.assertEqual(db.audits[-1][4], "USER_SUSPENDED")
 
     def test_cannot_self_suspend(self):
         self._admin_session(user_id=1)
@@ -674,7 +691,7 @@ class ReactivateTests(_ClientTestCase):
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(db.users[5]["account_status"], "ACTIVE")
         self.assertEqual(db.users[5]["auth_version"], 3)
-        self.assertEqual(db.audits[-1][3], "USER_REACTIVATED")
+        self.assertEqual(db.audits[-1][4], "USER_REACTIVATED")
 
     def test_reactivate_suspended_without_google_sub_becomes_invited(self):
         self._admin_session(user_id=1)
@@ -730,7 +747,7 @@ class RevokeSessionsTests(_ClientTestCase):
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(db.users[5]["account_status"], "ACTIVE")  # unchanged
         self.assertEqual(db.users[5]["auth_version"], 8)
-        self.assertEqual(db.audits[-1][3], "USER_SESSIONS_REVOKED")
+        self.assertEqual(db.audits[-1][4], "USER_SESSIONS_REVOKED")
 
     def test_revoke_on_unknown_or_non_google_user_rejected(self):
         self._admin_session(user_id=1)
@@ -840,11 +857,13 @@ class AuditSafetyTests(_ClientTestCase):
         with mock.patch.object(admin_google_users, "get_connection", _fake_get_connection(db)):
             self.client.post("/admin/users/google/suspend", data=self._csrf_form(user_id="5"))
         self.assertEqual(len(db.audits), 1)
-        target_user_id, actor_user_id, outcome, reason_code = db.audits[0]
+        target_user_id, actor_user_id, provider, outcome, reason_code, target_team_id = db.audits[0]
         self.assertEqual(target_user_id, 5)
         self.assertEqual(actor_user_id, 1)
+        self.assertEqual(provider, "GOOGLE")
         self.assertEqual(outcome, "SUCCESS")
         self.assertEqual(reason_code, "USER_SUSPENDED")
+        self.assertIsNone(target_team_id)
         for value in db.audits[0]:
             self.assertNotIn("super-secret-sub-value", str(value))
             self.assertNotIn("token", str(value).lower())

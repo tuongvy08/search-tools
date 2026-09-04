@@ -1,10 +1,16 @@
-"""Tests for /search table display fields and Copy Selected column output."""
+"""Tests for /search table display fields and Copy Selected column output.
 
-import os
+Phase 6A -- Local Release Gate: `SearchDisplayIntegrationTests` used to
+connect straight to whatever `DATABASE_URL` pointed at (in practice
+`products_local`, per `.env`); it now runs against its own throwaway,
+uniquely-named database instead (see `tests/pg_temp_db.py`), never
+touching `products_local`.
+"""
+
 import re
 import unittest
 from pathlib import Path
-from urllib.parse import urlparse
+from unittest import mock
 
 import psycopg2
 from dotenv import load_dotenv
@@ -14,20 +20,11 @@ load_dotenv(dotenv_path=".env")
 import search  # noqa: E402
 from auth_test_helpers import start_auth_db_patch  # noqa: E402
 from compliance_resolver import resolve_compliance_precedence  # noqa: E402
+from pg_temp_db import create_full_schema_temp_db, drop_temp_db, probe_postgres_reachable  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_JS = ROOT / "static" / "script.js"
 INDEX_HTML = ROOT / "templates" / "index.html"
-
-
-def _local_dsn():
-    dsn = os.environ.get("DATABASE_URL")
-    if not dsn:
-        return None
-    host = urlparse(dsn).hostname or ""
-    if host not in {"127.0.0.1", "localhost", "::1"}:
-        return None
-    return dsn
 
 
 def _product_note(product):
@@ -304,7 +301,7 @@ class SearchDisplayCopySelectionTests(unittest.TestCase):
         self.assertIn("Bỏ chọn tất cả", INDEX_HTML.read_text(encoding="utf-8"))
 
 
-@unittest.skipUnless(_local_dsn(), "local DATABASE_URL required")
+@unittest.skipUnless(probe_postgres_reachable(), "local Postgres required")
 class SearchDisplayIntegrationTests(unittest.TestCase):
     PREFIX = "CURSOR_DISPLAY"
     BRAND = "CURSOR_DISPLAY_BRAND"
@@ -313,30 +310,30 @@ class SearchDisplayIntegrationTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.conn = psycopg2.connect(_local_dsn())
-        cls.conn.autocommit = True
-        cls._ensure_schema()
-        cls._reset_fixture()
+        cls.db_name, cls.dsn = create_full_schema_temp_db()
+        try:
+            # `/search` (hit via `self._search_row()`) calls
+            # `search.get_connection()` == `db.get_connection()`, which
+            # reads `DATABASE_URL` fresh on every call -- patch it for the
+            # whole class so the app's own query lands in the same temp DB.
+            cls._env_patch = mock.patch.dict("os.environ", {"DATABASE_URL": cls.dsn})
+            cls._env_patch.start()
+            cls.conn = psycopg2.connect(cls.dsn)
+            cls.conn.autocommit = True
+            cls._reset_fixture()
+        except Exception:
+            drop_temp_db(cls.db_name)
+            raise
 
     @classmethod
     def tearDownClass(cls):
         try:
-            cls._cleanup_fixture()
-        finally:
             cls.conn.close()
-
-    @classmethod
-    def _ensure_schema(cls):
-        with cls.conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT 1
-                FROM information_schema.tables
-                WHERE table_name = 'brand_compliance_settings'
-                """
-            )
-            if cur.fetchone() is None:
-                raise unittest.SkipTest("Run sql/migration_011_manual_compliance.sql on local DB first.")
+        finally:
+            try:
+                drop_temp_db(cls.db_name)
+            finally:
+                cls._env_patch.stop()
 
     @classmethod
     def _cleanup_fixture(cls):

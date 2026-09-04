@@ -1,9 +1,20 @@
-"""Quote Assistant matching API checks (local DB only)."""
+"""Quote Assistant matching API checks (local DB only).
+
+Phase 6A -- Local Release Gate: `QuoteAssistantApiTests` used to connect
+straight to whatever `DATABASE_URL` pointed at (in practice
+`products_local`, per `.env`); it now creates its own throwaway,
+uniquely-named database (see `tests/pg_temp_db.py`) and patches
+`DATABASE_URL` to point at it for the whole class, so `_local_dsn()` below
+(used both by this class's own fixture connection and by
+`RecordingConnection` inside `_call_api`) resolves to the temp DB instead
+of the real environment/`.env` value.
+"""
 
 import os
 import re
 import time
 import unittest
+from unittest import mock
 from unittest.mock import patch
 from urllib.parse import urlparse
 
@@ -14,6 +25,12 @@ load_dotenv(dotenv_path=".env")
 
 import search  # noqa: E402
 from auth_test_helpers import auth_db_patch, start_auth_db_patch  # noqa: E402
+from pg_temp_db import (  # noqa: E402
+    apply_sql_file_statement_by_statement,
+    create_full_schema_temp_db,
+    drop_temp_db,
+    probe_postgres_reachable,
+)
 
 
 def _local_dsn():
@@ -32,6 +49,28 @@ def _local_dsn():
 
 
 class QuoteAssistantUnitTests(unittest.TestCase):
+    """Phase 6A -- Local Release Gate finding: this class has no
+    `@unittest.skipUnless(_local_dsn(), ...)` guard (unlike
+    `QuoteAssistantApiTests` below) -- it's meant to run everywhere, with
+    no real Postgres required. But its one Flask-route test uses a
+    non-admin session with a synthetic `team_id=123`, which the real,
+    always-on IP/team-policy middleware (`middleware_access.py`, Fix1) now
+    looks up with a genuine, UNMOCKED `teams.ip_policy` query -- landing on
+    whatever `DATABASE_URL` happens to be (in practice `products_local`,
+    per `.env`) and getting a real 503 there instead of the 200 this test
+    asserts, since team 123 doesn't exist / `products_local` doesn't have
+    migration_015 applied. This test is about payload validation, not IP
+    policy, so scope `DISABLE_IP_ALLOWLIST` narrowly to just this class
+    (same pattern as `test_quote_templates.py`/`test_admin_teams.py`)
+    rather than mocking `middleware_access.get_connection` for a policy
+    this test isn't exercising either way.
+    """
+
+    def setUp(self):
+        self._disable_ip_patch = mock.patch.dict("os.environ", {"DISABLE_IP_ALLOWLIST": "1"})
+        self._disable_ip_patch.start()
+        self.addCleanup(self._disable_ip_patch.stop)
+
     def test_payload_validation_and_missing_identifier_route_do_not_open_db(self):
         search.app.testing = True
         with search.app.test_client() as client:
@@ -117,7 +156,7 @@ class RecordingConnection:
         self._conn.close()
 
 
-@unittest.skipUnless(_local_dsn(), "local DATABASE_URL required")
+@unittest.skipUnless(probe_postgres_reachable(), "local Postgres required")
 class QuoteAssistantApiTests(unittest.TestCase):
     PREFIX = "CURSOR_QUOTE_ASSIST"
     BRAND_ALLOW = "CURSOR_QUOTE_ALLOW"
@@ -165,10 +204,67 @@ class QuoteAssistantApiTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.conn = psycopg2.connect(_local_dsn())
-        cls.conn.autocommit = True
-        cls._ensure_schema()
-        cls._reset_fixture()
+        cls.db_name, cls.dsn = create_full_schema_temp_db()
+        # unittest does NOT call tearDownClass if setUpClass raises --
+        # anything below that fails would otherwise leak this temp DB
+        # forever, so clean up ourselves on any exception past this point.
+        try:
+            cls._env_patch = mock.patch.dict("os.environ", {"DATABASE_URL": cls.dsn})
+            cls._env_patch.start()
+            cls.conn = psycopg2.connect(_local_dsn())
+            cls.conn.autocommit = True
+            cls._reset_fixture()
+            cls._seed_perf_index_prerequisites()
+        except Exception:
+            drop_temp_db(cls.db_name)
+            raise
+
+    @classmethod
+    def _seed_perf_index_prerequisites(cls):
+        """Several tests in this class assert the query PLANNER actually
+        chooses `idx_products_code_upper_trim`/`idx_products_cas_upper_trim`
+        (migrations 007/008) over a sequential scan -- a genuine cost-based
+        decision Postgres makes from real table statistics, not just from
+        whether the index exists. See `test_batch_queries.py`'s identical
+        helper for the full rationale.
+
+        Also seeds >500 rows sharing one CAS (`7704-34-9`) so
+        `test_candidate_limit_exceeded_uses_new_reason_code` /
+        `test_candidate_limit_exact_boundary_500_vs_501` can exercise the
+        real 500-SQL-candidate fail-closed path: those two tests originally
+        relied on a real CAS (Sulfur) that happened to have 750 rows in
+        `products_local` ("verified in scale-gate audit", per their own
+        comment) -- a real-data coincidence a synthetic temp DB has no way
+        to reproduce on its own. Seeding it explicitly here tests the same
+        code path (an actual >500-row SQL result) rather than a hand-picked
+        row count asserted only in Python.
+        """
+        with cls.conn.cursor() as cur:
+            for name in (
+                "migration_007_products_code_upper_trim_index.sql",
+                "migration_008_check_cas_perf_indexes.sql",
+            ):
+                path = os.path.join(os.path.dirname(__file__), "..", "sql", name)
+                apply_sql_file_statement_by_statement(cur, path)
+            cur.execute(
+                """
+                INSERT INTO products (name, code, cas, brand, size, ship, price, note)
+                SELECT 'Perf decoy ' || g, 'PERF-DECOY-CODE-' || g, 'PERF-DECOY-CAS-' || g,
+                       'PERF_DECOY_BRAND', '1g', '1', '1000', ''
+                FROM generate_series(1, 8000) AS g
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO products (name, code, cas, brand, size, ship, price, note)
+                SELECT 'Candidate limit decoy ' || g, 'CANDIDATE-LIMIT-CODE-' || g, '7704-34-9',
+                       %s, '1g', '1', '1000', ''
+                FROM generate_series(1, 600) AS g
+                """,
+                (cls.BRAND_ALLOW,),
+            )
+            cur.execute("ANALYZE products")
+            cur.execute("ANALYZE regulatory_rules")
 
     def setUp(self):
         # Phase 5D2A: every authenticated session now needs a `user_id` +
@@ -182,43 +278,12 @@ class QuoteAssistantApiTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         try:
-            cls._cleanup_fixture()
-        finally:
             cls.conn.close()
-
-    @classmethod
-    def _ensure_schema(cls):
-        with cls.conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT 1
-                FROM information_schema.tables
-                WHERE table_name IN ('teams', 'team_brands', 'brand_compliance_settings')
-                HAVING COUNT(*) = 3
-                """
-            )
-            if cur.fetchone() is None:
-                raise unittest.SkipTest("Run RBAC/manual compliance migrations on local DB first.")
-            cur.execute(
-                """
-                SELECT 1
-                FROM information_schema.columns
-                WHERE table_name = 'products'
-                  AND column_name IN ('manual_compliance', 'manual_compliance_note')
-                HAVING COUNT(*) = 2
-                """
-            )
-            if cur.fetchone() is None:
-                raise unittest.SkipTest("Run sql/migration_011_manual_compliance.sql on local DB first.")
-            cur.execute(
-                """
-                SELECT 1
-                FROM information_schema.columns
-                WHERE table_name = 'products' AND column_name = 'preparation_type'
-                """
-            )
-            if cur.fetchone() is None:
-                raise unittest.SkipTest("Run sql/migration_012_product_preparation_type.sql on local DB first.")
+        finally:
+            try:
+                drop_temp_db(cls.db_name)
+            finally:
+                cls._env_patch.stop()
 
     @classmethod
     def _cleanup_fixture(cls):
@@ -354,8 +419,25 @@ class QuoteAssistantApiTests(unittest.TestCase):
         response, _recorder = self._call_api({"rows": []}, authenticated=False)
         self.assertEqual(response.status_code, 401)
 
+        # Phase 6A -- Local Release Gate finding: this used to expect 403
+        # from `_require_authenticated_quote_api`'s own "Tài khoản chưa
+        # được gán team." check. That code path is UNREACHABLE for a real
+        # account now: every write path that can make a non-admin account
+        # ACTIVE (admin_google_users.approve/update, search.py's legacy
+        # create_user/update_user) already REJECTS the write outright if
+        # staff has no valid team -- there is no real flow that produces
+        # an ACTIVE, non-admin, team_id=NULL account. This session shape
+        # (authenticated=True, is_admin=False, no team_id at all) can only
+        # happen from a forged/stale cookie, and Fix1's real, already-
+        # reviewed middleware (`middleware_access.py`, see
+        # `_load_team_ip_policy`'s docstring) now deliberately fails
+        # CLOSED on exactly that data/session inconsistency with 503,
+        # before this route's own 403 ever runs. 503 here is the correct,
+        # intended contract from an already-shipped security fix, not an
+        # app bug this test should paper over -- the assertion changed to
+        # match reality, not the other way around.
         response, _recorder = self._call_api({"rows": []}, is_admin=False)
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 503)
 
         response, _recorder = self._call_api({"rows": [{}] * 2001})
         self.assertEqual(response.status_code, 413)

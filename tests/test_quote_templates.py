@@ -2,6 +2,7 @@ import io
 import json
 import unittest
 from pathlib import Path
+from unittest import mock
 from unittest.mock import MagicMock, patch
 
 import search
@@ -271,6 +272,20 @@ class QuoteTemplateAdminApiTests(unittest.TestCase):
         # `auth_version`; stub the DB it checks with an in-memory fake (no
         # real Postgres touched) for every test in this class.
         start_auth_db_patch(self)
+        # Phase 6A-UAT gap fix: this file only exercises the quote-template
+        # admin API's own 401/403 auth checks and mocks `search.get_connection`
+        # for template rows -- it never wires a fake for the Fix1 IP/team
+        # policy middleware, which now issues a REAL query
+        # (`SELECT ip_policy FROM teams WHERE id = %s`) against whatever
+        # `DATABASE_URL` this process has. Disabling it here (same pattern
+        # already used by test_admin_teams.py / test_admin_google_users.py)
+        # keeps this file testing what it says it tests instead of failing
+        # with an unrelated 503 whenever a non-admin session is used.
+        self._disable_ip_patch = mock.patch.dict(
+            "os.environ", {"DISABLE_IP_ALLOWLIST": "1"}
+        )
+        self._disable_ip_patch.start()
+        self.addCleanup(self._disable_ip_patch.stop)
 
     def _auth(self, admin=True):
         with self.client.session_transaction() as sess:
@@ -399,6 +414,16 @@ class QuoteTemplateAssistantApiTests(unittest.TestCase):
         search.app.testing = True
         self.client = search.app.test_client()
         start_auth_db_patch(self)
+        # Phase 6A-UAT gap fix: same reason as QuoteTemplateAdminApiTests
+        # above -- every test in this class uses a non-admin, team_id=123
+        # session, which now makes the real Fix1 IP/team-policy middleware
+        # query `teams.ip_policy` for real instead of being exempt. Nothing
+        # here is testing IP policy, so disable it explicitly.
+        self._disable_ip_patch = mock.patch.dict(
+            "os.environ", {"DISABLE_IP_ALLOWLIST": "1"}
+        )
+        self._disable_ip_patch.start()
+        self.addCleanup(self._disable_ip_patch.stop)
         with self.client.session_transaction() as sess:
             sess["authenticated"] = True
             sess["user_id"] = 1

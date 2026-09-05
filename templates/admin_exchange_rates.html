@@ -3,92 +3,870 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Tỷ giá (exchange rates)</title>
+  <title>Quản lý Tỷ giá — Admin</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 24px auto; padding: 0 12px; }
-    .card { border: 1px solid #ddd; border-radius: 8px; padding: 14px; margin-bottom: 16px; }
-    .ok { color: #0b7a0b; }
-    .err { color: #b00020; white-space: pre-wrap; }
-    table { border-collapse: collapse; width: 100%; margin-top: 8px; }
-    th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; }
-    code { background: #f6f6f6; padding: 1px 4px; }
-    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+    :root {
+      --bg: #f1f5f9;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #64748b;
+      --border: #e2e8f0;
+      --border-focus: #3b82f6;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --success: #059669;
+      --success-bg: #ecfdf5;
+      --danger: #dc2626;
+      --danger-bg: #fef2f2;
+      --warning: #d97706;
+      --warning-bg: #fffbeb;
+      --radius: 8px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px 16px 48px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.5;
+    }
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    header.page-header {
+      margin-bottom: 20px;
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 1.5rem;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .sub {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+    .sub code {
+      background: #e2e8f0;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.9em;
+    }
+
+    /* Alerts */
+    .alert {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 12px 16px;
+      border-radius: var(--radius);
+      margin-bottom: 16px;
+      font-size: 0.95rem;
+    }
+    .alert-success {
+      background: var(--success-bg);
+      border: 1px solid #a7f3d0;
+      color: #065f46;
+    }
+    .alert-danger {
+      background: var(--danger-bg);
+      border: 1px solid #fecaca;
+      color: #991b1b;
+      white-space: pre-wrap;
+    }
+    .alert-icon {
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    /* Workspace Panel */
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+      margin-bottom: 20px;
+      overflow: hidden;
+    }
+    .panel-head {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      background: #fafbfc;
+    }
+    .panel-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      margin: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Toolbar */
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      width: 100%;
+    }
+    .search-box {
+      flex: 1 1 240px;
+      position: relative;
+    }
+    .search-box input {
+      width: 100%;
+      padding: 8px 12px 8px 34px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.92rem;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .search-box input:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    }
+    .search-box .search-icon {
+      position: absolute;
+      left: 11px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--muted);
+      font-size: 0.85rem;
+      pointer-events: none;
+    }
+    .toolbar-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-height: 36px;
+      padding: 6px 12px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--text);
+      font-size: 0.9rem;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+    .btn:hover { background: #f8fafc; border-color: #cbd5e1; }
+    .btn-primary {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #fff;
+    }
+    .btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+    .btn-danger {
+      background: #fff;
+      border-color: #fecaca;
+      color: var(--danger);
+    }
+    .btn-danger:hover { background: #fef2f2; border-color: var(--danger); }
+    .btn-sm {
+      min-height: 30px;
+      padding: 4px 10px;
+      font-size: 0.82rem;
+    }
+
+    /* Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 600;
+    }
+    .badge-count {
+      color: var(--muted);
+      font-size: 0.88rem;
+      white-space: nowrap;
+    }
+    .badge-db {
+      background: #dbeafe;
+      color: #1e40af;
+    }
+    .badge-dirty {
+      background: var(--warning-bg);
+      border: 1px solid #fde68a;
+      color: #92400e;
+      font-size: 0.78rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    /* Compact Edit / Add Form (Never takes full width) */
+    .edit-drawer {
+      display: none;
+      max-width: 540px;
+      padding: 16px;
+      margin: 16px;
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+    }
+    .edit-drawer.open {
+      display: block;
+    }
+    .drawer-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .drawer-title {
+      font-size: 1rem;
+      font-weight: 700;
+      margin: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    @media (max-width: 480px) {
+      .form-grid { grid-template-columns: 1fr; }
+    }
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .form-group label {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #334155;
+    }
+    .form-control {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.92rem;
+      font-family: inherit;
+      outline: none;
+      background: #fff;
+    }
+    .form-control:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    }
+    .form-hint {
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+    .drawer-actions {
+      display: flex;
+      justify-content: flex-start;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .inline-error {
+      display: none;
+      padding: 8px 10px;
+      background: #fee2e2;
+      border: 1px solid #fca5a5;
+      border-radius: 6px;
+      color: #991b1b;
+      font-size: 0.85rem;
+      margin-bottom: 10px;
+    }
+
+    /* Bulk drawer */
+    .bulk-drawer {
+      display: none;
+      max-width: 760px;
+      padding: 16px;
+      margin: 16px;
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .bulk-drawer.open {
+      display: block;
+    }
+    .tabs {
+      display: flex;
+      gap: 6px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+    .tab-btn {
+      padding: 6px 12px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .tab-btn.active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
+    }
+    .tab-content {
+      display: none;
+    }
+    .tab-content.active {
+      display: block;
+    }
+    textarea.form-control {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.85rem;
+      resize: vertical;
+    }
+
+    /* Workspace Table */
+    .table-wrap {
+      width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    table.data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+      text-align: left;
+    }
+    table.data-table th,
+    table.data-table td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    table.data-table th {
+      background: #f8fafc;
+      color: #475569;
+      font-weight: 700;
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      white-space: nowrap;
+    }
+    table.data-table tbody tr:hover {
+      background: #f8fafc;
+    }
+    table.data-table tr.editing {
+      background: #eff6ff;
+    }
+    .cell-brand {
+      font-weight: 600;
+      color: #0f172a;
+      word-break: break-word;
+    }
+    .cell-rate {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #1e293b;
+      white-space: nowrap;
+    }
+    .cell-time {
+      color: var(--muted);
+      font-size: 0.85rem;
+      white-space: nowrap;
+    }
+    .cell-actions {
+      white-space: nowrap;
+      text-align: right;
+    }
+    .empty-state {
+      padding: 36px 16px;
+      text-align: center;
+      color: var(--muted);
+    }
+    .empty-state i {
+      font-size: 2rem;
+      color: #cbd5e1;
+      margin-bottom: 8px;
+    }
+
+    @media (max-width: 640px) {
+      body { padding: 16px 10px 36px; }
+      .panel-head { padding: 12px; }
+      table.data-table th, table.data-table td { padding: 8px 10px; font-size: 0.88rem; }
+      .edit-drawer, .bulk-drawer { margin: 10px; padding: 12px; }
+    }
   </style>
 </head>
 <body>
   {% include "_user_nav.html" %}
-  <h1>Tỷ giá theo brand</h1>
-  <p>Giá hiển thị = <code>price × ship × tỷ_giá</code>. Brand có trong bảng dưới dùng tỷ giá DB; còn lại lấy từ <code>static/exchange_rates.json</code> (hiện có <b>{{ json_fallback_count }}</b> mục trong file).</p>
 
-  {% if message %}<p class="ok">{{ message }}</p>{% endif %}
-  {% if error %}<p class="err">{{ error }}</p>{% endif %}
+  <div class="wrap">
+    <header class="page-header">
+      <h1><i class="fas fa-money-bill-wave" style="color: #2563eb;"></i> Quản lý Tỷ giá theo Brand</h1>
+      <p class="sub">
+        Giá tính toán = <code>price × ship × tỷ_giá</code>. Tỷ giá trong cơ sở dữ liệu có độ ưu tiên cao nhất;
+        các brand còn lại lấy từ <code>static/exchange_rates.json</code> (hiện có <b>{{ json_fallback_count }}</b> mục mặc định).
+      </p>
+    </header>
 
-  <div class="card">
-    <h2>Thêm / cập nhật một brand</h2>
-    <form method="post">
-      <div class="row">
-        <label>Brand <input name="brand" type="text" placeholder="Tên hãng" required /></label>
-        <label>Tỷ giá <input name="rate" type="text" inputmode="decimal" placeholder="1.23" required /></label>
-        <button type="submit">Lưu</button>
+    <!-- Top Alert Notification Area -->
+    <div id="statusAlert" class="alert {% if error %}alert-danger{% elif message %}alert-success{% endif %}" style="display: {% if error or message %}flex{% else %}none{% endif %};">
+      <div class="alert-icon">
+        <i class="fas {% if error %}fa-exclamation-triangle{% else %}fa-check-circle{% endif %}"></i>
       </div>
-    </form>
-  </div>
+      <div id="statusAlertText">{% if error %}{{ error }}{% elif message %}{{ message }}{% endif %}</div>
+    </div>
 
-  <div class="card">
-    <h2>Một tỷ giá chung cho nhiều brand (nhanh)</h2>
-    <p>Dán danh sách brand: <b>mỗi dòng một hoặc nhiều brand</b> (cách nhau bởi dấu phẩy hoặc chấm phẩy). Cùng một tỷ giá sẽ được ghi cho tất cả.</p>
-    <form method="post">
-      <p><textarea name="bulk_brands" rows="8" style="width:100%; box-sizing:border-box; font-family: monospace;" placeholder="Brand A&#10;Brand B, Brand C&#10;Brand D"></textarea></p>
-      <div class="row">
-        <label>Tỷ giá chung <input name="bulk_rate" type="text" inputmode="decimal" placeholder="23500" /></label>
-        <button type="submit" name="bulk_same_apply" value="1">Áp dụng cho cả danh sách</button>
+    <!-- Workspace Panel -->
+    <div class="panel">
+      <!-- Toolbar -->
+      <div class="panel-head">
+        <div class="toolbar">
+          <div class="search-box">
+            <i class="fas fa-search search-icon"></i>
+            <input type="search" id="brandFilter" placeholder="Tìm nhanh brand trong database..." aria-label="Tìm kiếm brand" autocomplete="off" />
+          </div>
+          <div class="toolbar-actions">
+            <span class="badge-count">Hiển thị <b id="visibleCount">{{ rows|length }}</b> / {{ rows|length }} brand DB</span>
+            <button type="button" class="btn btn-primary btn-sm" id="toggleAddBtn">
+              <i class="fas fa-plus"></i> Thêm / Sửa nhanh
+            </button>
+            <button type="button" class="btn btn-sm" id="toggleBulkBtn">
+              <i class="fas fa-layer-group"></i> Thao tác hàng loạt
+            </button>
+          </div>
+        </div>
       </div>
-    </form>
-  </div>
 
-  <div class="card">
-    <h2>Nhiều brand, tỷ giá khác nhau (mỗi dòng một cặp)</h2>
-    <p>Định dạng: <code>brand,tỷ_giá</code> hoặc <code>brand</code> + tab + <code>tỷ_giá</code>. Dòng bắt đầu bằng <code>#</code> bị bỏ qua.</p>
-    <form method="post">
-      <p><textarea name="bulk_lines" rows="8" style="width:100%; box-sizing:border-box; font-family: monospace;" placeholder="Sigma, 23500&#10;Merck	25000&#10;# ghi chú"></textarea></p>
-      <button type="submit" name="bulk_lines_apply" value="1">Áp dụng các dòng</button>
-    </form>
-  </div>
+      <!-- Compact Single Edit / Add Drawer (max-width 540px, never full-width) -->
+      <div id="singleDrawer" class="edit-drawer">
+        <div class="drawer-header">
+          <h3 id="drawerTitle" class="drawer-title"><i class="fas fa-edit"></i> Thêm / Cập nhật tỷ giá</h3>
+          <span id="dirtyIndicator" class="badge-dirty" style="display: none;">
+            <i class="fas fa-pencil-alt"></i> Chưa lưu
+          </span>
+        </div>
+        <div id="drawerError" class="inline-error"></div>
+        <form id="singleForm" method="post" action="/admin/exchange-rates">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="action" value="save_single">
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="formBrand">Tên Brand <span style="color:var(--danger)">*</span></label>
+              <input type="text" id="formBrand" name="brand" class="form-control" placeholder="Ví dụ: Sigma, Merck" required autocomplete="off" />
+            </div>
+            <div class="form-group">
+              <label for="formRate">Tỷ giá <span style="color:var(--danger)">*</span></label>
+              <input type="text" id="formRate" name="rate" class="form-control" inputmode="decimal" placeholder="Ví dụ: 26000 hoặc 1.25" required autocomplete="off" />
+              <div class="form-hint">Số dương hữu hạn, dấu chấm cho thập phân.</div>
+            </div>
+          </div>
+          <div class="drawer-actions">
+            <button type="submit" class="btn btn-primary" id="saveBtn">
+              <i class="fas fa-save"></i> Lưu tỷ giá
+            </button>
+            <button type="button" class="btn" id="cancelBtn">
+              <i class="fas fa-times"></i> Hủy
+            </button>
+          </div>
+        </form>
+      </div>
 
-  <div class="card">
-    <h2>Đồng bộ từ file JSON một lần</h2>
-    <p>Ghi đè/ bổ sung toàn bộ brand có trong <code>static/exchange_rates.json</code> vào database (sau đó có thể sửa từng dòng trên web, không cần upload file JSON nữa).</p>
-    <form method="post" onsubmit="return confirm('Ghi đồng bộ tất cả brand từ JSON vào DB?');">
-      <button type="submit" name="seed_json" value="1">Đồng bộ từ JSON → DB</button>
-    </form>
-  </div>
+      <!-- Bulk & Seed Drawer (collapsible, max-width 760px) -->
+      <div id="bulkDrawer" class="bulk-drawer">
+        <div class="tabs">
+          <button type="button" class="tab-btn active" data-tab="tab-same"><i class="fas fa-clone"></i> Tỷ giá chung cho nhiều brand</button>
+          <button type="button" class="tab-btn" data-tab="tab-lines"><i class="fas fa-list-ol"></i> Nhập danh sách dòng (brand,tỷ_giá)</button>
+          <button type="button" class="tab-btn" data-tab="tab-seed"><i class="fas fa-file-import"></i> Đồng bộ từ JSON</button>
+        </div>
 
-  <div class="card">
-    <h2>Đang lưu trong database</h2>
-    {% if rows %}
-    <table>
-      <thead><tr><th>brand</th><th>rate</th><th>updated_at</th><th></th></tr></thead>
-      <tbody>
-      {% for r in rows %}
-      <tr>
-        <td>{{ r.brand }}</td>
-        <td>{{ r.rate }}</td>
-        <td>{{ r.updated_at }}</td>
-        <td>
-          <form method="post" style="display:inline" onsubmit="return confirm('Xóa tỷ giá {{ r.brand }}?');">
-            <input type="hidden" name="delete_brand" value="{{ r.brand }}" />
-            <button type="submit">Xóa</button>
+        <!-- Tab 1: Same rate for multiple brands -->
+        <div id="tab-same" class="tab-content active">
+          <form method="post" action="/admin/exchange-rates">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="bulk_same_apply" value="1">
+            <div class="form-group" style="margin-bottom: 12px;">
+              <label>Danh sách Brand (mỗi dòng một brand hoặc cách nhau bằng dấu phẩy)</label>
+              <textarea name="bulk_brands" class="form-control" rows="5" placeholder="Brand A&#10;Brand B, Brand C&#10;Brand D"></textarea>
+            </div>
+            <div class="form-grid" style="align-items: end;">
+              <div class="form-group">
+                <label>Tỷ giá chung</label>
+                <input type="text" name="bulk_rate" class="form-control" inputmode="decimal" placeholder="26000" required />
+              </div>
+              <div>
+                <button type="submit" class="btn btn-primary"><i class="fas fa-check"></i> Áp dụng cho cả danh sách</button>
+              </div>
+            </div>
           </form>
-        </td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <p>Chưa có dòng nào trong bảng <code>exchange_rates</code> — mọi brand đang dùng file JSON (hoặc mặc định 1).</p>
-    {% endif %}
+        </div>
+
+        <!-- Tab 2: Multiple lines brand,rate -->
+        <div id="tab-lines" class="tab-content">
+          <form method="post" action="/admin/exchange-rates">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="bulk_lines_apply" value="1">
+            <div class="form-group" style="margin-bottom: 12px;">
+              <label>Danh sách brand và tỷ giá (Định dạng: <code>brand,tỷ_giá</code> hoặc tab. Dòng bắt đầu bằng <code>#</code> được bỏ qua)</label>
+              <textarea name="bulk_lines" class="form-control" rows="6" placeholder="Sigma, 26000&#10;Merck	29300&#10;# Dòng chú thích"></textarea>
+              <div class="form-hint">Nếu một dòng không hợp lệ, toàn bộ quá trình cập nhật sẽ dừng để đảm bảo an toàn dữ liệu.</div>
+            </div>
+            <button type="submit" class="btn btn-primary"><i class="fas fa-check"></i> Áp dụng các dòng</button>
+          </form>
+        </div>
+
+        <!-- Tab 3: Seed from JSON -->
+        <div id="tab-seed" class="tab-content">
+          <p style="margin-top:0; font-size:0.92rem; color:#475569;">
+            Ghi đè/bổ sung toàn bộ brand có trong <code>static/exchange_rates.json</code> (<b>{{ json_fallback_count }}</b> brand) vào database.
+            Sau khi nạp, bạn có thể chỉnh sửa trực tiếp từng brand tại đây.
+          </p>
+          <form method="post" action="/admin/exchange-rates" onsubmit="return confirmSeed(event);">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="seed_json" value="1">
+            <button type="submit" class="btn btn-primary"><i class="fas fa-sync-alt"></i> Đồng bộ từ JSON → Database</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Main Rates Table -->
+      <div class="table-wrap">
+        <table class="data-table" id="ratesTable">
+          <thead>
+            <tr>
+              <th style="min-width: 180px;">Brand</th>
+              <th style="min-width: 140px;">Tỷ giá</th>
+              <th style="min-width: 110px;">Nguồn</th>
+              <th style="min-width: 160px;">Cập nhật lúc</th>
+              <th style="min-width: 140px; text-align: right;">Thao tác</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody">
+            {% if rows %}
+              {% for r in rows %}
+                <tr id="row-{{ loop.index }}" data-brand="{{ r.brand|lower }}" data-brand-raw="{{ r.brand }}" data-rate="{{ r.rate_num }}">
+                  <td class="cell-brand">{{ r.brand }}</td>
+                  <td class="cell-rate">
+                    <span class="rate-text">{{ r.rate_display }}</span>
+                  </td>
+                  <td>
+                    <span class="badge badge-db"><i class="fas fa-database"></i> Database</span>
+                  </td>
+                  <td class="cell-time">
+                    {{ r.updated_at_display }}
+                  </td>
+                  <td class="cell-actions">
+                    <button type="button" class="btn btn-sm edit-row-btn" data-brand="{{ r.brand }}" data-rate="{{ r.rate_num }}" title="Chỉnh sửa tỷ giá {{ r.brand }}">
+                      <i class="fas fa-edit"></i> Sửa
+                    </button>
+                    <form method="post" action="/admin/exchange-rates" style="display:inline;" onsubmit="return confirmDelete(event, '{{ r.brand }}');">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <input type="hidden" name="delete_brand" value="{{ r.brand }}">
+                      <button type="submit" class="btn btn-sm btn-danger" title="Xóa tỷ giá {{ r.brand }} (quay về dùng file JSON)">
+                        <i class="fas fa-trash-alt"></i> Xóa
+                      </button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            {% else %}
+              <tr>
+                <td colspan="5" class="empty-state">
+                  <i class="fas fa-inbox"></i>
+                  <p>Chưa có dòng nào trong bảng <code>exchange_rates</code>.</p>
+                  <p style="font-size:0.85rem;">Mọi brand hiện đang dùng file <code>static/exchange_rates.json</code> hoặc tỷ giá 1.0.</p>
+                </td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+      <div id="emptyFilterMsg" class="empty-state" style="display: none;">
+        <i class="fas fa-filter"></i>
+        <p>Không tìm thấy brand nào khớp với từ khóa tìm kiếm.</p>
+      </div>
+    </div>
   </div>
+
+  <script>
+    (function () {
+      const csrfToken = "{{ csrf_token() }}";
+      const brandFilter = document.getElementById('brandFilter');
+      const tableBody = document.getElementById('tableBody');
+      const emptyFilterMsg = document.getElementById('emptyFilterMsg');
+      const visibleCount = document.getElementById('visibleCount');
+
+      const singleDrawer = document.getElementById('singleDrawer');
+      const toggleAddBtn = document.getElementById('toggleAddBtn');
+      const toggleBulkBtn = document.getElementById('toggleBulkBtn');
+      const bulkDrawer = document.getElementById('bulkDrawer');
+      const drawerTitle = document.getElementById('drawerTitle');
+      const drawerError = document.getElementById('drawerError');
+      const dirtyIndicator = document.getElementById('dirtyIndicator');
+      const formBrand = document.getElementById('formBrand');
+      const formRate = document.getElementById('formRate');
+      const singleForm = document.getElementById('singleForm');
+      const cancelBtn = document.getElementById('cancelBtn');
+      const statusAlert = document.getElementById('statusAlert');
+      const statusAlertText = document.getElementById('statusAlertText');
+
+      let originalBrand = '';
+      let originalRate = '';
+      let activeRow = null;
+
+      // Filter rows
+      if (brandFilter && tableBody) {
+        brandFilter.addEventListener('input', function () {
+          const q = (this.value || '').trim().toLowerCase();
+          const rows = tableBody.querySelectorAll('tr[data-brand]');
+          let count = 0;
+          rows.forEach(function (row) {
+            const b = row.getAttribute('data-brand') || '';
+            const match = !q || b.includes(q);
+            row.style.display = match ? '' : 'none';
+            if (match) count++;
+          });
+          if (visibleCount) visibleCount.textContent = count;
+          if (emptyFilterMsg) emptyFilterMsg.style.display = (rows.length > 0 && count === 0) ? 'block' : 'none';
+        });
+      }
+
+      // Check dirty state on single form
+      function checkDirty() {
+        const isBrandChanged = formBrand.value.trim() !== originalBrand;
+        const isRateChanged = formRate.value.trim() !== originalRate;
+        const isDirty = (originalBrand || originalRate) ? (isBrandChanged || isRateChanged) : (formBrand.value.trim() !== '' || formRate.value.trim() !== '');
+        dirtyIndicator.style.display = isDirty ? 'inline-flex' : 'none';
+      }
+      formBrand.addEventListener('input', checkDirty);
+      formRate.addEventListener('input', checkDirty);
+
+      // Open Add/Edit Drawer
+      function openDrawerForEdit(brand, rate, rowEl) {
+        if (bulkDrawer) bulkDrawer.classList.remove('open');
+        singleDrawer.classList.add('open');
+        originalBrand = brand || '';
+        originalRate = rate || '';
+        formBrand.value = originalBrand;
+        formRate.value = originalRate;
+        drawerError.style.display = 'none';
+        drawerError.textContent = '';
+        dirtyIndicator.style.display = 'none';
+
+        if (activeRow) activeRow.classList.remove('editing');
+        activeRow = rowEl || null;
+        if (activeRow) activeRow.classList.add('editing');
+
+        if (brand) {
+          drawerTitle.innerHTML = '<i class="fas fa-edit"></i> Cập nhật tỷ giá: <b>' + escapeHtml(brand) + '</b>';
+          formRate.focus();
+          formRate.select();
+        } else {
+          drawerTitle.innerHTML = '<i class="fas fa-plus"></i> Thêm tỷ giá mới';
+          formBrand.focus();
+        }
+        singleDrawer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+
+      function closeDrawer() {
+        singleDrawer.classList.remove('open');
+        formBrand.value = '';
+        formRate.value = '';
+        originalBrand = '';
+        originalRate = '';
+        dirtyIndicator.style.display = 'none';
+        drawerError.style.display = 'none';
+        if (activeRow) {
+          activeRow.classList.remove('editing');
+          activeRow = null;
+        }
+      }
+
+      if (toggleAddBtn) {
+        toggleAddBtn.addEventListener('click', function () {
+          if (singleDrawer.classList.contains('open') && !originalBrand) {
+            closeDrawer();
+          } else {
+            openDrawerForEdit('', '', null);
+          }
+        });
+      }
+
+      if (cancelBtn) {
+        cancelBtn.addEventListener('click', closeDrawer);
+      }
+
+      // Hook up row edit buttons
+      document.querySelectorAll('.edit-row-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          const b = this.getAttribute('data-brand') || '';
+          const r = this.getAttribute('data-rate') || '';
+          const row = this.closest('tr');
+          openDrawerForEdit(b, r, row);
+        });
+      });
+
+      // Bulk drawer toggle
+      if (toggleBulkBtn && bulkDrawer) {
+        toggleBulkBtn.addEventListener('click', function () {
+          if (singleDrawer) closeDrawer();
+          bulkDrawer.classList.toggle('open');
+          if (bulkDrawer.classList.contains('open')) {
+            bulkDrawer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }
+        });
+      }
+
+      // Bulk tabs
+      document.querySelectorAll('.tab-btn').forEach(function (tBtn) {
+        tBtn.addEventListener('click', function () {
+          document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
+          document.querySelectorAll('.tab-content').forEach(function (c) { c.classList.remove('active'); });
+          this.classList.add('active');
+          const target = document.getElementById(this.getAttribute('data-tab'));
+          if (target) target.classList.add('active');
+        });
+      });
+
+      // Single Form AJAX submit for smooth inline update
+      if (singleForm) {
+        singleForm.addEventListener('submit', function (e) {
+          e.preventDefault();
+          const brandVal = formBrand.value.trim();
+          const rateVal = formRate.value.trim();
+          drawerError.style.display = 'none';
+
+          if (!brandVal) {
+            showDrawerError('Vui lòng nhập tên brand.');
+            formBrand.focus();
+            return;
+          }
+          if (!rateVal) {
+            showDrawerError('Vui lòng nhập tỷ giá.');
+            formRate.focus();
+            return;
+          }
+
+          const saveBtn = document.getElementById('saveBtn');
+          saveBtn.disabled = true;
+          saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang lưu...';
+
+          const formData = new FormData();
+          formData.append('csrf_token', csrfToken);
+          formData.append('brand', brandVal);
+          formData.append('rate', rateVal);
+
+          fetch('/admin/exchange-rates', {
+            method: 'POST',
+            body: formData,
+            headers: {
+              'X-Requested-With': 'XMLHttpRequest',
+              'Accept': 'application/json'
+            }
+          })
+          .then(function (res) {
+            return res.json().then(function (data) {
+              return { status: res.status, data: data };
+            });
+          })
+          .then(function (resObj) {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<i class="fas fa-save"></i> Lưu tỷ giá';
+
+            if (!resObj.data.ok || resObj.status !== 200) {
+              showDrawerError(resObj.data.error || 'Có lỗi xảy ra khi lưu.');
+            } else {
+              // Success!
+              showAlert(resObj.data.message || 'Đã lưu tỷ giá thành công.', false);
+              closeDrawer();
+              // Reload page or update row smoothly
+              setTimeout(function () {
+                window.location.reload();
+              }, 400);
+            }
+          })
+          .catch(function (err) {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<i class="fas fa-save"></i> Lưu tỷ giá';
+            // Fallback to normal submit if fetch fails
+            singleForm.submit();
+          });
+        });
+      }
+
+      function showDrawerError(msg) {
+        drawerError.textContent = msg;
+        drawerError.style.display = 'block';
+      }
+
+      function showAlert(msg, isError) {
+        if (!statusAlert || !statusAlertText) return;
+        statusAlert.className = 'alert ' + (isError ? 'alert-danger' : 'alert-success');
+        const icon = statusAlert.querySelector('.alert-icon i');
+        if (icon) {
+          icon.className = 'fas ' + (isError ? 'fa-exclamation-triangle' : 'fa-check-circle');
+        }
+        statusAlertText.textContent = msg;
+        statusAlert.style.display = 'flex';
+        statusAlert.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+
+      function escapeHtml(str) {
+        return (str || '').replace(/[&<>"']/g, function (m) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m];
+        });
+      }
+
+      // Safe confirmations
+      window.confirmDelete = function (e, brand) {
+        if (!confirm('Xóa tỷ giá tùy chỉnh của brand "' + brand + '"? Hệ thống sẽ quay về dùng tỷ giá từ file JSON mặc định.')) {
+          e.preventDefault();
+          return false;
+        }
+        return true;
+      };
+
+      window.confirmSeed = function (e) {
+        if (!confirm('Bạn có chắc muốn đồng bộ tất cả brand từ file JSON vào database? Các bản ghi đã tồn tại sẽ được cập nhật.')) {
+          e.preventDefault();
+          return false;
+        }
+        return true;
+      };
+    })();
+  </script>
 </body>
 </html>

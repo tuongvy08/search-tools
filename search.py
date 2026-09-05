@@ -1,4 +1,5 @@
 import csv
+from decimal import Decimal, InvalidOperation
 import hashlib
 import ipaddress
 import json
@@ -144,6 +145,124 @@ QUOTE_TEMPLATE_MAPPING_SNAPSHOT = {
 
 class QuoteTemplateError(ValueError):
     pass
+
+
+MAX_EXCHANGE_RATE = Decimal("1000000000")
+MIN_EXCHANGE_RATE = Decimal("0.000001")
+
+
+def parse_exchange_rate(raw) -> Decimal:
+    """
+    Parse và validate tỷ giá an toàn, độc lập locale.
+    Chấp nhận Decimal/int/float hoặc chuỗi số dương hữu hạn.
+    Từ chối rỗng, chữ, NaN, Infinity, <= 0, quá giới hạn, và định dạng phân cách mơ hồ.
+    """
+    if raw is None:
+        raise ValueError("Tỷ giá không được để trống.")
+    s = str(raw).strip()
+    if not s:
+        raise ValueError("Tỷ giá không được để trống.")
+
+    lower = s.lower()
+    if any(k in lower for k in ("nan", "inf", "none", "null")):
+        raise ValueError("Tỷ giá không hợp lệ (không chấp nhận NaN hoặc vô cực).")
+
+    # Kiểm tra ký tự không hợp lệ
+    if not re.match(r"^[+-]?[\d.,\s]+$", s):
+        raise ValueError(f"Tỷ giá chứa ký tự không hợp lệ: '{raw}'.")
+
+    s = s.replace(" ", "")
+    if s.startswith("+"):
+        s = s[1:]
+    if s.startswith("-"):
+        raise ValueError("Tỷ giá phải là số dương lớn hơn 0.")
+
+    if "," in s and "." in s:
+        last_dot = s.rfind(".")
+        last_comma = s.rfind(",")
+        if last_dot > last_comma:
+            parts = s.split(".")
+            if len(parts) == 2 and re.match(r"^\d{1,3}(,\d{3})+$", parts[0]) and parts[1].isdigit():
+                s = parts[0].replace(",", "") + "." + parts[1]
+            else:
+                raise ValueError(
+                    f"Định dạng số không rõ ràng: '{raw}'. Vui lòng nhập số liền không dấu phân cách nghìn."
+                )
+        else:
+            parts = s.split(",")
+            if len(parts) == 2 and re.match(r"^\d{1,3}(\.\d{3})+$", parts[0]) and parts[1].isdigit():
+                s = parts[0].replace(".", "") + "." + parts[1]
+            else:
+                raise ValueError(
+                    f"Định dạng số không rõ ràng: '{raw}'. Vui lòng nhập số liền không dấu phân cách nghìn."
+                )
+    elif "," in s:
+        if s.count(",") > 1:
+            if re.match(r"^\d{1,3}(,\d{3})+$", s):
+                raise ValueError(
+                    f"Định dạng số không rõ ràng: '{raw}'. Vui lòng nhập số liền (ví dụ: 1000000 thay vì 1,000,000)."
+                )
+            raise ValueError(f"Định dạng số có nhiều dấu phẩy không hợp lệ: '{raw}'.")
+        parts = s.split(",")
+        if len(parts) == 2 and parts[0].isdigit() and len(parts[1]) == 3 and int(parts[0]) >= 10:
+            raise ValueError(
+                f"Định dạng số không rõ ràng giữa dấu hàng nghìn và thập phân: '{raw}'. Vui lòng nhập số liền (ví dụ: 26000 thay vì 26,000)."
+            )
+        s = s.replace(",", ".")
+    elif "." in s:
+        if s.count(".") > 1:
+            raise ValueError(f"Định dạng số có nhiều dấu chấm không hợp lệ: '{raw}'. Vui lòng nhập số liền.")
+        parts = s.split(".")
+        if len(parts) == 2 and parts[0].isdigit() and parts[1] == "000" and int(parts[0]) >= 10:
+            raise ValueError(
+                f"Định dạng số không rõ ràng giữa dấu hàng nghìn và thập phân: '{raw}'. Vui lòng nhập số liền (ví dụ: 26000 thay vì 26.000)."
+            )
+
+    try:
+        val = Decimal(s)
+    except InvalidOperation:
+        raise ValueError(f"Tỷ giá không hợp lệ: '{raw}'.")
+
+    if not val.is_finite() or val.is_nan():
+        raise ValueError("Tỷ giá không hợp lệ (không chấp nhận NaN hoặc vô cực).")
+    if val <= 0:
+        raise ValueError("Tỷ giá phải là số dương lớn hơn 0.")
+    if val > MAX_EXCHANGE_RATE:
+        raise ValueError(f"Tỷ giá vượt quá giới hạn tối đa ({MAX_EXCHANGE_RATE:,}).")
+    if val < MIN_EXCHANGE_RATE:
+        raise ValueError(f"Tỷ giá quá nhỏ (tối thiểu là {MIN_EXCHANGE_RATE}).")
+    if val.as_tuple().exponent < -8:
+        raise ValueError("Tỷ giá tối đa 8 chữ số phần thập phân.")
+
+    return val
+
+
+def _exchange_rates_upsert_sql(has_updated_at: bool) -> str:
+    if has_updated_at:
+        return """
+            INSERT INTO exchange_rates (brand, rate, updated_at)
+            VALUES (%s, %s, NOW())
+            ON CONFLICT (brand) DO UPDATE SET rate = EXCLUDED.rate, updated_at = NOW()
+        """
+    return """
+        INSERT INTO exchange_rates (brand, rate)
+        VALUES (%s, %s)
+        ON CONFLICT (brand) DO UPDATE SET rate = EXCLUDED.rate
+    """
+
+
+def _check_table_has_column(cur, table_name: str, column_name: str) -> bool:
+    try:
+        cur.execute(
+            """
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = %s AND column_name = %s
+            """,
+            (table_name, column_name),
+        )
+        return bool(cur.fetchone())
+    except Exception:
+        return False
 
 
 def _default_exchange_rates_from_json() -> dict[str, float]:
@@ -3377,65 +3496,84 @@ def admin_exchange_rates():
         return guard
 
     msg = err = None
+    is_ajax = (
+        request.headers.get("X-Requested-With") == "XMLHttpRequest"
+        or request.is_json
+        or "application/json" in (request.headers.get("Accept") or "")
+    )
+
     if request.method == "POST":
+        if not session_security.verify_csrf_token(request.form.get("csrf_token", "")):
+            if is_ajax:
+                return jsonify({"ok": False, "error": "CSRF token không hợp lệ hoặc đã hết hạn."}), 400
+            return "CSRF token không hợp lệ hoặc đã hết hạn.", 400
+
+        action = (request.form.get("action") or "").strip()
         conn = get_connection()
         try:
-            if request.form.get("seed_json"):
+            if request.form.get("seed_json") or action == "seed_json":
                 base = _default_exchange_rates_from_json()
                 if not base:
                     err = "Không đọc được static/exchange_rates.json hoặc file rỗng."
                 else:
-                    with conn.cursor() as cur:
-                        for brand, rate in base.items():
-                            cur.execute(
-                                """
-                                INSERT INTO exchange_rates (brand, rate)
-                                VALUES (%s, %s)
-                                ON CONFLICT (brand) DO UPDATE SET rate = EXCLUDED.rate, updated_at = NOW()
-                                """,
-                                (brand, rate),
-                            )
-                    conn.commit()
-                    msg = f"Đã đồng bộ {len(base)} brand từ file JSON vào database."
-            elif request.form.get("delete_brand"):
-                b = (request.form.get("delete_brand") or "").strip()
-                if b:
-                    with conn.cursor() as cur:
-                        cur.execute("DELETE FROM exchange_rates WHERE brand = %s", (b,))
-                    conn.commit()
+                    valid_items: list[tuple[str, Decimal]] = []
+                    for brand, r_raw in base.items():
+                        b_str = (brand or "").strip()
+                        if not b_str:
+                            continue
+                        try:
+                            rate_dec = parse_exchange_rate(r_raw)
+                            valid_items.append((b_str, rate_dec))
+                        except ValueError:
+                            continue
+
+                    if not valid_items:
+                        err = "Không có tỷ giá hợp lệ nào trong file JSON."
+                    else:
+                        with conn:
+                            with conn.cursor() as cur:
+                                has_updated_at = _check_table_has_column(cur, "exchange_rates", "updated_at")
+                                sql = _exchange_rates_upsert_sql(has_updated_at)
+                                for b_str, rate_dec in valid_items:
+                                    cur.execute(sql, (b_str, rate_dec))
+                        msg = f"Đã đồng bộ {len(valid_items)} brand từ file JSON vào database."
+
+            elif request.form.get("delete_brand") or action == "delete":
+                b = (request.form.get("delete_brand") or request.form.get("brand") or "").strip()
+                if not b:
+                    err = "Thiếu tên brand cần xóa."
+                else:
+                    with conn:
+                        with conn.cursor() as cur:
+                            cur.execute("DELETE FROM exchange_rates WHERE brand = %s", (b,))
                     msg = f"Đã xóa tỷ giá cho brand: {b}"
-            elif request.form.get("bulk_same_apply"):
+
+            elif request.form.get("bulk_same_apply") or action == "bulk_same":
                 brands = _parse_brand_list(request.form.get("bulk_brands") or "")
-                rate_raw = (request.form.get("bulk_rate") or "").strip().replace(",", ".")
+                rate_raw = (request.form.get("bulk_rate") or "").strip()
                 if not brands:
                     err = "Nhập danh sách brand (mỗi dòng hoặc cách nhau bởi dấu phẩy)."
-                elif not rate_raw:
-                    err = "Nhập tỷ giá chung."
                 elif len(brands) > 2000:
                     err = "Tối đa 2000 brand mỗi lần."
                 else:
                     try:
-                        rate = float(rate_raw)
-                    except ValueError:
-                        err = "Tỷ giá không phải số."
+                        rate_dec = parse_exchange_rate(rate_raw)
+                    except ValueError as ve:
+                        err = str(ve)
                     else:
-                        with conn.cursor() as cur:
-                            for brand in brands:
-                                cur.execute(
-                                    """
-                                    INSERT INTO exchange_rates (brand, rate)
-                                    VALUES (%s, %s)
-                                    ON CONFLICT (brand) DO UPDATE SET rate = EXCLUDED.rate, updated_at = NOW()
-                                    """,
-                                    (brand, rate),
-                                )
-                        conn.commit()
-                        msg = f"Đã áp dụng tỷ giá {rate} cho {len(brands)} brand."
-            elif request.form.get("bulk_lines_apply"):
+                        with conn:
+                            with conn.cursor() as cur:
+                                has_updated_at = _check_table_has_column(cur, "exchange_rates", "updated_at")
+                                sql = _exchange_rates_upsert_sql(has_updated_at)
+                                for brand in brands:
+                                    cur.execute(sql, (brand, rate_dec))
+                        msg = f"Đã áp dụng tỷ giá {rate_dec} cho {len(brands)} brand."
+
+            elif request.form.get("bulk_lines_apply") or action == "bulk_lines":
                 text = request.form.get("bulk_lines") or ""
-                rows_parsed: list[tuple[str, float]] = []
-                bad_lines: list[str] = []
-                for raw in text.splitlines():
+                rows_parsed: list[tuple[str, Decimal]] = []
+                line_errors: list[str] = []
+                for idx, raw in enumerate(text.splitlines(), start=1):
                     line = raw.strip()
                     if not line or line.startswith("#"):
                         continue
@@ -3444,69 +3582,117 @@ def admin_exchange_rates():
                     else:
                         parts = [p.strip() for p in line.split(",", 1)]
                     if len(parts) < 2 or not parts[0]:
-                        bad_lines.append(raw.strip()[:80])
+                        line_errors.append(f"Dòng {idx}: sai định dạng 'brand,tỷ_giá' ({line[:60]})")
                         continue
-                    b, rraw = parts[0], parts[1].replace(",", ".")
+                    b, rraw = parts[0], parts[1]
                     try:
-                        r = float(rraw)
-                    except ValueError:
-                        bad_lines.append(raw.strip()[:80])
-                        continue
-                    rows_parsed.append((b, r))
-                if len(rows_parsed) > 2000:
+                        r = parse_exchange_rate(rraw)
+                        rows_parsed.append((b, r))
+                    except ValueError as ve:
+                        line_errors.append(f"Dòng {idx} ({b}): {ve}")
+
+                if len(rows_parsed) + len(line_errors) > 2000:
                     err = "Tối đa 2000 dòng mỗi lần."
+                elif line_errors:
+                    sample_errs = "; ".join(line_errors[:3])
+                    if len(line_errors) > 3:
+                        sample_errs += f" và {len(line_errors) - 3} lỗi khác"
+                    err = f"Dữ liệu có dòng không hợp lệ, đã dừng toàn bộ: {sample_errs}."
                 elif not rows_parsed:
                     err = "Không có dòng hợp lệ. Định dạng: brand,tỷ_giá (mỗi dòng một cặp)."
                 else:
-                    with conn.cursor() as cur:
-                        for brand, rate in rows_parsed:
-                            cur.execute(
-                                """
-                                INSERT INTO exchange_rates (brand, rate)
-                                VALUES (%s, %s)
-                                ON CONFLICT (brand) DO UPDATE SET rate = EXCLUDED.rate, updated_at = NOW()
-                                """,
-                                (brand, rate),
-                            )
-                    conn.commit()
-                    msg = f"Đã cập nhật {len(rows_parsed)} dòng."
-                    if bad_lines:
-                        msg += f" Bỏ qua {len(bad_lines)} dòng không đọc được."
+                    with conn:
+                        with conn.cursor() as cur:
+                            has_updated_at = _check_table_has_column(cur, "exchange_rates", "updated_at")
+                            sql = _exchange_rates_upsert_sql(has_updated_at)
+                            for brand, rate_dec in rows_parsed:
+                                cur.execute(sql, (brand, rate_dec))
+                    msg = f"Đã cập nhật thành công {len(rows_parsed)} dòng tỷ giá."
+
             else:
                 brand = (request.form.get("brand") or "").strip()
-                rate_raw = (request.form.get("rate") or "").strip().replace(",", ".")
-                if not brand or not rate_raw:
-                    err = "Nhập đủ brand và rate."
+                rate_raw = (request.form.get("rate") or "").strip()
+                if not brand:
+                    err = "Vui lòng nhập tên brand."
+                elif len(brand) > 255:
+                    err = "Tên brand quá dài (tối đa 255 ký tự)."
                 else:
                     try:
-                        rate = float(rate_raw)
-                    except ValueError:
-                        err = "Rate không phải số."
+                        rate_dec = parse_exchange_rate(rate_raw)
+                    except ValueError as ve:
+                        err = str(ve)
                     else:
-                        with conn.cursor() as cur:
-                            cur.execute(
-                                """
-                                INSERT INTO exchange_rates (brand, rate)
-                                VALUES (%s, %s)
-                                ON CONFLICT (brand) DO UPDATE SET rate = EXCLUDED.rate, updated_at = NOW()
-                                """,
-                                (brand, rate),
-                            )
-                        conn.commit()
-                        msg = f"Đã lưu tỷ giá {brand} = {rate}"
+                        with conn:
+                            with conn.cursor() as cur:
+                                has_updated_at = _check_table_has_column(cur, "exchange_rates", "updated_at")
+                                sql = _exchange_rates_upsert_sql(has_updated_at)
+                                cur.execute(sql, (brand, rate_dec))
+                        msg = f"Đã lưu tỷ giá cho {brand} = {rate_dec}."
+
         except Exception as e:
-            err = str(e)
+            app.logger.exception("Lỗi xử lý exchange_rates: %s", e)
+            err = "Đã xảy ra lỗi hệ thống khi lưu tỷ giá. Vui lòng thử lại sau."
         finally:
             conn.close()
+
+        if is_ajax:
+            status_code = 400 if err else 200
+            return jsonify({
+                "ok": not bool(err),
+                "message": msg,
+                "error": err,
+                "brand": request.form.get("brand"),
+            }), status_code
 
     rows = []
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT brand, rate, updated_at FROM exchange_rates ORDER BY brand ASC LIMIT 500")
-            rows = [{"brand": r[0], "rate": r[1], "updated_at": r[2]} for r in cur.fetchall()]
+            try:
+                cur.execute(
+                    "SELECT brand, rate, updated_at FROM exchange_rates ORDER BY brand ASC LIMIT 2000"
+                )
+                raw_rows = cur.fetchall()
+            except Exception:
+                conn.rollback()
+                cur.execute(
+                    "SELECT brand, rate FROM exchange_rates ORDER BY brand ASC LIMIT 2000"
+                )
+                raw_rows = [(r[0], r[1], None) for r in cur.fetchall()]
+
+            for r in raw_rows:
+                b_name, b_rate, b_updated_at = r[0], r[1], r[2]
+                rate_num = (
+                    f"{b_rate:.8f}".rstrip("0").rstrip(".")
+                    if isinstance(b_rate, (Decimal, float))
+                    else str(b_rate)
+                )
+                try:
+                    rate_display = (
+                        f"{b_rate:,.2f}".rstrip("0").rstrip(".")
+                        if isinstance(b_rate, (Decimal, float))
+                        else str(b_rate)
+                    )
+                except Exception:
+                    rate_display = str(b_rate)
+
+                updated_at_display = (
+                    b_updated_at.strftime("%d/%m/%Y %H:%M")
+                    if hasattr(b_updated_at, "strftime")
+                    else (str(b_updated_at) if b_updated_at else "—")
+                )
+
+                rows.append({
+                    "brand": b_name,
+                    "rate": b_rate,
+                    "rate_num": rate_num,
+                    "rate_display": rate_display,
+                    "updated_at": b_updated_at,
+                    "updated_at_display": updated_at_display,
+                })
     except Exception as e:
-        err = err or f"Không đọc được bảng exchange_rates (đã chạy migration_005?): {e}"
+        app.logger.exception("Không đọc được bảng exchange_rates: %s", e)
+        err = err or "Không thể tải danh sách tỷ giá từ cơ sở dữ liệu."
     finally:
         conn.close()
 

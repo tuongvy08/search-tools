@@ -29,6 +29,14 @@ import auth_google
 import session_security
 from compliance_resolver import compliance_css_type, resolve_compliance_precedence
 from db import get_connection
+from brand_gateway import (
+    load_brand_gateway,
+    validate_import_rows_brands,
+    resolve_product_candidates,
+    inspect_replace_by_brand_scopes,
+    resolve_replace_by_brand_target_ids,
+    acquire_products_import_lock,
+)
 from middleware_access import register_ip_access_control
 from product_import_manual import (
     HEADER_MODE_ABSENT,
@@ -2454,15 +2462,20 @@ def _insert_import_job(cur, **kwargs):
     )
 
 
-def _preview_hints(dataset, mode, rows):
+def _preview_hints(dataset, mode, rows, deletable_count=None, ambiguous_count=0):
     hints = []
     if dataset == "products":
         brands = sorted({_norm(r.get("brand")) for r in rows if _norm(r.get("brand"))})
         hints.append(f"Distinct brands in file: {len(brands)}")
         if mode == "replace_by_brand":
-            hints.append("Apply sẽ xóa products theo các brand trong file rồi insert lại")
+            if deletable_count is not None:
+                hints.append(f"Apply sẽ xóa an toàn {deletable_count:,} sản phẩm theo scope brand/source_brand trong file rồi nạp lại")
+            else:
+                hints.append("Apply sẽ xóa an toàn products theo scope brand/source_brand trong file rồi nạp lại")
         elif mode == "upsert":
-            hints.append("Upsert key: code + brand (không phân biệt hoa thường)")
+            hints.append("Upsert key: code + brand (chuẩn hóa qua Brand Master, an toàn va chạm)")
+        if ambiguous_count > 0:
+            hints.append(f"Cảnh báo: Phát hiện {ambiguous_count} dòng trùng mã/brand (ambiguous). Cần chỉ định rõ source_brand hoặc size nếu không file sẽ bị từ chối khi apply.")
     else:
         types_ = sorted({_norm(r.get("rule_type")).upper() for r in rows if _norm(r.get("rule_type"))})
         hints.append(f"Rule types in file: {', '.join(types_) if types_ else 'none'}")
@@ -2672,11 +2685,42 @@ def admin_imports_preview():
             )
         )
 
+    deletable_count = None
     if dataset == "products":
         try:
             validate_product_import_rows(rows, header_cols)
         except ValueError as e:
             return redirect(url_for("admin_imports", err=str(e)))
+
+        conn = get_connection()
+        ambiguous_preview_count = 0
+        try:
+            with conn.cursor() as cur:
+                gateway = load_brand_gateway(cur)
+                if gateway.table_exists:
+                    resolved_rows, brand_errors = validate_import_rows_brands(rows, gateway)
+                    if brand_errors:
+                        sample_err = "; ".join(brand_errors[:3])
+                        if len(brand_errors) > 3:
+                            sample_err += f" (và {len(brand_errors) - 3} lỗi khác)"
+                        return redirect(url_for("admin_imports", err=f"Brand không hợp lệ: {sample_err}"))
+
+                    if mode == "replace_by_brand":
+                        _, scope_errors, deletable_count = inspect_replace_by_brand_scopes(cur, rows, gateway)
+                        if scope_errors:
+                            return redirect(url_for("admin_imports", err="; ".join(scope_errors)))
+                    elif mode == "upsert":
+                        for r in resolved_rows:
+                            c_code = _norm(r.get("code"))
+                            c_can = _norm(r.get("brand"))
+                            c_src = _norm(r.get("source_brand")) or c_can
+                            c_sz = _norm(r.get("size"))
+                            if c_code and c_can:
+                                cands = resolve_product_candidates(cur, c_code, c_can, source_brand=c_src, size=c_sz)
+                                if len(cands) > 1:
+                                    ambiguous_preview_count += 1
+        finally:
+            conn.close()
 
     token = str(uuid4())
     IMPORT_PREVIEWS[token] = {
@@ -2688,7 +2732,8 @@ def admin_imports_preview():
         "header_cols": sorted(header_cols),
         "row_count": len(rows),
         "sample_rows": rows[:10],
-        "hints": _preview_hints(dataset, mode, rows),
+        "hints": _preview_hints(dataset, mode, rows, deletable_count=deletable_count, ambiguous_count=ambiguous_preview_count),
+        "preview_deletable_count": deletable_count,
     }
     return redirect(url_for("admin_imports", preview=token))
 
@@ -2719,49 +2764,127 @@ def admin_imports_apply():
     try:
         with conn:
             with conn.cursor() as cur:
+                ambiguous_count = 0
                 if dataset == "products":
+                    # MUST be first: serialize with every other product-mutating
+                    # import path (bulk apply + quick-product upsert/delete) before
+                    # any candidate scan, ambiguity check, or scope/count computation.
+                    acquire_products_import_lock(cur)
+
                     validate_product_import_rows(rows, header_cols)
                     manual_header_mode = classify_manual_compliance_headers(header_cols)
                     manual_snapshot = {}
                     preparation_snapshot = {}
+                    has_source_brand = _check_table_has_column(cur, "products", "source_brand")
+
+                    gateway = load_brand_gateway(cur)
+                    if gateway.table_exists:
+                        resolved_rows, brand_errors = validate_import_rows_brands(rows, gateway)
+                        if brand_errors:
+                            raise ValueError(f"Brand không hợp lệ: {brand_errors[0]}")
+                        rows_to_process = resolved_rows
+                    else:
+                        rows_to_process = rows
 
                     if mode == "replace_by_brand":
                         brands = sorted({_norm(r.get("brand")) for r in rows if _norm(r.get("brand"))})
                         if not brands:
                             raise ValueError("Mode replace_by_brand yêu cầu ít nhất 1 brand hợp lệ trong file.")
-                        # Xóa theo brand không phân biệt hoa thường và bỏ khoảng trắng thừa.
-                        brands_norm = sorted({b.strip().upper() for b in brands if b.strip()})
-                        if manual_header_mode == HEADER_MODE_ABSENT:
-                            manual_snapshot = fetch_manual_compliance_snapshot(cur, brands_norm)
-                        if "preparation_type" not in header_cols:
-                            preparation_snapshot = fetch_preparation_type_snapshot(cur, brands_norm)
-                        cur.execute(
-                            """
-                            DELETE FROM products
-                            WHERE UPPER(TRIM(COALESCE(brand, ''))) = ANY(%s)
-                            """,
-                            (brands_norm,),
-                        )
-                        deleted = cur.rowcount
 
-                    for r in rows:
+                        if gateway.table_exists:
+                            brand_to_sources, scope_errors, _preview_count = inspect_replace_by_brand_scopes(cur, rows, gateway)
+                            if scope_errors:
+                                raise ValueError(scope_errors[0])
+
+                            # Resolve the EXACT row IDs to delete now, while still holding
+                            # the products-import lock, immediately before the DELETE. This
+                            # is the authoritative scope -- never widen the DELETE predicate
+                            # beyond this verified ID set.
+                            target_ids_map = resolve_replace_by_brand_target_ids(cur, brand_to_sources)
+                            current_deletable_count = sum(len(ids) for ids in target_ids_map.values())
+
+                            preview_deletable_count = data.get("preview_deletable_count")
+                            if preview_deletable_count is not None and current_deletable_count != preview_deletable_count:
+                                raise ValueError(
+                                    f"Phạm vi dữ liệu đã thay đổi kể từ khi xem trước (dự kiến xóa: {preview_deletable_count} dòng, "
+                                    f"hiện tại: {current_deletable_count} dòng). Thao tác bị hủy để đảm bảo an toàn."
+                                )
+
+                            brands_norm = sorted({b.strip().upper() for b in brand_to_sources.keys()})
+                            if manual_header_mode == HEADER_MODE_ABSENT:
+                                manual_snapshot = fetch_manual_compliance_snapshot(cur, brands_norm)
+                            if "preparation_type" not in header_cols:
+                                preparation_snapshot = fetch_preparation_type_snapshot(cur, brands_norm)
+
+                            for can_b, ids in target_ids_map.items():
+                                if not ids:
+                                    continue
+                                cur.execute(
+                                    "DELETE FROM products WHERE id = ANY(%s)",
+                                    (ids,),
+                                )
+                                deleted += cur.rowcount
+                        else:
+                            brands_norm = sorted({b.strip().upper() for b in brands if b.strip()})
+                            if manual_header_mode == HEADER_MODE_ABSENT:
+                                manual_snapshot = fetch_manual_compliance_snapshot(cur, brands_norm)
+                            if "preparation_type" not in header_cols:
+                                preparation_snapshot = fetch_preparation_type_snapshot(cur, brands_norm)
+                            cur.execute(
+                                """
+                                DELETE FROM products
+                                WHERE UPPER(TRIM(COALESCE(brand, ''))) = ANY(%s)
+                                """,
+                                (brands_norm,),
+                            )
+                            deleted = cur.rowcount
+
+                    if mode == "upsert" and gateway.table_exists:
+                        ambiguous_errors = []
+                        for idx, r in enumerate(rows_to_process, start=2):
+                            chk_code = _norm(r.get("code"))
+                            chk_brand = _norm(r.get("brand"))
+                            chk_source = _norm(r.get("source_brand")) or chk_brand
+                            chk_size = _norm(r.get("size"))
+                            if chk_code and chk_brand:
+                                cands = resolve_product_candidates(
+                                    cur, chk_code, chk_brand, source_brand=chk_source, size=chk_size
+                                )
+                                if len(cands) > 1:
+                                    ambiguous_errors.append(
+                                        f"dòng {idx} (code '{chk_code}', brand '{chk_brand}', {len(cands)} bản ghi)"
+                                    )
+                        if ambiguous_errors:
+                            sample_err = "; ".join(ambiguous_errors[:5])
+                            if len(ambiguous_errors) > 5:
+                                sample_err += f" (và {len(ambiguous_errors) - 5} dòng khác)"
+                            raise ValueError(
+                                f"Phát hiện {len(ambiguous_errors)} dòng trùng lặp mơ hồ (ambiguous) trong cơ sở dữ liệu: {sample_err}. "
+                                f"Vui lòng chỉ định rõ source_brand hoặc quy cách size để tránh cập nhật tùy ý. "
+                                f"Toàn bộ file bị hủy bỏ, 0 dòng nào được ghi."
+                            )
+
+                    for r in rows_to_process:
+                        canonical_brand = _norm(r.get("brand"))
+                        code = _norm(r.get("code"))
+                        source_brand = _norm(r.get("source_brand")) or canonical_brand
+                        size = _norm(r.get("size"))
                         vals = (
-                            _norm(r.get("name")), _norm(r.get("code")), _norm(r.get("cas")), _norm(r.get("brand")),
-                            _norm(r.get("size")), _norm(r.get("ship")), _norm(r.get("price")), _norm(r.get("note")),
+                            _norm(r.get("name")), code, _norm(r.get("cas")), canonical_brand,
+                            size, _norm(r.get("ship")), _norm(r.get("price")), _norm(r.get("note")),
                         )
-                        code, brand = vals[1], vals[3]
                         include_manual, manual_c, manual_n = resolve_manual_fields_for_write(
                             header_mode=manual_header_mode,
                             row=r,
                             code=code,
-                            brand=brand,
+                            brand=canonical_brand,
                             snapshot=manual_snapshot,
                         )
                         include_preparation, preparation_type = resolve_preparation_type_for_write(
                             header_cols=header_cols,
                             row=r,
                             code=code,
-                            brand=brand,
+                            brand=canonical_brand,
                             snapshot=preparation_snapshot,
                         )
                         if mode == "append":
@@ -2773,10 +2896,12 @@ def admin_imports_apply():
                                 manual_n,
                                 include_preparation,
                                 preparation_type,
+                                source_brand=source_brand,
+                                has_source_brand=has_source_brand,
                             )
                             inserted += 1
                         else:
-                            if not code or not brand:
+                            if not code or not canonical_brand:
                                 _insert_product_row(
                                     cur,
                                     vals,
@@ -2785,32 +2910,16 @@ def admin_imports_apply():
                                     manual_n,
                                     include_preparation,
                                     preparation_type,
+                                    source_brand=source_brand,
+                                    has_source_brand=has_source_brand,
                                 )
                                 inserted += 1
                                 continue
-                            cur.execute(
-                                """
-                                SELECT id FROM products
-                                WHERE UPPER(TRIM(code)) = UPPER(TRIM(%s))
-                                  AND UPPER(TRIM(brand)) = UPPER(TRIM(%s))
-                                LIMIT 1
-                                """,
-                                (code, brand),
+
+                            candidates = resolve_product_candidates(
+                                cur, code, canonical_brand, source_brand=source_brand, size=size
                             )
-                            ex = cur.fetchone()
-                            if ex:
-                                _update_product_row(
-                                    cur,
-                                    vals,
-                                    ex[0],
-                                    include_manual,
-                                    manual_c,
-                                    manual_n,
-                                    include_preparation,
-                                    preparation_type,
-                                )
-                                updated += 1
-                            else:
+                            if len(candidates) == 0:
                                 _insert_product_row(
                                     cur,
                                     vals,
@@ -2819,8 +2928,29 @@ def admin_imports_apply():
                                     manual_n,
                                     include_preparation,
                                     preparation_type,
+                                    source_brand=source_brand,
+                                    has_source_brand=has_source_brand,
                                 )
                                 inserted += 1
+                            elif len(candidates) == 1:
+                                _update_product_row(
+                                    cur,
+                                    vals,
+                                    candidates[0][0],
+                                    include_manual,
+                                    manual_c,
+                                    manual_n,
+                                    include_preparation,
+                                    preparation_type,
+                                    source_brand=source_brand,
+                                    has_source_brand=has_source_brand,
+                                )
+                                updated += 1
+                            else:
+                                raise ValueError(
+                                    f"Phát hiện bản ghi trùng lặp mơ hồ cho code '{code}', brand '{canonical_brand}'. "
+                                    f"Hủy bỏ cập nhật để bảo toàn dữ liệu."
+                                )
 
                 else:
                     parsed = []
@@ -2891,6 +3021,10 @@ def admin_imports_apply():
                                 )
                                 inserted += 1
 
+                meta_payload = {"preview_token": token}
+                if ambiguous_count > 0:
+                    meta_payload["ambiguous_count"] = ambiguous_count
+
                 _insert_import_job(
                     cur,
                     dataset=dataset,
@@ -2902,10 +3036,13 @@ def admin_imports_apply():
                     updated_count=updated,
                     deleted_count=deleted,
                     created_by=actor,
-                    meta={"preview_token": token},
+                    meta=meta_payload,
                 )
 
-        return redirect(url_for("admin_imports", msg=f"Import OK: inserted={inserted}, updated={updated}, deleted={deleted}"))
+        msg = f"Import OK: inserted={inserted}, updated={updated}, deleted={deleted}"
+        if ambiguous_count > 0:
+            msg += f" (Bỏ qua {ambiguous_count} bản ghi ambiguous để chống ghi đè nhầm)"
+        return redirect(url_for("admin_imports", msg=msg))
     except Exception as e:
         try:
             with conn:
@@ -2947,6 +3084,8 @@ def _insert_product_row(
     manual_n,
     include_preparation: bool = False,
     preparation_type=None,
+    source_brand: Optional[str] = None,
+    has_source_brand: Optional[bool] = None,
 ) -> None:
     columns = ["name", "code", "cas", "brand", "size", "ship", "price", "note"]
     params = list(vals)
@@ -2956,6 +3095,11 @@ def _insert_product_row(
     if include_preparation:
         columns.append("preparation_type")
         params.append(preparation_type)
+    if has_source_brand is None:
+        has_source_brand = _check_table_has_column(cur, "products", "source_brand")
+    if has_source_brand:
+        columns.append("source_brand")
+        params.append(source_brand if source_brand is not None else vals[3])
     placeholders = ", ".join(["%s"] * len(columns))
     cur.execute(
         f"""
@@ -2975,6 +3119,8 @@ def _update_product_row(
     manual_n,
     include_preparation: bool = False,
     preparation_type=None,
+    source_brand: Optional[str] = None,
+    has_source_brand: Optional[bool] = None,
 ) -> None:
     assignments = ["name=%s", "code=%s", "cas=%s", "brand=%s", "size=%s", "ship=%s", "price=%s", "note=%s"]
     params = list(vals)
@@ -2984,6 +3130,11 @@ def _update_product_row(
     if include_preparation:
         assignments.append("preparation_type=%s")
         params.append(preparation_type)
+    if has_source_brand is None:
+        has_source_brand = _check_table_has_column(cur, "products", "source_brand")
+    if has_source_brand and source_brand is not None:
+        assignments.append("source_brand=%s")
+        params.append(source_brand)
     params.append(product_id)
     cur.execute(
         f"""
@@ -3005,38 +3156,64 @@ def _parse_is_active(raw) -> bool:
 
 
 def _upsert_single_product(cur, row: dict) -> tuple[str, str]:
-    """UPSERT 1 dòng products theo cặp code + brand (không phân biệt hoa thường)."""
-    code = _norm(row.get("code"))
-    brand = _norm(row.get("brand"))
-    if not code or not brand:
+    """UPSERT 1 dòng products theo cặp code + brand (qua Brand Gateway, an toàn va chạm)."""
+    raw_code = _norm(row.get("code"))
+    raw_brand = _norm(row.get("brand"))
+    if not raw_code or not raw_brand:
         raise ValueError("Trường code và brand là bắt buộc.")
+
+    gateway = load_brand_gateway(cur)
+    res = gateway.resolve(raw_brand, row.get("source_brand"))
+    if not res.is_valid:
+        raise ValueError(res.error_message)
+
+    canonical_brand = res.canonical_brand
+    source_brand = res.source_brand
+    size = _norm(row.get("size"))
 
     vals = (
         _norm(row.get("name")),
-        code,
+        raw_code,
         _norm(row.get("cas")),
-        brand,
-        _norm(row.get("size")),
+        canonical_brand,
+        size,
         _norm(row.get("ship")),
         _norm(row.get("price")),
         _norm(row.get("note")),
     )
-    cur.execute(
-        """
-        SELECT id FROM products
-        WHERE UPPER(TRIM(code)) = UPPER(TRIM(%s))
-          AND UPPER(TRIM(brand)) = UPPER(TRIM(%s))
-        LIMIT 1
-        """,
-        (code, brand),
+    has_source_brand = _check_table_has_column(cur, "products", "source_brand")
+    candidates = resolve_product_candidates(
+        cur, raw_code, canonical_brand, source_brand=source_brand, size=size
     )
-    existing = cur.fetchone()
-    label = vals[0] or code
-    if existing:
-        _update_product_row(cur, vals, existing[0], include_manual=False, manual_c=None, manual_n=None)
+    if len(candidates) > 1:
+        raise ValueError(
+            f"Phát hiện {len(candidates)} bản ghi trùng mã '{raw_code}' và brand '{canonical_brand}'. "
+            f"Vui lòng chỉ định rõ source_brand hoặc quy cách size để tránh cập nhật tùy ý."
+        )
+
+    label = vals[0] or raw_code
+    if len(candidates) == 1:
+        _update_product_row(
+            cur,
+            vals,
+            candidates[0][0],
+            include_manual=False,
+            manual_c=None,
+            manual_n=None,
+            source_brand=source_brand,
+            has_source_brand=has_source_brand,
+        )
         return "updated", label
 
-    _insert_product_row(cur, vals, include_manual=False, manual_c=None, manual_n=None)
+    _insert_product_row(
+        cur,
+        vals,
+        include_manual=False,
+        manual_c=None,
+        manual_n=None,
+        source_brand=source_brand,
+        has_source_brand=has_source_brand,
+    )
     return "inserted", label
 
 
@@ -3095,14 +3272,19 @@ def _upsert_single_regulatory_rule(cur, row: dict) -> tuple[str, str]:
 
 def _delete_single_product(cur, row: dict) -> tuple[str, int]:
     """Xóa sản phẩm theo brand + (code | cas | name); size tuỳ chọn để thu hẹp."""
-    brand = _norm(row.get("brand"))
+    raw_brand = _norm(row.get("brand"))
     code = _norm(row.get("code"))
     cas = _norm(row.get("cas"))
     name = _norm(row.get("name"))
     size = _norm(row.get("size"))
 
-    if not brand:
+    if not raw_brand:
         raise ValueError("Trường brand là bắt buộc để xóa.")
+
+    gateway = load_brand_gateway(cur)
+    res = gateway.resolve(raw_brand)
+    brand = res.canonical_brand if res.is_valid and res.canonical_brand else raw_brand
+
     if not code and not cas and not name:
         raise ValueError(
             "Cần điền brand và ít nhất một trong: code, CAS hoặc name. "
@@ -3203,6 +3385,10 @@ def admin_imports_quick_product():
     try:
         with conn:
             with conn.cursor() as cur:
+                # Serialize with every other product-mutating import path (bulk
+                # apply + quick-product delete) so concurrent single-row edits can
+                # never race a bulk import's candidate scan/mutation.
+                acquire_products_import_lock(cur)
                 action, label = _upsert_single_product(cur, request.values)
                 inserted = 1 if action == "inserted" else 0
                 updated = 1 if action == "updated" else 0
@@ -3287,6 +3473,9 @@ def admin_imports_quick_product_delete():
     try:
         with conn:
             with conn.cursor() as cur:
+                # Same lock as bulk apply / quick-upsert -- a single quick-delete
+                # must never race a concurrent bulk import's scan/mutation.
+                acquire_products_import_lock(cur)
                 label, deleted = _delete_single_product(cur, request.values)
                 _insert_import_job(
                     cur,

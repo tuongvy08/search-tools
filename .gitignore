@@ -6,3 +6,4 @@ __pycache__/
 *.db
 .DS_Store
 tmp/
+rehearsal_results.json

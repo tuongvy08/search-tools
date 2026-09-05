@@ -1,0 +1,328 @@
+/* Phase 6B1: shared admin/app navigation shell.
+   Rendered by templates/_user_nav.html on every page that includes it
+   (Search, Quick Quote, and every /admin/* page). Kept in its own file
+   instead of inline <style> so it is loaded once per page (browser cache)
+   and never duplicated per-template -- see templates/_user_nav.html's
+   own comment for the "why one shared partial" rationale.
+
+   Scope is deliberately limited to the top navigation bar. Page-specific
+   layout (cards, tables, forms) stays in each template's own <style>
+   block -- this file does not attempt a full styles.css refactor.
+
+   Phase 6B1-Polish: the breakpoint between "single-row desktop bar" and
+   "hamburger-collapsed mobile bar" moved from 760px to 1024px (exclusive:
+   the mobile rules below fire at max-width 1023.98px, so exactly 1024px
+   is desktop). Below 1024px the 8 admin links are still grouped under
+   the "Quản trị" label, but rendered flat/inline (not a floating
+   dropdown) so the mobile hamburger never opens a second nested menu on
+   top of itself. */
+
+.sq-shell-header {
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: system-ui, sans-serif;
+  font-size: 0.9rem;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  box-sizing: border-box;
+}
+
+.sq-shell-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  max-width: 100%;
+  box-sizing: border-box;
+  /* Desktop (>=1024px): everything -- brand, links, admin trigger, user
+     info, logout -- must stay on exactly one row. flex-wrap left at the
+     default `nowrap` here; the mobile media query below is what switches
+     to a wrapping/stacked layout, not this rule shrinking under pressure. */
+  flex-wrap: nowrap;
+}
+
+.sq-shell-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #f8fafc;
+  text-decoration: none;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.sq-shell-toggle {
+  display: none;
+  margin-left: auto;
+  background: transparent;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.sq-shell-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.sq-shell-nav {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.sq-shell-group {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+
+.sq-shell-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #cbd5e1;
+  text-decoration: none;
+  background: transparent;
+  border: none;
+  padding: 6px 10px;
+  border-radius: 8px;
+  white-space: nowrap;
+  line-height: 1.1;
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+}
+
+.sq-shell-link i {
+  width: 1em;
+  text-align: center;
+  opacity: 0.85;
+}
+
+.sq-shell-link:hover {
+  background: #1e293b;
+  color: #f8fafc;
+}
+
+.sq-shell-link:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+.sq-shell-link.is-active {
+  background: #1d4ed8;
+  color: #fff;
+  font-weight: 600;
+}
+
+/* ---- "Quản trị" disclosure control (desktop: dropdown; mobile: flat) --- */
+
+.sq-shell-admin {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.sq-shell-admin-caret {
+  font-size: 0.7em;
+  margin-left: 2px;
+  transition: transform 0.15s ease;
+}
+
+.sq-shell-admin-trigger[aria-expanded="true"] .sq-shell-admin-caret {
+  transform: rotate(180deg);
+}
+
+.sq-shell-admin-mobile-label {
+  display: none;
+}
+
+.sq-shell-admin-menu {
+  /* Desktop default: a floating dropdown panel, closed. */
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  display: none;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 240px;
+  background: #111827;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4);
+  z-index: 60;
+}
+
+.sq-shell-admin-menu.is-open {
+  display: flex;
+}
+
+.sq-shell-admin-menu .sq-shell-link {
+  width: 100%;
+}
+
+.sq-shell-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.sq-shell-username {
+  font-weight: 600;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sq-shell-role {
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  background: #1e293b;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.sq-shell-logout {
+  margin: 0;
+}
+
+.sq-shell-logout button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  color: #fca5a5;
+  border: 1px solid #7f1d1d;
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.sq-shell-logout button:hover {
+  background: #7f1d1d;
+  color: #fff;
+}
+
+.sq-shell-logout button:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+/* Mobile (<1024px): collapse the link groups behind a hamburger toggle so
+   the bar never overflows horizontally, and force the admin panel to
+   render flat/inline (never a floating dropdown) so opening the
+   hamburger is the only "tap to reveal" step -- no nested second menu. */
+@media (max-width: 1023.98px) {
+  .sq-shell-bar {
+    flex-wrap: wrap;
+  }
+
+  .sq-shell-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .sq-shell-nav {
+    flex-basis: 100%;
+    display: none;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+    order: 3;
+    padding-top: 8px;
+    border-top: 1px solid #1e293b;
+    margin-top: 8px;
+  }
+
+  .sq-shell-nav.is-open {
+    display: flex;
+  }
+
+  .sq-shell-group {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .sq-shell-admin {
+    display: block;
+    border-left: none;
+    padding-left: 0;
+    margin-left: 0;
+    padding-top: 6px;
+    border-top: 1px solid #1e293b;
+    margin-top: 6px;
+  }
+
+  /* The desktop trigger button is hidden entirely on mobile -- it is not
+     just visually hidden, it plays no role here, so there is exactly one
+     "open admin links" affordance on this breakpoint: the hamburger. */
+  .sq-shell-admin-trigger {
+    display: none;
+  }
+
+  .sq-shell-admin-mobile-label {
+    display: block;
+    color: #64748b;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    margin: 0 0 4px;
+  }
+
+  /* Same panel markup as desktop, but always laid out inline/flat --
+     ignore the JS-driven `.is-open` class entirely on this breakpoint. */
+  .sq-shell-admin-menu,
+  .sq-shell-admin-menu.is-open {
+    position: static;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+    min-width: 0;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    box-shadow: none;
+  }
+
+  .sq-shell-link {
+    padding: 10px 8px;
+  }
+
+  .sq-shell-user {
+    order: 2;
+    margin-left: 0;
+    flex-basis: 100%;
+    justify-content: space-between;
+  }
+
+  .sq-shell-username {
+    max-width: 50vw;
+  }
+}

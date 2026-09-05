@@ -4,13 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Lịch sử đăng nhập</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
   <style>
     body { font-family: system-ui, sans-serif; max-width: 1200px; margin: 24px auto; padding: 0 12px; }
     .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin-bottom: 16px; background: #fff; }
     .err { color: #b00020; white-space: pre-wrap; margin-bottom: 12px; }
     .muted { color: #555; font-size: 0.95rem; }
     .small { font-size: 0.9rem; color: #666; }
-    .nav a { margin-right: 12px; }
     table { border-collapse: collapse; width: 100%; margin-top: 10px; }
     th, td { border: 1px solid #ddd; padding: 8px 10px; text-align: left; vertical-align: top; white-space: nowrap; }
     th { background: #f4f7fe; color: #2e45b6; }
@@ -35,12 +36,6 @@
 </head>
 <body>
   {% include "_user_nav.html" %}
-  <div class="nav" style="margin-bottom: 12px;">
-    <a href="/">Search</a>
-    <a href="/admin/imports">Imports</a>
-    <a href="/admin/users">Users</a>
-    <a href="/admin/login-history">Lịch sử đăng nhập</a>
-  </div>
 
   <h1 style="margin-top:0;">Lịch sử đăng nhập</h1>
   <p class="muted">

@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Quản lý Users</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
   <style>
     body { font-family: system-ui, sans-serif; max-width: 1100px; margin: 24px auto; padding: 0 12px; }
     .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin-bottom: 16px; background: #fff; }
@@ -13,7 +15,6 @@
     th, td { border: 1px solid #ddd; padding: 8px 10px; text-align: left; vertical-align: top; }
     th { background: #f4f7fe; color: #2e45b6; }
     code { background: #f6f6f6; padding: 1px 4px; border-radius: 4px; }
-    .nav a { margin-right: 12px; }
     .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
     .field { display: flex; flex-direction: column; gap: 4px; }
     input[type="text"], input[type="password"], textarea, select {
@@ -40,16 +41,6 @@
 </head>
 <body>
   {% include "_user_nav.html" %}
-  <div class="nav" style="margin-bottom: 12px;">
-    <a href="/">Search</a>
-    <a href="/admin/imports">Imports</a>
-    <a href="/admin/quote-templates">Mẫu báo giá</a>
-    <a href="/admin/exchange-rates">Tỷ giá</a>
-    <a href="/admin/network">Mạng / IP</a>
-    <a href="/admin/teams">Teams</a>
-    <a href="/admin/users">Users</a>
-    <a href="/admin/brand-compliance">Manual compliance</a>
-  </div>
 
   <h1 style="margin-top:0;">Quản lý Users</h1>
   <p class="muted">

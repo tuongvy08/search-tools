@@ -20,6 +20,7 @@ ADMIN_TEMPLATES = [
     ROOT / "templates" / "admin_brand_compliance.html",
     ADMIN_QUOTE_HTML,
 ]
+USER_NAV_HTML = ROOT / "templates" / "_user_nav.html"
 
 
 class AdminQuoteTemplatesRouteTests(unittest.TestCase):
@@ -73,12 +74,34 @@ class AdminQuoteTemplatesRouteTests(unittest.TestCase):
 
 class AdminQuoteTemplatesStaticTests(unittest.TestCase):
     def test_nav_link_on_admin_pages_only(self):
-        for path in ADMIN_TEMPLATES:
+        # Phase 6B1: the per-template hand-written `.nav` link list that
+        # used to live inline on every admin page (checked here before
+        # 6B1) was replaced by ONE shared shell nav
+        # (`templates/_user_nav.html`, included via
+        # `{% include "_user_nav.html" %}` on every page). So the actual
+        # "Mẫu báo giá" link now lives in that single partial, gated by
+        # `session.get('is_admin')` -- not duplicated per admin template
+        # any more. Assert the link's one real source, and that every page
+        # (including admin pages) reaches it only via the shared include,
+        # never via a second, template-local nav block.
+        nav_html = USER_NAV_HTML.read_text(encoding="utf-8")
+        self.assertIn("admin_quote_templates_page", nav_html)
+        self.assertIn("Mẫu báo giá", nav_html)
+        self.assertIn("session.get('is_admin')", nav_html)
+
+        for path in ADMIN_TEMPLATES + [INDEX_HTML, QUICK_QUOTE_HTML]:
             html = path.read_text(encoding="utf-8")
-            self.assertIn('/admin/quote-templates', html, f"Missing nav link: {path.name}")
-            self.assertIn("Mẫu báo giá", html, f"Missing nav text: {path.name}")
-        self.assertNotIn('/admin/quote-templates', INDEX_HTML.read_text(encoding="utf-8"))
-        self.assertNotIn('/admin/quote-templates', QUICK_QUOTE_HTML.read_text(encoding="utf-8"))
+            self.assertEqual(
+                html.count('{% include "_user_nav.html" %}'), 1,
+                f"Expected exactly one shared-nav include: {path.name}",
+            )
+            # No template may hand-roll its own admin nav block any more --
+            # that would reintroduce the exact duplication Phase 6B1 removed.
+            self.assertNotIn('class="nav"', html, f"Leftover duplicate nav block: {path.name}")
+            self.assertNotIn("<nav class=\"nav\"", html, f"Leftover duplicate nav block: {path.name}")
+            # The raw template source itself (Jinja untouched) must not
+            # hardcode this admin link a second time outside the partial.
+            self.assertNotIn('href="/admin/quote-templates"', html, f"Hardcoded duplicate nav link: {path.name}")
 
     def test_html_has_required_sections(self):
         html = ADMIN_QUOTE_HTML.read_text(encoding="utf-8")

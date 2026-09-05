@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Mẫu báo giá — Admin</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
   <style>
     :root {
@@ -36,15 +37,6 @@
       letter-spacing: -0.02em;
     }
     .sub { margin: 0; color: var(--muted); font-size: 0.95rem; }
-    .nav {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px 14px;
-      margin-top: 12px;
-      font-size: 0.95rem;
-    }
-    .nav a { color: var(--primary); text-decoration: none; font-weight: 500; }
-    .nav a:hover { text-decoration: underline; }
     .panel {
       background: var(--card);
       border: 1px solid var(--border);
@@ -274,15 +266,6 @@
     <header>
       <h1>Mẫu báo giá</h1>
       <p class="sub">Quản lý phiên bản workbook báo giá do admin upload. Profile hiện tại: <code>BG_V1</code>.</p>
-      <nav class="nav" aria-label="Admin navigation">
-        <a href="/">Search</a>
-        <a href="/admin/imports">Imports</a>
-        <a href="/admin/quote-templates"><b>Mẫu báo giá</b></a>
-        <a href="/admin/exchange-rates">Tỷ giá</a>
-        <a href="/admin/network">Mạng / IP</a>
-        <a href="/admin/users">Users</a>
-        <a href="/admin/brand-compliance">Manual compliance</a>
-      </nav>
     </header>
 
     <div id="qtPageAlert" class="alert" role="status" aria-live="polite"></div>

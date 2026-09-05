@@ -1,66 +1,201 @@
 {% if session.get('authenticated') %}
-<div class="sq-user-nav">
-  <div class="sq-user-nav-who">
-    <span class="sq-user-nav-name">{{ session.get('username') or 'Người dùng' }}</span>
-    <span class="sq-user-nav-role">{{ session.get('role') or 'user' }}</span>
+{#
+  Phase 6B1: one shared admin/app navigation shell, included by every page
+  (Search, Quick Quote, every /admin/* page) via `{% include "_user_nav.html" %}`.
+  Replaces the old pattern of this same partial PLUS a second, hand-written
+  `.nav`/`<nav class="nav">` link list duplicated inline on every admin
+  template (Phase 6A and earlier).
+
+  Visibility rule (unchanged from before Phase 6B1, still backend-enforced
+  independently by each route's own `_require_admin_page()`/blueprint
+  guard -- this partial only controls what's SHOWN, never what's ALLOWED):
+  the "Quản trị" control only renders when `session.get('is_admin')` is
+  true. A staff/non-admin session never sees any `/admin/*` link here, and
+  calling an admin URL directly still hits the real backend guard
+  regardless of what this template renders.
+
+  "Trang đang mở" (active-page highlight) is computed purely from
+  `request.path` (a Jinja global Flask already injects on every request)
+  compared against each link's own `url_for(...)` result -- no new
+  context variable, no route/endpoint change required anywhere.
+
+  Phase 6B1-Polish: the 8 admin links used to render as a flat row of
+  links inline in the top bar, which wrapped to a second line well before
+  1024px (too many items for one row). They're now grouped behind a single
+  "Quản trị" disclosure button (WAI-ARIA "disclosure" pattern -- a button
+  with aria-expanded/aria-controls toggling a sibling panel of plain links;
+  deliberately NOT a role="menu"/menuitem widget, which would require
+  arrow-key roving-tabindex navigation this task doesn't ask for) so the
+  always-visible desktop row is just: brand, Search, Quick Quote, one
+  "Quản trị" button, username/role, Đăng xuất -- narrow enough to stay on
+  one line from 1024px up. Below that, `admin_nav.css` forces the SAME
+  panel markup to render inline/flat inside the existing mobile hamburger
+  (see `#sqShellToggle` below) instead of as a floating dropdown, so
+  mobile never has two stacked layers of "tap to reveal" menus.
+#}
+{% set _sq_home_path = url_for('home') %}
+{% set _sq_quick_quote_path = url_for('quick_quote') %}
+{# Icon names below are Font Awesome 5 Free (see the fa 5.15.2 CDN <link>
+   each template loads) -- FA6-only names like fa-user-gear/fa-shield-halved
+   render as blank glyphs on FA5 and were caught + fixed during Phase 6B1
+   browser smoke testing. Every icon class used in this file has been
+   verified (via computed ::before content in a real FA5.15.2 page) to
+   resolve to a real glyph, not a blank one. #}
+{% set _sq_admin_links = [
+  ('admin_imports', 'fa-file-import', 'Nhập dữ liệu'),
+  ('admin_teams.index', 'fa-users', 'Team & quyền truy cập'),
+  ('admin_users', 'fa-user-cog', 'Người dùng'),
+  ('admin_network', 'fa-network-wired', 'Mạng / IP'),
+  ('admin_quote_templates_page', 'fa-file-invoice', 'Mẫu báo giá'),
+  ('admin_exchange_rates', 'fa-money-bill-alt', 'Tỷ giá'),
+  ('admin_brand_compliance', 'fa-shield-alt', 'Manual compliance'),
+  ('admin_login_history.index', 'fa-history', 'Lịch sử đăng nhập'),
+] %}
+{% set _sq_admin_paths = [] %}
+{% for endpoint, _sq_icon, _sq_label in _sq_admin_links %}
+  {% set _ = _sq_admin_paths.append(url_for(endpoint)) %}
+{% endfor %}
+{% set _sq_admin_active = request.path in _sq_admin_paths %}
+<header class="sq-shell-header sq-user-nav">
+  <div class="sq-shell-bar">
+    <a class="sq-shell-brand" href="{{ _sq_home_path }}">
+      <i class="fas fa-flask" aria-hidden="true"></i>
+      <span>Search Tools</span>
+    </a>
+
+    <button type="button" class="sq-shell-toggle" id="sqShellToggle" aria-expanded="false" aria-controls="sqShellNav">
+      <i class="fas fa-bars" aria-hidden="true"></i>
+      <span class="sq-shell-sr">Mở/đóng menu</span>
+    </button>
+
+    <nav class="sq-shell-nav" id="sqShellNav" aria-label="Điều hướng chính">
+      <div class="sq-shell-group">
+        <a class="sq-shell-link{{ ' is-active' if request.path == _sq_home_path else '' }}"
+           href="{{ _sq_home_path }}"{% if request.path == _sq_home_path %} aria-current="page"{% endif %}>
+          <i class="fas fa-search" aria-hidden="true"></i> Search
+        </a>
+        <a class="sq-shell-link{{ ' is-active' if request.path == _sq_quick_quote_path else '' }}"
+           href="{{ _sq_quick_quote_path }}"{% if request.path == _sq_quick_quote_path %} aria-current="page"{% endif %}>
+          <i class="fas fa-bolt" aria-hidden="true"></i> Quick Quote
+        </a>
+      </div>
+
+      {% if session.get('is_admin') %}
+      <div class="sq-shell-admin" id="sqAdminWrap">
+        {# Desktop-only trigger: hidden on mobile (see admin_nav.css) so the
+           mobile hamburger panel below never shows a second, redundant
+           "tap to open" control for the same 8 links. #}
+        <button type="button"
+                class="sq-shell-link sq-shell-admin-trigger{{ ' is-active' if _sq_admin_active else '' }}"
+                id="sqAdminTrigger"
+                aria-haspopup="true"
+                aria-expanded="false"
+                aria-controls="sqAdminMenu">
+          <i class="fas fa-cog" aria-hidden="true"></i> Quản trị
+          <i class="fas fa-chevron-down sq-shell-admin-caret" aria-hidden="true"></i>
+        </button>
+        {# Mobile-only static label, same text, no button semantics --
+           the panel right after it is always visible (flat, one layer)
+           once the hamburger itself is open. #}
+        <span class="sq-shell-group-label sq-shell-admin-mobile-label">Quản trị</span>
+        <div class="sq-shell-admin-menu" id="sqAdminMenu">
+          {% for endpoint, icon, label in _sq_admin_links %}
+            {% set _sq_link_path = url_for(endpoint) %}
+            <a class="sq-shell-link{{ ' is-active' if request.path == _sq_link_path else '' }}"
+               href="{{ _sq_link_path }}"{% if request.path == _sq_link_path %} aria-current="page"{% endif %}>
+              <i class="fas {{ icon }}" aria-hidden="true"></i> {{ label }}
+            </a>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    </nav>
+
+    <div class="sq-shell-user">
+      <span class="sq-shell-username">{{ session.get('username') or 'Người dùng' }}</span>
+      <span class="sq-shell-role">{{ 'Admin' if session.get('is_admin') else 'Staff' }}</span>
+      <form method="post" action="{{ url_for('session_security.logout') }}" class="sq-shell-logout">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit"><i class="fas fa-sign-out-alt" aria-hidden="true"></i> Đăng xuất</button>
+      </form>
+    </div>
   </div>
-  <nav class="sq-user-nav-links">
-    <a href="{{ url_for('home') }}">Search</a>
-    <a href="{{ url_for('quick_quote') }}">Quick Quote</a>
-    {% if session.get('is_admin') %}
-    <a href="{{ url_for('admin_imports') }}">Quản trị</a>
-    <a href="{{ url_for('admin_quote_templates_page') }}">Mẫu báo giá</a>
-    <a href="{{ url_for('admin_teams.index') }}">Team</a>
-    <a href="{{ url_for('admin_users') }}">Người dùng</a>
-    <a href="{{ url_for('admin_login_history.index') }}">Lịch sử đăng nhập</a>
-    {% endif %}
-  </nav>
-  <form method="post" action="{{ url_for('session_security.logout') }}" class="sq-user-nav-logout">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <button type="submit">Đăng xuất</button>
-  </form>
-</div>
-<style>
-  .sq-user-nav {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 12px;
-    background: #0f172a;
-    color: #e2e8f0;
-    padding: 8px 16px;
-    font-family: system-ui, sans-serif;
-    font-size: 0.85rem;
-    box-sizing: border-box;
-  }
-  .sq-user-nav-who { display: flex; align-items: center; gap: 8px; min-width: 0; }
-  .sq-user-nav-name { font-weight: 600; word-break: break-all; }
-  .sq-user-nav-role {
-    text-transform: uppercase;
-    font-size: 0.7rem;
-    letter-spacing: 0.04em;
-    background: #1e293b;
-    padding: 2px 8px;
-    border-radius: 999px;
-    white-space: nowrap;
-  }
-  .sq-user-nav-links { display: flex; flex-wrap: wrap; gap: 10px; margin-left: auto; }
-  .sq-user-nav-links a { color: #93c5fd; text-decoration: none; }
-  .sq-user-nav-links a:hover { text-decoration: underline; }
-  .sq-user-nav-logout { margin: 0; }
-  .sq-user-nav-logout button {
-    background: transparent;
-    color: #fca5a5;
-    border: 1px solid #7f1d1d;
-    border-radius: 6px;
-    padding: 4px 10px;
-    cursor: pointer;
-    font-size: 0.8rem;
-  }
-  .sq-user-nav-logout button:hover { background: #7f1d1d; color: #fff; }
-  @media (max-width: 480px) {
-    .sq-user-nav { justify-content: flex-start; }
-    .sq-user-nav-links { margin-left: 0; }
-  }
-</style>
+</header>
+<script>
+  (function () {
+    // Mobile hamburger: unchanged from Phase 6B1 -- collapses the whole
+    // `#sqShellNav` (both the Search/Quick Quote group AND, when present,
+    // the admin panel rendered flat by admin_nav.css at <1024px) behind
+    // one toggle.
+    var toggle = document.getElementById('sqShellToggle');
+    var nav = document.getElementById('sqShellNav');
+    if (toggle && nav) {
+      toggle.addEventListener('click', function () {
+        var expanded = toggle.getAttribute('aria-expanded') === 'true';
+        toggle.setAttribute('aria-expanded', String(!expanded));
+        nav.classList.toggle('is-open', !expanded);
+      });
+    }
+
+    // Desktop "Quản trị" disclosure button. WAI-ARIA disclosure pattern:
+    // a real <button> (Enter/Space open it natively, no keydown handler
+    // needed for that part) toggling `aria-expanded` + a sibling panel's
+    // `.is-open` class. Closes on: selecting a link, Escape (returns
+    // focus to the button), or a click outside the control. At <1024px
+    // `admin_nav.css` makes the panel always visible via CSS regardless
+    // of this class, so this script never needs to know the viewport --
+    // toggling `aria-expanded`/`.is-open` on a hidden-on-mobile trigger
+    // is simply inert there.
+    var wrap = document.getElementById('sqAdminWrap');
+    var trigger = document.getElementById('sqAdminTrigger');
+    var menu = document.getElementById('sqAdminMenu');
+    if (!wrap || !trigger || !menu) return;
+
+    function isOpen() {
+      return trigger.getAttribute('aria-expanded') === 'true';
+    }
+    function openMenu() {
+      trigger.setAttribute('aria-expanded', 'true');
+      menu.classList.add('is-open');
+    }
+    function closeMenu(returnFocus) {
+      trigger.setAttribute('aria-expanded', 'false');
+      menu.classList.remove('is-open');
+      if (returnFocus) trigger.focus();
+    }
+
+    trigger.addEventListener('click', function () {
+      if (isOpen()) {
+        closeMenu(false);
+      } else {
+        openMenu();
+      }
+    });
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && isOpen()) {
+        closeMenu(true);
+      }
+    });
+
+    // Click outside the whole control (button + panel) closes it. Clicks
+    // on the trigger itself are handled by the listener above, so this
+    // only needs to catch "everywhere else".
+    document.addEventListener('click', function (e) {
+      if (isOpen() && !wrap.contains(e.target)) {
+        closeMenu(false);
+      }
+    });
+
+    // Selecting any admin link closes the panel. The link's own
+    // navigation (real <a href>, full page load) happens regardless --
+    // this just avoids leaving `aria-expanded="true"` stuck on a page
+    // that's about to unload/get replaced by the browser back-cache.
+    Array.prototype.forEach.call(menu.querySelectorAll('a'), function (link) {
+      link.addEventListener('click', function () {
+        closeMenu(false);
+      });
+    });
+  })();
+</script>
 {% endif %}

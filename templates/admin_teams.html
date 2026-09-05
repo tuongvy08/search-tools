@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Quản lý Team</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
   <style>
     body { font-family: system-ui, sans-serif; max-width: 1100px; margin: 24px auto; padding: 0 12px; }
     .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin-bottom: 16px; background: #fff; }
@@ -13,7 +15,6 @@
     th, td { border: 1px solid #ddd; padding: 8px 10px; text-align: left; vertical-align: top; }
     th { background: #f4f7fe; color: #2e45b6; }
     code { background: #f6f6f6; padding: 1px 4px; border-radius: 4px; }
-    .nav a { margin-right: 12px; }
     .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
     .field { display: flex; flex-direction: column; gap: 4px; }
     input[type="text"], input[type="password"], select {
@@ -27,7 +28,22 @@
     .small { font-size: 0.9rem; color: #666; }
     .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; background: #eef2ff; color: #3730a3; font-size: 0.8rem; }
     .brand-picker { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; margin: 8px 0; background: #fafafa; }
-    .brand-filter { width: 100%; box-sizing: border-box; margin-bottom: 8px; min-width: 0; }
+    .brand-picker-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+    .brand-filter { flex: 1 1 220px; box-sizing: border-box; min-width: 0; }
+    .brand-picker-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .brand-action {
+      padding: 6px 10px; border-radius: 8px; border: 1px solid #ddd; background: #fff;
+      cursor: pointer; font-size: 0.82rem; font-weight: 600; white-space: nowrap;
+    }
+    .brand-action:hover { background: #f3f4f6; }
+    .brand-action.danger { color: #b00020; border-color: #f3c2c2; }
+    .brand-action.danger:hover { background: #fef2f2; }
+    .brand-picker-summary {
+      display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline;
+      margin-bottom: 8px; font-size: 0.85rem; min-height: 1.2em;
+    }
+    .brand-selected-count { font-weight: 600; color: #2e45b6; white-space: nowrap; }
+    .brand-picker-status { color: #555; }
     .brand-checkbox-list { max-height: 220px; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 4px 14px; }
     .brand-check-row { display: flex; align-items: center; gap: 6px; font-size: 0.9rem; white-space: nowrap; }
     details > summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
@@ -48,14 +64,45 @@
 </head>
 <body>
   {% include "_user_nav.html" %}
-  <div class="nav" style="margin-bottom: 12px;">
-    <a href="/">Search</a>
-    <a href="/admin/imports">Imports</a>
-    <a href="/admin/network">Mạng / IP</a>
-    <a href="/admin/teams"><b>Teams</b></a>
-    <a href="/admin/users">Users</a>
-    <a href="/admin/brand-compliance">Manual compliance</a>
+
+  {% macro brand_picker(picker_id, checked_brands) %}
+  {#
+    Phase 6B1: one shared brand-picker macro used by BOTH the "Tạo team
+    mới" form and every per-team "Chỉnh brand / chính sách IP" form below
+    -- keeps the create/edit pickers structurally identical (search box +
+    checkboxes + bulk-selection toolbar + live counter) instead of two
+    hand-copied blocks that could drift apart.
+
+    Bulk actions (below) only ever toggle `.checked`/`display` on
+    checkboxes Jinja already rendered above -- never innerHTML, never a
+    per-checkbox request. Submission still goes through the exact same
+    `<form>`/`name="brands"` fields as before Phase 6B1, so
+    `admin_teams._validate_brands` and the preview/confirm/staleness
+    contract are completely unchanged.
+  #}
+  <div class="brand-picker" data-picker="{{ picker_id }}">
+    <div class="brand-picker-toolbar">
+      <input type="text" class="brand-filter" placeholder="Tìm brand..." aria-label="Tìm brand" />
+      <div class="brand-picker-actions" role="group" aria-label="Thao tác chọn brand hàng loạt">
+        <button type="button" class="brand-action" data-action="select-filtered">Chọn tất cả kết quả đang lọc</button>
+        <button type="button" class="brand-action" data-action="deselect-filtered">Bỏ chọn kết quả đang lọc</button>
+        <button type="button" class="brand-action danger" data-action="clear-all">Xóa toàn bộ lựa chọn</button>
+      </div>
+    </div>
+    <div class="brand-picker-summary">
+      <span class="brand-selected-count" data-role="count">Đã chọn 0 brand</span>
+      <span class="brand-picker-status" role="status" aria-live="polite"></span>
+    </div>
+    <div class="brand-checkbox-list">
+      {% for b in distinct_brands %}
+        <label class="brand-check-row" data-brand-label="{{ b|lower }}">
+          <input type="checkbox" name="brands" value="{{ b }}" {{ 'checked' if b in checked_brands else '' }}> {{ b }}
+        </label>
+      {% endfor %}
+    </div>
+    {% if not distinct_brands %}<div class="small muted">Chưa có brand nào trong dữ liệu sản phẩm.</div>{% endif %}
   </div>
+  {% endmacro %}
 
   <h1 style="margin-top:0;">Quản lý Team</h1>
   <p class="muted">
@@ -154,17 +201,7 @@
       </div>
       <div class="field">
         <label>Brand cho phép (tìm kiếm rồi tick chọn -- không nhập tay)</label>
-        <div class="brand-picker" data-picker="create">
-          <input type="text" class="brand-filter" placeholder="Tìm brand..." />
-          <div class="brand-checkbox-list">
-            {% for b in distinct_brands %}
-              <label class="brand-check-row" data-brand-label="{{ b|lower }}">
-                <input type="checkbox" name="brands" value="{{ b }}"> {{ b }}
-              </label>
-            {% endfor %}
-          </div>
-        </div>
-        {% if not distinct_brands %}<div class="small muted">Chưa có brand nào trong dữ liệu sản phẩm.</div>{% endif %}
+        {{ brand_picker('create', []) }}
       </div>
       <button class="primary" type="submit" style="margin-top:10px;">Tạo team</button>
     </form>
@@ -219,16 +256,7 @@
                   </select>
                 </div>
 
-                <div class="brand-picker" data-picker="edit-{{ t.id }}">
-                  <input type="text" class="brand-filter" placeholder="Tìm brand..." />
-                  <div class="brand-checkbox-list">
-                    {% for b in distinct_brands %}
-                      <label class="brand-check-row" data-brand-label="{{ b|lower }}">
-                        <input type="checkbox" name="brands" value="{{ b }}" {{ 'checked' if b in t.brands else '' }}> {{ b }}
-                      </label>
-                    {% endfor %}
-                  </div>
-                </div>
+                {{ brand_picker('edit-' ~ t.id, t.brands) }}
 
                 <button class="primary" type="submit" style="margin-top:8px;">Xem trước thay đổi</button>
               </form>
@@ -243,21 +271,112 @@
   </div>
 
   <script>
-    // Pure DOM filter (no innerHTML, nothing DB-sourced ever written into
-    // markup here beyond what Jinja already rendered/escaped above) --
-    // same technique as admin_users.html's Google-account status filter.
+    // Phase 6B1 brand picker: filter (existing, unchanged) + bulk
+    // select/deselect/clear + live "Đã chọn N brand" counter.
+    //
+    // Hard invariants kept on purpose:
+    //  - Never uses innerHTML; the only DOM writes are `.checked` (a
+    //    boolean, not a string) on checkboxes Jinja already rendered, and
+    //    `.textContent` (never HTML) on the counter/status text.
+    //  - Filtering only ever toggles `row.style.display`; it NEVER
+    //    unchecks/removes a row. A brand hidden by the current search
+    //    term keeps whatever checked state it had, so switching the
+    //    search term back and forth never drops a selection -- and a
+    //    hidden-but-checked `<input>` still submits with the form (only
+    //    `disabled` inputs are excluded from form submission, not
+    //    `display:none` ones), so the eventual POST always reflects the
+    //    FULL selected set, not just what's currently visible.
+    //  - The two "chọn/bỏ chọn theo kết quả lọc" bulk buttons only ever
+    //    touch rows currently visible under the active filter (which is
+    //    every row when the search box is empty).
+    //  - "Xóa toàn bộ lựa chọn" is a separate, explicit action (never
+    //    implied by the two above) and always asks for confirmation
+    //    naming exactly how many brands (out of the whole list, including
+    //    ones hidden by the filter) are about to be cleared.
+    //  - No action here submits, saves, or previews anything by itself --
+    //    the admin still has to press the form's own submit button.
     (function () {
       document.querySelectorAll('.brand-picker').forEach(function (picker) {
         var input = picker.querySelector('.brand-filter');
-        var rows = picker.querySelectorAll('.brand-check-row');
-        if (!input) return;
-        input.addEventListener('input', function () {
-          var needle = input.value.trim().toLowerCase();
+        var rows = Array.prototype.slice.call(picker.querySelectorAll('.brand-check-row'));
+        var checkboxes = rows.map(function (row) { return row.querySelector('input[type="checkbox"]'); });
+        var countEl = picker.querySelector('[data-role="count"]');
+        var statusEl = picker.querySelector('.brand-picker-status');
+        var list = picker.querySelector('.brand-checkbox-list');
+
+        function isRowVisible(row) {
+          return row.style.display !== 'none';
+        }
+
+        function countChecked() {
+          var n = 0;
+          checkboxes.forEach(function (cb) { if (cb.checked) n += 1; });
+          return n;
+        }
+
+        function updateCount() {
+          if (countEl) countEl.textContent = 'Đã chọn ' + countChecked() + ' brand';
+        }
+
+        function applyFilter() {
+          var needle = (input && input.value ? input.value : '').trim().toLowerCase();
           rows.forEach(function (row) {
             var label = row.getAttribute('data-brand-label') || '';
+            // Empty search term => "kết quả đang lọc" nghĩa là toàn bộ danh sách.
             row.style.display = (!needle || label.indexOf(needle) !== -1) ? '' : 'none';
           });
+        }
+
+        if (input) input.addEventListener('input', applyFilter);
+
+        if (list) {
+          list.addEventListener('change', function (e) {
+            if (e.target && e.target.matches('input[type="checkbox"]')) updateCount();
+          });
+        }
+
+        picker.querySelectorAll('.brand-action').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var action = btn.getAttribute('data-action');
+
+            if (action === 'select-filtered' || action === 'deselect-filtered') {
+              var makeChecked = action === 'select-filtered';
+              var affected = 0;
+              rows.forEach(function (row, i) {
+                if (!isRowVisible(row)) return;
+                var cb = checkboxes[i];
+                if (cb.checked !== makeChecked) affected += 1;
+                cb.checked = makeChecked;
+              });
+              updateCount();
+              if (statusEl) {
+                statusEl.textContent = makeChecked
+                  ? 'Đã chọn thêm ' + affected + ' brand trong kết quả đang lọc.'
+                  : 'Đã bỏ chọn ' + affected + ' brand trong kết quả đang lọc.';
+              }
+              return;
+            }
+
+            if (action === 'clear-all') {
+              var totalChecked = countChecked();
+              if (totalChecked === 0) {
+                if (statusEl) statusEl.textContent = 'Chưa có brand nào được chọn.';
+                return;
+              }
+              var confirmed = window.confirm(
+                'Xóa toàn bộ lựa chọn sẽ bỏ chọn ' + totalChecked + ' brand đã chọn ' +
+                '(kể cả brand đang bị ẩn bởi bộ lọc tìm kiếm). Tiếp tục?'
+              );
+              if (!confirmed) return;
+              checkboxes.forEach(function (cb) { cb.checked = false; });
+              updateCount();
+              if (statusEl) statusEl.textContent = 'Đã xóa toàn bộ ' + totalChecked + ' brand đã chọn.';
+            }
+          });
         });
+
+        applyFilter();
+        updateCount();
       });
     })();
   </script>

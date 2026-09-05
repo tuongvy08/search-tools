@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nhập dữ liệu — Admin</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
   <style>
     :root {
       --bg: #f1f5f9;
@@ -42,19 +44,6 @@
       font-size: 0.95rem;
       max-width: 52rem;
     }
-    .nav {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px 16px;
-      margin-top: 14px;
-    }
-    .nav a {
-      color: var(--primary);
-      text-decoration: none;
-      font-weight: 500;
-    }
-    .nav a:hover { text-decoration: underline; }
-
     .flow {
       background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
       border: 1px solid #bfdbfe;
@@ -324,14 +313,6 @@
     <header>
       <h1>Nhập dữ liệu (Admin)</h1>
       <p class="sub">Import sản phẩm hoặc quy tắc từ Excel. Hệ thống dùng hai bước để tránh ghi nhầm vào cơ sở dữ liệu.</p>
-      <nav class="nav">
-        <a href="/">← Search</a>
-        <a href="/admin/quote-templates">Mẫu báo giá</a>
-        <a href="/admin/exchange-rates">Tỷ giá</a>
-        <a href="/admin/network">Mạng / IP</a>
-        <a href="/admin/users">Users</a>
-        <a href="/admin/brand-compliance">Manual compliance</a>
-      </nav>
     </header>
 
     <div class="flow">

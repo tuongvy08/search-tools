@@ -17,6 +17,7 @@
     activeActivated: document.getElementById('qtActiveActivated'),
     activeUploader: document.getElementById('qtActiveUploader'),
     uploadForm: document.getElementById('qtUploadForm'),
+    csrfToken: document.getElementById('qtCsrfToken'),
     workbook: document.getElementById('qtWorkbook'),
     activate: document.getElementById('qtActivate'),
     uploadBtn: document.getElementById('qtUploadBtn'),
@@ -273,6 +274,7 @@
       const body = new FormData();
       body.append('workbook', file);
       body.append('activate', els.activate && els.activate.checked ? 'true' : 'false');
+      body.append('csrf_token', els.csrfToken ? els.csrfToken.value : '');
       const response = await fetch(API_UPLOAD, {
         method: 'POST',
         body,
@@ -318,6 +320,7 @@
       const response = await fetch(`${API_ACTIVATE_PREFIX}${encodeURIComponent(pendingActivateId)}/activate`, {
         method: 'POST',
         credentials: 'same-origin',
+        headers: { 'X-CSRF-Token': els.csrfToken ? els.csrfToken.value : '' },
       });
       await parseJsonResponse(response);
       closeActivateDialog();

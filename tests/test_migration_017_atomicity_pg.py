@@ -194,6 +194,105 @@ class Migration017CleanRunAtomicityTests(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_production_shape_without_test_fixtures_preserves_real_id_collision(self):
+        """Production has no TEST1/TEST2 fixtures and id=1344915 is a real
+        canonical product. The approved business delete counts must still be
+        enforced exactly, while the unrelated real row is preserved and gets
+        source_brand backfilled."""
+        conn = _connect(self.dsn)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    WITH manifest(brand, expected_count) AS (
+                        VALUES
+                            ('ACROS', 29744),
+                            ('Aozeal(Mỹ)', 5214),
+                            ('Aquigen', 4649),
+                            ('Axios Research', 7173),
+                            ('BIOREAGENTS', 705),
+                            ('Bertin Technologies (not active - use vendor # 5869)', 127),
+                            ('Biosense Laboratories AS', 85),
+                            ('Chemservice (Mỹ)', 3108),
+                            ('Clearsynth', 74058),
+                            ('Columbia Bioscience, Inc.', 254),
+                            ('Eurofins Calixar', 24),
+                            ('FISHER CHEMICAL', 4070),
+                            ('MAYBRIDGE', 6741),
+                            ('Merck', 1331),
+                            ('NIFC (Việt Nam)', 103),
+                            ('Oxford - Ấn Độ', 463),
+                            ('Phụ lục I', 1),
+                            ('TCI', 54340),
+                            ('THERMO SCIENTIFIC', 29)
+                    )
+                    INSERT INTO products (name, brand)
+                    SELECT brand || ' production fixture ' || n, brand
+                    FROM manifest
+                    CROSS JOIN LATERAL generate_series(1, expected_count) AS n
+                    """
+                )
+                cur.execute(
+                    """
+                    INSERT INTO products (id, name, code, brand)
+                    VALUES (1344915, 'Real production product', 'REAL-1344915', 'AccuStandard')
+                    """
+                )
+                cur.execute(
+                    "INSERT INTO products (id, price) VALUES (1360666, '0')"
+                )
+                cur.execute("INSERT INTO teams (id, name) VALUES (1, 'Production team')")
+                cur.execute(
+                    """
+                    INSERT INTO team_brands (team_id, brand)
+                    VALUES
+                        (1, 'Columbia Bioscience'),
+                        (1, 'Inc.'),
+                        (1, 'TỒN KHO')
+                    """
+                )
+        finally:
+            conn.close()
+
+        exit_code, output = run_migration_via_psql(self.dsn, _MIGRATION_017)
+        self.assertEqual(exit_code, 0, f"production-shaped migration failed:\n{output}")
+
+        conn = _connect(self.dsn)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT name, code, brand, source_brand FROM products WHERE id = 1344915"
+                )
+                self.assertEqual(
+                    cur.fetchone(),
+                    (
+                        "Real production product",
+                        "REAL-1344915",
+                        "AccuStandard",
+                        "AccuStandard",
+                    ),
+                )
+                cur.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM products
+                    WHERE brand IN (
+                        'ACROS', 'Aozeal(Mỹ)', 'Aquigen', 'Axios Research',
+                        'BIOREAGENTS', 'Bertin Technologies (not active - use vendor # 5869)',
+                        'Biosense Laboratories AS', 'Chemservice (Mỹ)', 'Clearsynth',
+                        'Columbia Bioscience, Inc.', 'Eurofins Calixar', 'FISHER CHEMICAL',
+                        'MAYBRIDGE', 'Merck', 'NIFC (Việt Nam)', 'Oxford - Ấn Độ',
+                        'Phụ lục I', 'TCI', 'TEST1', 'TEST2', 'THERMO SCIENTIFIC'
+                    )
+                    """
+                )
+                self.assertEqual(cur.fetchone()[0], 0)
+                cur.execute("SELECT COUNT(*) FROM products WHERE id = 1360666")
+                self.assertEqual(cur.fetchone()[0], 0)
+                cur.execute("SELECT COUNT(*) FROM team_brands")
+                self.assertEqual(cur.fetchone()[0], 0)
+        finally:
+            conn.close()
 
 @_REQUIRE_PG
 @_REQUIRE_PSQL

@@ -154,6 +154,7 @@ class AdminBrandComplianceTests(unittest.TestCase):
                 sess["user_id"] = 1
                 sess["auth_version"] = 1
                 sess["is_admin"] = is_admin
+                sess["csrf_token"] = "the-real-token"
                 if not is_admin:
                     # Real middleware now requires a real team_id for any
                     # authenticated non-admin session -- see setUpClass.
@@ -163,7 +164,7 @@ class AdminBrandComplianceTests(unittest.TestCase):
     def _post_toggle(self, client, *, brand_norm, action):
         return client.post(
             "/admin/brand-compliance",
-            data={"brand_norm": brand_norm, "action": action},
+            data={"brand_norm": brand_norm, "action": action, "csrf_token": "the-real-token"},
             follow_redirects=False,
         )
 
@@ -227,6 +228,15 @@ class AdminBrandComplianceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(self._setting_enabled())
 
+    def test_missing_csrf_rejected_without_mutation(self):
+        client = self._client(authenticated=True, is_admin=True)
+        response = client.post(
+            "/admin/brand-compliance",
+            data={"brand_norm": self.BRAND_NORM, "action": "enable"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(self._setting_enabled())
+
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT 1 FROM brand_compliance_settings WHERE brand_norm = %s",
@@ -243,7 +253,7 @@ class AdminBrandComplianceTests(unittest.TestCase):
 
         response = client.post(
             "/admin/brand-compliance",
-            data={"brand_norm": self.BRAND_NORM, "action": "toggle"},
+            data={"brand_norm": self.BRAND_NORM, "action": "toggle", "csrf_token": "the-real-token"},
         )
         self.assertEqual(response.status_code, 200)
         self.assertIn("không hợp lệ", response.get_data(as_text=True).lower())

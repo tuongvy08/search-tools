@@ -215,6 +215,27 @@ class QuoteRequestFileApiTests(unittest.TestCase):
         self.assertEqual(bad_column.status_code, 400)
         self.assertIn("Cột code", bad_column.get_json()["error"])
 
+        huge_header = post_file(
+            self.client,
+            "/api/quote-assistant/request-file/parse",
+            raw,
+            "sales.xlsx",
+            {"sheet": "Daily", "header_row": 1_000_000_000, "code": 0},
+        )
+        self.assertEqual(huge_header.status_code, 400)
+        self.assertIn("header_row", huge_header.get_json()["error"])
+
+    def test_csv_physical_row_cap_rejects_short_row_flood(self):
+        raw = (",\n" * (qrf.MAX_PHYSICAL_CSV_ROWS + 1)).encode("utf-8")
+        self.auth()
+        response = post_file(
+            self.client,
+            "/api/quote-assistant/request-file/analyze",
+            raw,
+            "flood.csv",
+        )
+        self.assertEqual(response.status_code, 413)
+
     def test_data_row_limit_allows_2000_and_rejects_2001(self):
         ok_raw = xlsx_bytes([("Daily", [["Code"]] + [[f"C{i}"] for i in range(2000)])])
         too_many_raw = xlsx_bytes([("Daily", [["Code"]] + [[f"C{i}"] for i in range(2001)])])

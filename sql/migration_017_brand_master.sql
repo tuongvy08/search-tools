@@ -8,8 +8,12 @@
 -- - Adds `products.source_brand` and backfills 100% of retained products.
 -- - Preflight check: fail closed if any unknown brand exists in products.
 -- - Single-pass update for products via hash join with staging mapping table.
--- - Deletes 192,233 products belonging to 21 Delete Set brands.
+-- - Deletes 192,219 production products belonging to 19 required Delete Set
+--   brands, plus 0-or-7 rows for each optional TEST1/TEST2 fixture brand
+--   (192,233 rows when both test fixtures are present, as on staging).
 -- - Deletes test product id=1344915 if precondition matches (brand='Phụ lục I', name='TEST XÓA', code/cas empty).
+-- - Deletes production junk row id=1360666 only when every descriptive field
+--   is blank and price='0'; any other blank-brand row fails preflight.
 -- - Canonicalizes team_brands with ON CONFLICT DO NOTHING, cleans legacy pseudo-brands and Delete Set.
 -- - Upserts exactly 35 canonical brand rates to exchange_rates (no TRUNCATE).
 -- - Cleans obsolete test brands from brand_compliance_settings.
@@ -457,6 +461,17 @@ VALUES
 ON CONFLICT (old_brand) DO UPDATE
 SET canonical_brand = EXCLUDED.canonical_brand;
 
+-- Production already contains some rows whose brand is the canonical name
+-- itself (notably AccuStandard). Include every canonical self-mapping so the
+-- single-pass product UPDATE below also backfills source_brand for those rows.
+-- Without this, the later NOT NULL validation fails even though preflight
+-- correctly accepts canonical brand names as mapped.
+INSERT INTO staging_brand_mapping (old_brand, canonical_brand)
+SELECT name, name
+FROM brand_master
+ON CONFLICT (old_brand) DO UPDATE
+SET canonical_brand = EXCLUDED.canonical_brand;
+
 INSERT INTO approved_delete_manifest (brand, expected_count)
 VALUES
     ('ACROS', 29744),
@@ -535,6 +550,8 @@ DECLARE
     v_unmapped_count          INT;
     v_unmapped_sample         TEXT;
     v_delete_set_total_actual INT;
+    v_delete_set_total_expected INT;
+    v_unexpected_blank_brand_count INT;
     r                         RECORD;
 BEGIN
     -- 1. Verify exactly 35 canonical brands in brand_master
@@ -576,30 +593,55 @@ BEGIN
         RAISE EXCEPTION 'Preflight check failed: % unmapped brand(s) found in products. Sample: %', v_unmapped_count, v_unmapped_sample;
     END IF;
 
-    -- 4. Verify test row 1344915 preconditions: fail closed if present with mismatching attributes
-    IF EXISTS (SELECT 1 FROM products WHERE id = 1344915) THEN
-        IF NOT EXISTS (
-            SELECT 1 FROM products
-            WHERE id = 1344915
-              AND brand = 'Phụ lục I'
-              AND name = 'TEST XÓA'
-              AND (code IS NULL OR TRIM(code) = '')
-              AND (cas IS NULL OR TRIM(cas) = '')
-        ) THEN
-            RAISE EXCEPTION 'Preflight check failed: row id=1344915 exists but preconditions do not match (expected brand="Phụ lục I", name="TEST XÓA", empty code/cas)';
-        END IF;
+    -- 4. A canonical product cannot have a blank brand/source_brand. The
+    -- production snapshot has one known, unusable junk row (id=1360666,
+    -- descriptive fields blank, price='0'). Permit only that exact shape;
+    -- any other blank-brand row is unknown drift and must fail closed.
+    SELECT COUNT(*) INTO v_unexpected_blank_brand_count
+    FROM products
+    WHERE (brand IS NULL OR TRIM(brand) = '')
+      AND NOT (
+          id = 1360666
+          AND (name IS NULL OR TRIM(name) = '')
+          AND (code IS NULL OR TRIM(code) = '')
+          AND (cas IS NULL OR TRIM(cas) = '')
+          AND (size IS NULL OR TRIM(size) = '')
+          AND (ship IS NULL OR TRIM(ship) = '')
+          AND price = '0'
+          AND (note IS NULL OR TRIM(note) = '')
+      );
+    IF v_unexpected_blank_brand_count > 0 THEN
+        RAISE EXCEPTION 'Preflight check failed: % unexpected blank-brand product row(s) found.',
+            v_unexpected_blank_brand_count;
     END IF;
 
-    -- 5. Target drift check: verify delete set counts on target match approved manifest
+    -- 5. Target drift check: verify delete set counts on target match approved
+    -- manifest. TEST1/TEST2 are optional fixtures: each may be absent (0) or
+    -- present at its exact approved count (7). Every business-data brand
+    -- remains exact-match only.
     SELECT COUNT(*) INTO v_delete_set_total_actual
     FROM products p
     JOIN approved_delete_manifest m ON p.brand = m.brand;
 
+    SELECT COALESCE(SUM(
+        CASE
+            WHEN m.brand IN ('TEST1', 'TEST2') AND COALESCE(p.actual_count, 0) = 0 THEN 0
+            ELSE m.expected_count
+        END
+    ), 0)
+    INTO v_delete_set_total_expected
+    FROM approved_delete_manifest m
+    LEFT JOIN (
+        SELECT brand, COUNT(*) AS actual_count
+        FROM products
+        GROUP BY brand
+    ) p ON p.brand = m.brand;
+
     -- If target database contains unmigrated delete set products, all counts must match manifest exactly
     IF v_delete_set_total_actual > 0 THEN
-        IF v_delete_set_total_actual <> 192233 THEN
-            RAISE EXCEPTION 'Target drift detected: total delete set products count is %, expected 192,233. Halting migration before hard-delete.',
-                v_delete_set_total_actual;
+        IF v_delete_set_total_actual <> v_delete_set_total_expected THEN
+            RAISE EXCEPTION 'Target drift detected: total delete set products count is %, expected %. Halting migration before hard-delete.',
+                v_delete_set_total_actual, v_delete_set_total_expected;
         END IF;
 
         FOR r IN
@@ -611,6 +653,10 @@ BEGIN
                 GROUP BY brand
             ) p ON p.brand = m.brand
             WHERE COALESCE(p.actual_count, 0) <> m.expected_count
+              AND NOT (
+                  m.brand IN ('TEST1', 'TEST2')
+                  AND COALESCE(p.actual_count, 0) = 0
+              )
         LOOP
             RAISE EXCEPTION 'Target drift detected for delete set brand "%": expected % products, found %. Halting migration before hard-delete.',
                 r.brand, r.expected_count, r.actual_count;
@@ -629,6 +675,18 @@ WHERE id = 1344915
   AND name = 'TEST XÓA'
   AND (code IS NULL OR TRIM(code) = '')
   AND (cas IS NULL OR TRIM(cas) = '');
+
+-- Delete the one exact production junk row accepted by preflight above.
+DELETE FROM products
+WHERE id = 1360666
+  AND (name IS NULL OR TRIM(name) = '')
+  AND (code IS NULL OR TRIM(code) = '')
+  AND (cas IS NULL OR TRIM(cas) = '')
+  AND (brand IS NULL OR TRIM(brand) = '')
+  AND (size IS NULL OR TRIM(size) = '')
+  AND (ship IS NULL OR TRIM(ship) = '')
+  AND price = '0'
+  AND (note IS NULL OR TRIM(note) = '');
 
 -- Delete products in Delete Set
 DELETE FROM products
@@ -659,9 +717,14 @@ USING staging_brand_mapping m
 WHERE tb.brand = m.old_brand
   AND tb.brand NOT IN (SELECT name FROM brand_master);
 
--- Clean legacy pseudo-brands and Delete Set from team_brands
+-- Clean legacy pseudo-brands and Delete Set from team_brands. Production also
+-- has two comma-split remnants of the deleted "Columbia Bioscience, Inc."
+-- key; none has a matching product row or canonical brand.
 DELETE FROM team_brands
-WHERE brand IN ('CẤM NHẬP', 'Phụ lục I', 'Phụ lục II', 'Phụ lục III');
+WHERE brand IN (
+    'CẤM NHẬP', 'Phụ lục I', 'Phụ lục II', 'Phụ lục III', 'TỒN KHO',
+    'Columbia Bioscience', 'Inc.'
+);
 
 DELETE FROM team_brands
 WHERE brand IN (SELECT brand FROM delete_set_brands);

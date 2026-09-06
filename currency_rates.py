@@ -165,13 +165,16 @@ class CurrencyRateResolver:
                 row = cur.fetchone()
                 brand_master_exists = bool(row and row[0])
                 currency_rates_exists = bool(row and row[1])
-        except Exception:
-            # Genuinely can't even tell if the tables exist (e.g. the whole
-            # connection is unusable) -- treat as "neither exists" same as a
-            # pre-migration-017/018 database, which is the only case this
-            # existence check itself is expected to ever fail/return NULL.
-            brand_master_exists = False
-            currency_rates_exists = False
+        except Exception as e:
+            # Failure to probe the catalog is not proof of a legacy schema.
+            # Fail closed so stale legacy/static rates can never be served
+            # when the migrated tables may actually exist.
+            self.load_error = repr(e)
+            self.warnings.append(
+                "CurrencyRateResolver: failed to inspect currency schema "
+                f"({e!r}). Pricing will fail closed; legacy fallback was not loaded."
+            )
+            return self
 
         if brand_master_exists and currency_rates_exists:
             # Both tables are CONFIRMED to exist: this is a fully-migrated

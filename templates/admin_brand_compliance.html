@@ -128,6 +128,7 @@
             </td>
             <td>
               <form class="toggle-form" method="post" action="/admin/brand-compliance">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                 <input type="hidden" name="brand_norm" value="{{ r.brand_norm }}" />
                 <input type="hidden" name="action" value="{% if r.manual_enabled %}disable{% else %}enable{% endif %}" />
                 <label class="switch" title="{% if r.manual_enabled %}Tắt{% else %}Bật{% endif %} manual compliance cho {{ r.brand }}">

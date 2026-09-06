@@ -296,6 +296,24 @@ class QuoteTemplateAdminApiTests(unittest.TestCase):
             sess["role"] = "admin" if admin else "user"
             if not admin:
                 sess["team_id"] = 1
+            sess["csrf_token"] = "the-real-token"
+        self.client.environ_base["HTTP_X_CSRF_TOKEN"] = "the-real-token"
+
+    def test_mutations_reject_missing_or_wrong_csrf_before_db(self):
+        self._auth(admin=True)
+        self.client.environ_base.pop("HTTP_X_CSRF_TOKEN", None)
+        with patch.object(search, "get_connection", side_effect=AssertionError("db should not open")):
+            missing = self.client.post(
+                "/api/admin/quote-templates",
+                data={"workbook": (io.BytesIO(make_workbook()), "template.xlsx")},
+                content_type="multipart/form-data",
+            )
+            wrong = self.client.post(
+                "/api/admin/quote-templates/1/activate",
+                headers={"X-CSRF-Token": "wrong"},
+            )
+        self.assertEqual(missing.status_code, 400)
+        self.assertEqual(wrong.status_code, 400)
 
     def test_admin_auth_401_403(self):
         self.assertEqual(self.client.get("/api/admin/quote-templates").status_code, 401)

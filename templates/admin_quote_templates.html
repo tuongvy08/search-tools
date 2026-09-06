@@ -300,6 +300,7 @@
         </div>
       </div>
       <form id="qtUploadForm" class="upload-form" enctype="multipart/form-data" novalidate>
+        <input id="qtCsrfToken" type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
         <div>
           <label for="qtWorkbook">File mẫu báo giá</label>
           <input id="qtWorkbook" name="workbook" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />

@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS currency_rates (
     currency_code TEXT PRIMARY KEY,
     rate_vnd      NUMERIC NOT NULL,
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_by    INTEGER NULL REFERENCES app_users (id) ON DELETE SET NULL,
+    updated_by    INTEGER NULL,
     update_source TEXT NOT NULL DEFAULT 'SYSTEM'
 );
 
@@ -58,7 +58,23 @@ ALTER TABLE currency_rates ADD COLUMN IF NOT EXISTS update_source TEXT NOT NULL 
 DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'fk_currency_rates_updated_by'
+        SELECT 1
+        FROM pg_constraint c
+        WHERE c.contype = 'f'
+          AND c.conrelid = 'currency_rates'::regclass
+          AND c.confrelid = 'app_users'::regclass
+          AND c.conkey = ARRAY[(
+              SELECT attnum FROM pg_attribute
+              WHERE attrelid = 'currency_rates'::regclass
+                AND attname = 'updated_by'
+                AND NOT attisdropped
+          )]::smallint[]
+          AND c.confkey = ARRAY[(
+              SELECT attnum FROM pg_attribute
+              WHERE attrelid = 'app_users'::regclass
+                AND attname = 'id'
+                AND NOT attisdropped
+          )]::smallint[]
     ) THEN
         ALTER TABLE currency_rates
             ADD CONSTRAINT fk_currency_rates_updated_by
@@ -66,7 +82,17 @@ BEGIN
     END IF;
 END $$;
 
-ALTER TABLE currency_rates VALIDATE CONSTRAINT fk_currency_rates_updated_by;
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'fk_currency_rates_updated_by'
+          AND conrelid = 'currency_rates'::regclass
+          AND NOT convalidated
+    ) THEN
+        ALTER TABLE currency_rates VALIDATE CONSTRAINT fk_currency_rates_updated_by;
+    END IF;
+END $$;
 
 -- Only the 5 currencies the business actually prices in are allowed. Any
 -- other code (brand_master.currency_code included) is rejected upstream by

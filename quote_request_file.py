@@ -16,6 +16,8 @@ from quote_workbook_export import WorkbookExportError, _read_valid_xlsx_entries
 
 MAX_REQUEST_FILE_BYTES = 10 * 1024 * 1024
 MAX_DATA_ROWS = 2000
+MAX_HEADER_ROW = 200
+MAX_PHYSICAL_CSV_ROWS = MAX_DATA_ROWS + MAX_HEADER_ROW + 1
 MAX_ANALYZE_SCAN_ROWS = 50
 MAX_PREVIEW_ROWS = 20
 MAX_PREVIEW_COLS = 30
@@ -161,7 +163,14 @@ def _csv_rows(raw: bytes) -> list[list[str]]:
         dialect = csv.Sniffer().sniff(sample, delimiters=";\t,")
     except csv.Error:
         dialect = csv.excel
-    return [[excel_cell_to_str(cell) for cell in row] for row in csv.reader(StringIO(text), dialect)]
+    rows: list[list[str]] = []
+    for row_number, row in enumerate(csv.reader(StringIO(text), dialect), start=1):
+        if row_number > MAX_PHYSICAL_CSV_ROWS:
+            raise OverflowError(
+                f"CSV có quá nhiều dòng vật lý; tối đa {MAX_PHYSICAL_CSV_ROWS} dòng."
+            )
+        rows.append([excel_cell_to_str(cell) for cell in row])
+    return rows
 
 
 def _analyze_csv(upload: RequestFile, *, sheet: str | None = None, header_row: Any = None) -> dict:
@@ -422,6 +431,8 @@ def _parse_xlsx(upload: RequestFile, mapping: dict) -> dict:
         sheet = _mapping_sheet(mapping, sheet_names)
         ws = wb_values[sheet]
         header_row = _mapping_header_row(mapping)
+        if ws.max_row is not None and header_row > ws.max_row:
+            raise ValueError("header_row không tồn tại trong file.")
         rows = _worksheet_rows_for_parse(ws, header_row)
         parsed_mapping = _validate_mapping(mapping, sheet_names, rows)
         parsed_rows = _parse_rows(rows, parsed_mapping)
@@ -467,8 +478,6 @@ def _worksheet_rows_for_parse(ws, header_row: int) -> list[list[str]]:
         data_seen += 1
         if data_seen > MAX_DATA_ROWS:
             break
-    while len(rows) < header_row:
-        rows.append([])
     return rows
 
 
@@ -487,7 +496,7 @@ def _mapping_header_row(mapping: dict) -> int:
         header_row = int(mapping.get("header_row"))
     except (TypeError, ValueError):
         raise ValueError("header_row không hợp lệ.")
-    if header_row < 1:
+    if header_row < 1 or header_row > MAX_HEADER_ROW:
         raise ValueError("header_row không hợp lệ.")
     return header_row
 

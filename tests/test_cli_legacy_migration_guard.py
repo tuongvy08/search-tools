@@ -54,6 +54,39 @@ import migrate_sqlite_to_postgres  # noqa: E402
 import migrate_legacy_regulatory_from_products  # noqa: E402
 
 
+@unittest.skipUnless(probe_postgres_reachable(), "local Postgres required")
+class LegacyRegulatoryDeleteSafetyTests(unittest.TestCase):
+    def setUp(self):
+        self.db_name, self.dsn = create_full_schema_temp_db()
+        self.conn = psycopg2.connect(self.dsn)
+        self.conn.autocommit = True
+
+    def tearDown(self):
+        self.conn.close()
+        drop_temp_db(self.db_name)
+
+    def test_blank_source_key_is_rejected_before_delete(self):
+        with self.conn.cursor() as cur:
+            with self.assertRaisesRegex(RuntimeError, "no CAS or name"):
+                migrate_legacy_regulatory_from_products.assert_legacy_delete_is_safe(cur, 1)
+
+    def test_inactive_conflict_is_rejected_before_delete(self):
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO products (name, cas, brand) VALUES (%s, %s, %s)",
+                ("Legacy source", "50-00-0", "CẤM NHẬP"),
+            )
+            cur.execute(
+                """
+                INSERT INTO regulatory_rules
+                    (rule_type, rule_label, match_field, match_value, priority, is_active)
+                VALUES ('CAM_NHAP', 'CẤM NHẬP', 'cas', '50-00-0', 10, FALSE)
+                """
+            )
+            with self.assertRaisesRegex(RuntimeError, "lack an active equivalent"):
+                migrate_legacy_regulatory_from_products.assert_legacy_delete_is_safe(cur, 0)
+
+
 def _write_xlsx(path, headers, rows):
     wb = Workbook()
     ws = wb.active

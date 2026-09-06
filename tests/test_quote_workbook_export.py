@@ -614,6 +614,12 @@ class FakeCursor:
 
     def execute(self, query, params=None):
         self.conn.queries.append(query)
+        if "SELECT to_regclass('brand_master'), to_regclass('currency_rates')" in query:
+            # This fixture models the legacy pre-017/018 schema.  The live
+            # resolver now probes both catalogs before it may use the legacy
+            # exchange_rates overlay, so provide the matching one-row result.
+            self.rows = [(None, None)]
+            return
         if "SELECT brand, rate FROM exchange_rates" in query:
             # Phase 6B2B2-R2: the resolver's legacy path now fails closed
             # (LEGACY_RATE_MISSING) for any brand absent from this overlay
@@ -627,6 +633,9 @@ class FakeCursor:
 
     def fetchall(self):
         return self.rows
+
+    def fetchone(self):
+        return self.rows[0] if self.rows else None
 
 
 class FakeConnection:

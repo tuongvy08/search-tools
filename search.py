@@ -2342,6 +2342,13 @@ def _require_admin_api():
     return None
 
 
+def _require_admin_api_csrf():
+    token = request.form.get("csrf_token", "") or request.headers.get("X-CSRF-Token", "")
+    if session_security.verify_csrf_token(token):
+        return None
+    return _quote_json_error("CSRF token không hợp lệ hoặc đã hết hạn.", status=400)
+
+
 def _current_actor():
     if session.get("user_id"):
         return f"user:{session.get('user_id')}"
@@ -3734,6 +3741,9 @@ def admin_quote_templates_upload():
     guard = _require_admin_api()
     if guard is not None:
         return guard
+    csrf_guard = _require_admin_api_csrf()
+    if csrf_guard is not None:
+        return csrf_guard
 
     workbook = request.files.get("workbook")
     if workbook is None:
@@ -3774,6 +3784,9 @@ def admin_quote_templates_activate(template_id: int):
     guard = _require_admin_api()
     if guard is not None:
         return guard
+    csrf_guard = _require_admin_api_csrf()
+    if csrf_guard is not None:
+        return csrf_guard
 
     conn = get_connection()
     try:
@@ -4425,6 +4438,8 @@ def admin_brand_compliance():
 
     msg = err = None
     if request.method == "POST":
+        if not session_security.verify_csrf_token(request.form.get("csrf_token", "")):
+            return "CSRF token không hợp lệ hoặc đã hết hạn.", 400
         brand_norm = _norm(request.form.get("brand_norm")).upper()
         action = _norm(request.form.get("action")).lower()
         conn = get_connection()

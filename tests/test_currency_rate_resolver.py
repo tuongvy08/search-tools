@@ -631,6 +631,16 @@ class _FakeExistenceConn:
         return _FakeExistenceCursor(self._result)
 
 
+class _CatalogProbeErrorCursor(_FakeExistenceCursor):
+    def execute(self, sql, params=None):
+        raise RuntimeError("simulated catalog probe failure")
+
+
+class _CatalogProbeErrorConn:
+    def cursor(self, *args, **kwargs):
+        return _CatalogProbeErrorCursor(None)
+
+
 class SchemaIncompleteUnitTests(unittest.TestCase):
     """Pure in-memory (no Postgres required) coverage of BOTH partial-
     migration combinations, per Phase 6B2B2-R2 item 2: "Nếu chỉ một trong
@@ -685,6 +695,22 @@ class SchemaIncompleteUnitTests(unittest.TestCase):
             conn = _FakeExistenceConn(to_regclass_result)
             CurrencyRateResolver().load(conn, str(_ROOT), legacy_rate_map_loader=_loader)
             self.assertEqual(calls, [], f"loader must not be called for to_regclass={to_regclass_result}")
+
+    def test_catalog_probe_error_fails_closed_without_legacy_loader(self):
+        calls: list = []
+
+        def _loader():
+            calls.append(1)
+            return {"Sigma": 1.0}
+
+        resolver = CurrencyRateResolver().load(
+            _CatalogProbeErrorConn(), str(_ROOT), legacy_rate_map_loader=_loader
+        )
+        self.assertEqual(calls, [])
+        result = resolver.resolve("Sigma")
+        self.assertFalse(result.is_valid)
+        self.assertIsNone(result.rate)
+        self.assertEqual(result.status, "RESOLVER_LOAD_ERROR")
 
 
 class _FlakyCursor:

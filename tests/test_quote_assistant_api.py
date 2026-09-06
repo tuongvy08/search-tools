@@ -318,6 +318,24 @@ class QuoteAssistantApiTests(unittest.TestCase):
             cls.team_id = cur.fetchone()[0]
             for b in [cls.BRAND_ALLOW, cls.BRAND_CATO, cls.BRAND_LGC, cls.BRAND_HPC, cls.BRAND_TRC, cls.BRAND_EXTRA]:
                 cur.execute("INSERT INTO team_brands (team_id, brand) VALUES (%s, %s)", (cls.team_id, b))
+            # Phase 6B2B2-R2: this fixture predates migration_017/018 (no
+            # brand_master/currency_rates), so `CurrencyRateResolver` takes
+            # the legacy `exchange_rates` overlay path -- which, as of
+            # Phase 6B2B2-R2, fails closed for any brand with no explicit
+            # row there instead of silently defaulting to rate=1.0. Seed a
+            # real rate=1 row per fixture brand (equivalent to a domestic
+            # VND-priced legacy brand) so this class's Unit_Price
+            # assertions -- all written assuming a 1:1 rate -- keep testing
+            # matching/selection/compliance logic, not currency resolution.
+            cur.executemany(
+                "INSERT INTO exchange_rates (brand, rate) VALUES (%s, 1) "
+                "ON CONFLICT (brand) DO UPDATE SET rate = 1",
+                [
+                    (cls.BRAND_ALLOW,), (cls.BRAND_DENY,), (cls.BRAND_CATO,),
+                    (cls.BRAND_LGC,), (cls.BRAND_HPC,), (cls.BRAND_TRC,),
+                    (cls.BRAND_EXTRA,), ("PERF_DECOY_BRAND",),
+                ],
+            )
             cur.executemany(
                 """
                 INSERT INTO brand_compliance_settings (brand_norm, manual_compliance_priority)

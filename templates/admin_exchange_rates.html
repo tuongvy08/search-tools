@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Quản lý Tỷ giá — Admin</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260906a') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
   <style>
     :root {
@@ -20,8 +20,6 @@
       --success-bg: #ecfdf5;
       --danger: #dc2626;
       --danger-bg: #fef2f2;
-      --warning: #d97706;
-      --warning-bg: #fffbeb;
       --radius: 8px;
     }
     * { box-sizing: border-box; }
@@ -33,13 +31,8 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       line-height: 1.5;
     }
-    .wrap {
-      max-width: 1100px;
-      margin: 0 auto;
-    }
-    header.page-header {
-      margin-bottom: 20px;
-    }
+    .wrap { max-width: 1100px; margin: 0 auto; }
+    header.page-header { margin-bottom: 20px; }
     h1 {
       margin: 0 0 6px;
       font-size: 1.5rem;
@@ -48,19 +41,9 @@
       align-items: center;
       gap: 10px;
     }
-    .sub {
-      margin: 0;
-      color: var(--muted);
-      font-size: 0.95rem;
-    }
-    .sub code {
-      background: #e2e8f0;
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: 0.9em;
-    }
+    .sub { margin: 0; color: var(--muted); font-size: 0.95rem; }
+    .sub code { background: #e2e8f0; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
 
-    /* Alerts */
     .alert {
       display: flex;
       align-items: flex-start;
@@ -70,23 +53,10 @@
       margin-bottom: 16px;
       font-size: 0.95rem;
     }
-    .alert-success {
-      background: var(--success-bg);
-      border: 1px solid #a7f3d0;
-      color: #065f46;
-    }
-    .alert-danger {
-      background: var(--danger-bg);
-      border: 1px solid #fecaca;
-      color: #991b1b;
-      white-space: pre-wrap;
-    }
-    .alert-icon {
-      flex-shrink: 0;
-      margin-top: 2px;
-    }
+    .alert-success { background: var(--success-bg); border: 1px solid #a7f3d0; color: #065f46; }
+    .alert-danger { background: var(--danger-bg); border: 1px solid #fecaca; color: #991b1b; white-space: pre-wrap; }
+    .alert-icon { flex-shrink: 0; margin-top: 2px; }
 
-    /* Workspace Panel */
     .panel {
       background: var(--card);
       border: 1px solid var(--border);
@@ -105,27 +75,11 @@
       gap: 12px;
       background: #fafbfc;
     }
-    .panel-title {
-      font-size: 1.05rem;
-      font-weight: 700;
-      margin: 0;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
+    .panel-title { font-size: 1.05rem; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 8px; }
+    .panel-sub { margin: 4px 0 0; font-size: 0.85rem; color: var(--muted); }
 
-    /* Toolbar */
-    .toolbar {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: center;
-      width: 100%;
-    }
-    .search-box {
-      flex: 1 1 240px;
-      position: relative;
-    }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; width: 100%; }
+    .search-box { flex: 1 1 220px; position: relative; }
     .search-box input {
       width: 100%;
       padding: 8px 12px 8px 34px;
@@ -134,299 +88,97 @@
       font-size: 0.92rem;
       font-family: inherit;
       outline: none;
-      transition: border-color 0.15s, box-shadow 0.15s;
     }
-    .search-box input:focus {
-      border-color: var(--border-focus);
-      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
-    }
-    .search-box .search-icon {
-      position: absolute;
-      left: 11px;
-      top: 50%;
-      transform: translateY(-50%);
-      color: var(--muted);
-      font-size: 0.85rem;
-      pointer-events: none;
-    }
-    .toolbar-actions {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      align-items: center;
+    .search-box input:focus { border-color: var(--border-focus); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15); }
+    .search-box .search-icon { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 0.85rem; pointer-events: none; }
+    select.form-control-inline {
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.9rem;
+      font-family: inherit;
+      background: #fff;
     }
 
-    /* Buttons */
     .btn {
       display: inline-flex;
       align-items: center;
       justify-content: center;
       gap: 6px;
-      min-height: 36px;
+      min-height: 34px;
       padding: 6px 12px;
       border-radius: var(--radius);
       border: 1px solid var(--border);
       background: #fff;
       color: var(--text);
-      font-size: 0.9rem;
+      font-size: 0.88rem;
       font-weight: 600;
       font-family: inherit;
       cursor: pointer;
-      text-decoration: none;
-      transition: all 0.15s ease;
       white-space: nowrap;
     }
     .btn:hover { background: #f8fafc; border-color: #cbd5e1; }
-    .btn-primary {
-      background: var(--primary);
-      border-color: var(--primary);
-      color: #fff;
-    }
+    .btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
     .btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
-    .btn-danger {
-      background: #fff;
-      border-color: #fecaca;
-      color: var(--danger);
-    }
-    .btn-danger:hover { background: #fef2f2; border-color: var(--danger); }
-    .btn-sm {
-      min-height: 30px;
-      padding: 4px 10px;
-      font-size: 0.82rem;
-    }
+    .btn-sm { min-height: 28px; padding: 4px 10px; font-size: 0.8rem; }
+    .btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
-    /* Badges */
-    .badge {
+    .badge-count { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
+    .pill {
       display: inline-flex;
       align-items: center;
-      gap: 4px;
-      padding: 3px 8px;
+      padding: 2px 9px;
       border-radius: 999px;
       font-size: 0.78rem;
-      font-weight: 600;
-    }
-    .badge-count {
-      color: var(--muted);
-      font-size: 0.88rem;
-      white-space: nowrap;
-    }
-    .badge-db {
+      font-weight: 700;
       background: #dbeafe;
       color: #1e40af;
     }
-    .badge-dirty {
-      background: var(--warning-bg);
-      border: 1px solid #fde68a;
-      color: #92400e;
-      font-size: 0.78rem;
-      font-weight: 700;
-      padding: 2px 8px;
-      border-radius: 999px;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-    }
+    .pill-fixed { background: #f1f5f9; color: #475569; }
 
-    /* Compact Edit / Add Form (Never takes full width) */
-    .edit-drawer {
-      display: none;
-      max-width: 540px;
-      padding: 16px;
-      margin: 16px;
-      background: #f8fafc;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
-    }
-    .edit-drawer.open {
-      display: block;
-    }
-    .drawer-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 12px;
-    }
-    .drawer-title {
-      font-size: 1rem;
-      font-weight: 700;
-      margin: 0;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .form-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-bottom: 14px;
-    }
-    @media (max-width: 480px) {
-      .form-grid { grid-template-columns: 1fr; }
-    }
-    .form-group {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-    .form-group label {
-      font-size: 0.85rem;
-      font-weight: 600;
-      color: #334155;
-    }
-    .form-control {
-      width: 100%;
-      padding: 8px 10px;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      font-size: 0.92rem;
-      font-family: inherit;
-      outline: none;
-      background: #fff;
-    }
-    .form-control:focus {
-      border-color: var(--border-focus);
-      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
-    }
-    .form-hint {
-      font-size: 0.78rem;
-      color: var(--muted);
-      margin-top: 2px;
-    }
-    .drawer-actions {
-      display: flex;
-      justify-content: flex-start;
-      align-items: center;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-    .inline-error {
-      display: none;
-      padding: 8px 10px;
-      background: #fee2e2;
-      border: 1px solid #fca5a5;
-      border-radius: 6px;
-      color: #991b1b;
-      font-size: 0.85rem;
-      margin-bottom: 10px;
-    }
-
-    /* Bulk drawer */
-    .bulk-drawer {
-      display: none;
-      max-width: 760px;
-      padding: 16px;
-      margin: 16px;
-      background: #f8fafc;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-    }
-    .bulk-drawer.open {
-      display: block;
-    }
-    .tabs {
-      display: flex;
-      gap: 6px;
-      border-bottom: 1px solid var(--border);
-      margin-bottom: 14px;
-      flex-wrap: wrap;
-    }
-    .tab-btn {
-      padding: 6px 12px;
-      font-size: 0.88rem;
-      font-weight: 600;
-      background: transparent;
-      border: none;
-      border-bottom: 2px solid transparent;
-      color: var(--muted);
-      cursor: pointer;
-    }
-    .tab-btn.active {
-      color: var(--primary);
-      border-bottom-color: var(--primary);
-    }
-    .tab-content {
-      display: none;
-    }
-    .tab-content.active {
-      display: block;
-    }
-    textarea.form-control {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 0.85rem;
-      resize: vertical;
-    }
-
-    /* Workspace Table */
-    .table-wrap {
-      width: 100%;
-      overflow-x: auto;
-      -webkit-overflow-scrolling: touch;
-    }
-    table.data-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.92rem;
-      text-align: left;
-    }
-    table.data-table th,
-    table.data-table td {
-      padding: 10px 14px;
-      border-bottom: 1px solid var(--border);
-      vertical-align: middle;
-    }
+    .table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    table.data-table { width: 100%; border-collapse: collapse; font-size: 0.92rem; text-align: left; }
+    table.data-table th, table.data-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
     table.data-table th {
       background: #f8fafc;
       color: #475569;
       font-weight: 700;
-      font-size: 0.82rem;
+      font-size: 0.8rem;
       text-transform: uppercase;
       letter-spacing: 0.03em;
       white-space: nowrap;
     }
-    table.data-table tbody tr:hover {
-      background: #f8fafc;
-    }
-    table.data-table tr.editing {
-      background: #eff6ff;
-    }
-    .cell-brand {
-      font-weight: 600;
-      color: #0f172a;
-      word-break: break-word;
-    }
-    .cell-rate {
+    table.data-table tbody tr:hover { background: #f8fafc; }
+    .cell-currency { font-weight: 700; color: #0f172a; }
+    .cell-rate { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.98rem; font-weight: 700; color: #1e293b; white-space: nowrap; }
+    .cell-time { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
+    .cell-actions { white-space: nowrap; }
+    .rate-edit-form { display: inline-flex; gap: 6px; align-items: center; }
+    .rate-edit-form input[type="text"] {
+      width: 120px;
+      padding: 6px 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 0.95rem;
-      font-weight: 700;
-      color: #1e293b;
-      white-space: nowrap;
+      font-size: 0.9rem;
     }
-    .cell-time {
-      color: var(--muted);
-      font-size: 0.85rem;
-      white-space: nowrap;
+    .brand-currency-form select {
+      padding: 6px 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 0.88rem;
+      background: #fff;
     }
-    .cell-actions {
-      white-space: nowrap;
-      text-align: right;
-    }
-    .empty-state {
-      padding: 36px 16px;
-      text-align: center;
-      color: var(--muted);
-    }
-    .empty-state i {
-      font-size: 2rem;
-      color: #cbd5e1;
-      margin-bottom: 8px;
-    }
+    .empty-state { padding: 36px 16px; text-align: center; color: var(--muted); }
+    .empty-state i { font-size: 2rem; color: #cbd5e1; margin-bottom: 8px; }
+    .row-saved { animation: rowFlash 1.2s ease; }
+    @keyframes rowFlash { 0% { background: #ecfdf5; } 100% { background: transparent; } }
 
     @media (max-width: 640px) {
       body { padding: 16px 10px 36px; }
       .panel-head { padding: 12px; }
-      table.data-table th, table.data-table td { padding: 8px 10px; font-size: 0.88rem; }
-      .edit-drawer, .bulk-drawer { margin: 10px; padding: 12px; }
+      table.data-table th, table.data-table td { padding: 8px 10px; font-size: 0.86rem; }
+      .rate-edit-form input[type="text"] { width: 90px; }
     }
   </style>
 </head>
@@ -435,437 +187,247 @@
 
   <div class="wrap">
     <header class="page-header">
-      <h1><i class="fas fa-money-bill-wave" style="color: #2563eb;"></i> Quản lý Tỷ giá theo Brand</h1>
+      <h1><i class="fas fa-money-bill-wave" style="color: #2563eb;"></i> Quản lý Tỷ giá Trung tâm</h1>
       <p class="sub">
-        Giá tính toán = <code>price × ship × tỷ_giá</code>. Tỷ giá trong cơ sở dữ liệu có độ ưu tiên cao nhất;
-        các brand còn lại lấy từ <code>static/exchange_rates.json</code> (hiện có <b>{{ json_fallback_count }}</b> mục mặc định).
+        Mô hình: <code>Product → Canonical Brand → Currency → Tỷ giá hiện hành</code>.
+        Cập nhật tỷ giá một currency sẽ áp dụng ngay cho toàn bộ brand dùng currency đó ở lần đọc tiếp theo.
       </p>
     </header>
 
-    <!-- Top Alert Notification Area -->
     <div id="statusAlert" class="alert {% if error %}alert-danger{% elif message %}alert-success{% endif %}" style="display: {% if error or message %}flex{% else %}none{% endif %};">
-      <div class="alert-icon">
-        <i class="fas {% if error %}fa-exclamation-triangle{% else %}fa-check-circle{% endif %}"></i>
-      </div>
+      <div class="alert-icon"><i class="fas {% if error %}fa-exclamation-triangle{% else %}fa-check-circle{% endif %}"></i></div>
       <div id="statusAlertText">{% if error %}{{ error }}{% elif message %}{{ message }}{% endif %}</div>
     </div>
 
-    <!-- Workspace Panel -->
+    <!-- Panel 1: Currency Rates (max 5 rows) -->
     <div class="panel">
-      <!-- Toolbar -->
       <div class="panel-head">
-        <div class="toolbar">
-          <div class="search-box">
-            <i class="fas fa-search search-icon"></i>
-            <input type="search" id="brandFilter" placeholder="Tìm nhanh brand trong database..." aria-label="Tìm kiếm brand" autocomplete="off" />
-          </div>
-          <div class="toolbar-actions">
-            <span class="badge-count">Hiển thị <b id="visibleCount">{{ rows|length }}</b> / {{ rows|length }} brand DB</span>
-            <button type="button" class="btn btn-primary btn-sm" id="toggleAddBtn">
-              <i class="fas fa-plus"></i> Thêm / Sửa nhanh
-            </button>
-            <button type="button" class="btn btn-sm" id="toggleBulkBtn">
-              <i class="fas fa-layer-group"></i> Thao tác hàng loạt
-            </button>
-          </div>
+        <div>
+          <h3 class="panel-title"><i class="fas fa-coins"></i> Bảng tỷ giá tiền tệ</h3>
+          <p class="panel-sub">VND luôn cố định = 1. AUD/USD/EUR/GBP chỉnh trực tiếp bên dưới.</p>
         </div>
       </div>
-
-      <!-- Compact Single Edit / Add Drawer (max-width 540px, never full-width) -->
-      <div id="singleDrawer" class="edit-drawer">
-        <div class="drawer-header">
-          <h3 id="drawerTitle" class="drawer-title"><i class="fas fa-edit"></i> Thêm / Cập nhật tỷ giá</h3>
-          <span id="dirtyIndicator" class="badge-dirty" style="display: none;">
-            <i class="fas fa-pencil-alt"></i> Chưa lưu
-          </span>
-        </div>
-        <div id="drawerError" class="inline-error"></div>
-        <form id="singleForm" method="post" action="/admin/exchange-rates">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <input type="hidden" name="action" value="save_single">
-          <div class="form-grid">
-            <div class="form-group">
-              <label for="formBrand">Tên Brand <span style="color:var(--danger)">*</span></label>
-              <input type="text" id="formBrand" name="brand" class="form-control" placeholder="Ví dụ: Sigma, Merck" required autocomplete="off" />
-            </div>
-            <div class="form-group">
-              <label for="formRate">Tỷ giá <span style="color:var(--danger)">*</span></label>
-              <input type="text" id="formRate" name="rate" class="form-control" inputmode="decimal" placeholder="Ví dụ: 26000 hoặc 1.25" required autocomplete="off" />
-              <div class="form-hint">Số dương hữu hạn, dấu chấm cho thập phân.</div>
-            </div>
-          </div>
-          <div class="drawer-actions">
-            <button type="submit" class="btn btn-primary" id="saveBtn">
-              <i class="fas fa-save"></i> Lưu tỷ giá
-            </button>
-            <button type="button" class="btn" id="cancelBtn">
-              <i class="fas fa-times"></i> Hủy
-            </button>
-          </div>
-        </form>
-      </div>
-
-      <!-- Bulk & Seed Drawer (collapsible, max-width 760px) -->
-      <div id="bulkDrawer" class="bulk-drawer">
-        <div class="tabs">
-          <button type="button" class="tab-btn active" data-tab="tab-same"><i class="fas fa-clone"></i> Tỷ giá chung cho nhiều brand</button>
-          <button type="button" class="tab-btn" data-tab="tab-lines"><i class="fas fa-list-ol"></i> Nhập danh sách dòng (brand,tỷ_giá)</button>
-          <button type="button" class="tab-btn" data-tab="tab-seed"><i class="fas fa-file-import"></i> Đồng bộ từ JSON</button>
-        </div>
-
-        <!-- Tab 1: Same rate for multiple brands -->
-        <div id="tab-same" class="tab-content active">
-          <form method="post" action="/admin/exchange-rates">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="bulk_same_apply" value="1">
-            <div class="form-group" style="margin-bottom: 12px;">
-              <label>Danh sách Brand (mỗi dòng một brand hoặc cách nhau bằng dấu phẩy)</label>
-              <textarea name="bulk_brands" class="form-control" rows="5" placeholder="Brand A&#10;Brand B, Brand C&#10;Brand D"></textarea>
-            </div>
-            <div class="form-grid" style="align-items: end;">
-              <div class="form-group">
-                <label>Tỷ giá chung</label>
-                <input type="text" name="bulk_rate" class="form-control" inputmode="decimal" placeholder="26000" required />
-              </div>
-              <div>
-                <button type="submit" class="btn btn-primary"><i class="fas fa-check"></i> Áp dụng cho cả danh sách</button>
-              </div>
-            </div>
-          </form>
-        </div>
-
-        <!-- Tab 2: Multiple lines brand,rate -->
-        <div id="tab-lines" class="tab-content">
-          <form method="post" action="/admin/exchange-rates">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="bulk_lines_apply" value="1">
-            <div class="form-group" style="margin-bottom: 12px;">
-              <label>Danh sách brand và tỷ giá (Định dạng: <code>brand,tỷ_giá</code> hoặc tab. Dòng bắt đầu bằng <code>#</code> được bỏ qua)</label>
-              <textarea name="bulk_lines" class="form-control" rows="6" placeholder="Sigma, 26000&#10;Merck	29300&#10;# Dòng chú thích"></textarea>
-              <div class="form-hint">Nếu một dòng không hợp lệ, toàn bộ quá trình cập nhật sẽ dừng để đảm bảo an toàn dữ liệu.</div>
-            </div>
-            <button type="submit" class="btn btn-primary"><i class="fas fa-check"></i> Áp dụng các dòng</button>
-          </form>
-        </div>
-
-        <!-- Tab 3: Seed from JSON -->
-        <div id="tab-seed" class="tab-content">
-          <p style="margin-top:0; font-size:0.92rem; color:#475569;">
-            Ghi đè/bổ sung toàn bộ brand có trong <code>static/exchange_rates.json</code> (<b>{{ json_fallback_count }}</b> brand) vào database.
-            Sau khi nạp, bạn có thể chỉnh sửa trực tiếp từng brand tại đây.
-          </p>
-          <form method="post" action="/admin/exchange-rates" onsubmit="return confirmSeed(event);">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="seed_json" value="1">
-            <button type="submit" class="btn btn-primary"><i class="fas fa-sync-alt"></i> Đồng bộ từ JSON → Database</button>
-          </form>
-        </div>
-      </div>
-
-      <!-- Main Rates Table -->
       <div class="table-wrap">
-        <table class="data-table" id="ratesTable">
+        <table class="data-table">
           <thead>
             <tr>
-              <th style="min-width: 180px;">Brand</th>
-              <th style="min-width: 140px;">Tỷ giá</th>
-              <th style="min-width: 110px;">Nguồn</th>
-              <th style="min-width: 160px;">Cập nhật lúc</th>
-              <th style="min-width: 140px; text-align: right;">Thao tác</th>
+              <th>Currency</th>
+              <th>Tỷ giá VND hiện tại</th>
+              <th>Số brand đang dùng</th>
+              <th>Cập nhật lúc</th>
+              <th>Hành động</th>
             </tr>
           </thead>
-          <tbody id="tableBody">
-            {% if rows %}
-              {% for r in rows %}
-                <tr id="row-{{ loop.index }}" data-brand="{{ r.brand|lower }}" data-brand-raw="{{ r.brand }}" data-rate="{{ r.rate_num }}">
-                  <td class="cell-brand">{{ r.brand }}</td>
-                  <td class="cell-rate">
-                    <span class="rate-text">{{ r.rate_display }}</span>
-                  </td>
-                  <td>
-                    <span class="badge badge-db"><i class="fas fa-database"></i> Database</span>
-                  </td>
-                  <td class="cell-time">
-                    {{ r.updated_at_display }}
-                  </td>
-                  <td class="cell-actions">
-                    <button type="button" class="btn btn-sm edit-row-btn" data-brand="{{ r.brand }}" data-rate="{{ r.rate_num }}" title="Chỉnh sửa tỷ giá {{ r.brand }}">
-                      <i class="fas fa-edit"></i> Sửa
-                    </button>
-                    <form method="post" action="/admin/exchange-rates" style="display:inline;" onsubmit="return confirmDelete(event, '{{ r.brand }}');">
+          <tbody id="currencyTableBody">
+            {% for r in currency_rows %}
+              <tr id="currency-row-{{ r.currency_code }}" data-currency="{{ r.currency_code }}">
+                <td class="cell-currency">
+                  {{ r.currency_code }}
+                  {% if not r.editable %}<span class="pill pill-fixed" title="VND là đơn vị gốc, luôn bằng 1">CỐ ĐỊNH</span>{% endif %}
+                </td>
+                <td class="cell-rate"><span class="rate-text">{{ r.rate_display }}</span></td>
+                <td><span class="pill">{{ r.brand_count }} brand</span></td>
+                <td class="cell-time">{{ r.updated_at_display }}</td>
+                <td class="cell-actions">
+                  {% if r.editable %}
+                    <form class="rate-edit-form" method="post" action="/admin/exchange-rates" data-currency-form data-currency="{{ r.currency_code }}">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                      <input type="hidden" name="delete_brand" value="{{ r.brand }}">
-                      <button type="submit" class="btn btn-sm btn-danger" title="Xóa tỷ giá {{ r.brand }} (quay về dùng file JSON)">
-                        <i class="fas fa-trash-alt"></i> Xóa
-                      </button>
+                      <input type="hidden" name="action" value="update_rate">
+                      <input type="hidden" name="currency_code" value="{{ r.currency_code }}">
+                      <input type="text" name="rate" inputmode="decimal" value="{{ r.rate_raw }}" aria-label="Tỷ giá {{ r.currency_code }}" required autocomplete="off">
+                      <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save"></i> Lưu</button>
                     </form>
-                  </td>
-                </tr>
-              {% endfor %}
-            {% else %}
+                  {% else %}
+                    <span class="badge-count">Không thể chỉnh sửa</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+            {% if not currency_rows %}
               <tr>
                 <td colspan="5" class="empty-state">
                   <i class="fas fa-inbox"></i>
-                  <p>Chưa có dòng nào trong bảng <code>exchange_rates</code>.</p>
-                  <p style="font-size:0.85rem;">Mọi brand hiện đang dùng file <code>static/exchange_rates.json</code> hoặc tỷ giá 1.0.</p>
+                  <p>Chưa có dữ liệu <code>currency_rates</code>. Cần chạy <code>migration_018_currency_rates.sql</code>.</p>
                 </td>
               </tr>
             {% endif %}
           </tbody>
         </table>
       </div>
-      <div id="emptyFilterMsg" class="empty-state" style="display: none;">
+    </div>
+
+    <!-- Panel 2: Brand -> Currency mapping (35 canonical brands) -->
+    <div class="panel">
+      <div class="panel-head">
+        <div class="toolbar">
+          <div class="search-box">
+            <i class="fas fa-search search-icon"></i>
+            <input type="search" id="brandFilter" placeholder="Tìm brand..." aria-label="Tìm kiếm brand" autocomplete="off" />
+          </div>
+          <select id="currencyFilter" class="form-control-inline" aria-label="Lọc theo currency">
+            <option value="">Tất cả currency</option>
+            {% for c in allowed_currencies %}
+              <option value="{{ c }}">{{ c }}</option>
+            {% endfor %}
+          </select>
+          <span class="badge-count">Hiển thị <b id="visibleBrandCount">{{ brand_rows|length }}</b> / {{ brand_rows|length }} brand</span>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="brandTable">
+          <thead>
+            <tr>
+              <th style="min-width: 200px;">Brand (canonical)</th>
+              <th style="min-width: 140px;">Currency hiện tại</th>
+              <th style="min-width: 220px;">Đổi currency</th>
+            </tr>
+          </thead>
+          <tbody id="brandTableBody">
+            {% for b in brand_rows %}
+              <tr id="brand-row-{{ b.id }}" data-brand-name="{{ b.name|lower }}" data-currency="{{ b.currency_code }}">
+                <td>{{ b.name }}</td>
+                <td><span class="pill" id="brand-currency-label-{{ b.id }}">{{ b.currency_code }}</span></td>
+                <td>
+                  <form class="brand-currency-form" method="post" action="/admin/exchange-rates" data-brand-currency-form data-brand-id="{{ b.id }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="action" value="update_brand_currency">
+                    <input type="hidden" name="brand_id" value="{{ b.id }}">
+                    <select name="currency_code" aria-label="Currency cho {{ b.name }}">
+                      {% for c in allowed_currencies %}
+                        <option value="{{ c }}" {% if c == b.currency_code %}selected{% endif %}>{{ c }}</option>
+                      {% endfor %}
+                    </select>
+                    <button type="submit" class="btn btn-sm"><i class="fas fa-check"></i> Cập nhật</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+            {% if not brand_rows %}
+              <tr>
+                <td colspan="3" class="empty-state">
+                  <i class="fas fa-inbox"></i>
+                  <p>Chưa có dữ liệu <code>brand_master</code>. Cần chạy <code>migration_017_brand_master.sql</code>.</p>
+                </td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+      <div id="emptyBrandFilterMsg" class="empty-state" style="display: none;">
         <i class="fas fa-filter"></i>
-        <p>Không tìm thấy brand nào khớp với từ khóa tìm kiếm.</p>
+        <p>Không tìm thấy brand nào khớp bộ lọc.</p>
       </div>
     </div>
   </div>
 
   <script>
     (function () {
-      const csrfToken = "{{ csrf_token() }}";
-      const brandFilter = document.getElementById('brandFilter');
-      const tableBody = document.getElementById('tableBody');
-      const emptyFilterMsg = document.getElementById('emptyFilterMsg');
-      const visibleCount = document.getElementById('visibleCount');
-
-      const singleDrawer = document.getElementById('singleDrawer');
-      const toggleAddBtn = document.getElementById('toggleAddBtn');
-      const toggleBulkBtn = document.getElementById('toggleBulkBtn');
-      const bulkDrawer = document.getElementById('bulkDrawer');
-      const drawerTitle = document.getElementById('drawerTitle');
-      const drawerError = document.getElementById('drawerError');
-      const dirtyIndicator = document.getElementById('dirtyIndicator');
-      const formBrand = document.getElementById('formBrand');
-      const formRate = document.getElementById('formRate');
-      const singleForm = document.getElementById('singleForm');
-      const cancelBtn = document.getElementById('cancelBtn');
       const statusAlert = document.getElementById('statusAlert');
       const statusAlertText = document.getElementById('statusAlertText');
-
-      let originalBrand = '';
-      let originalRate = '';
-      let activeRow = null;
-
-      // Filter rows
-      if (brandFilter && tableBody) {
-        brandFilter.addEventListener('input', function () {
-          const q = (this.value || '').trim().toLowerCase();
-          const rows = tableBody.querySelectorAll('tr[data-brand]');
-          let count = 0;
-          rows.forEach(function (row) {
-            const b = row.getAttribute('data-brand') || '';
-            const match = !q || b.includes(q);
-            row.style.display = match ? '' : 'none';
-            if (match) count++;
-          });
-          if (visibleCount) visibleCount.textContent = count;
-          if (emptyFilterMsg) emptyFilterMsg.style.display = (rows.length > 0 && count === 0) ? 'block' : 'none';
-        });
-      }
-
-      // Check dirty state on single form
-      function checkDirty() {
-        const isBrandChanged = formBrand.value.trim() !== originalBrand;
-        const isRateChanged = formRate.value.trim() !== originalRate;
-        const isDirty = (originalBrand || originalRate) ? (isBrandChanged || isRateChanged) : (formBrand.value.trim() !== '' || formRate.value.trim() !== '');
-        dirtyIndicator.style.display = isDirty ? 'inline-flex' : 'none';
-      }
-      formBrand.addEventListener('input', checkDirty);
-      formRate.addEventListener('input', checkDirty);
-
-      // Open Add/Edit Drawer
-      function openDrawerForEdit(brand, rate, rowEl) {
-        if (bulkDrawer) bulkDrawer.classList.remove('open');
-        singleDrawer.classList.add('open');
-        originalBrand = brand || '';
-        originalRate = rate || '';
-        formBrand.value = originalBrand;
-        formRate.value = originalRate;
-        drawerError.style.display = 'none';
-        drawerError.textContent = '';
-        dirtyIndicator.style.display = 'none';
-
-        if (activeRow) activeRow.classList.remove('editing');
-        activeRow = rowEl || null;
-        if (activeRow) activeRow.classList.add('editing');
-
-        if (brand) {
-          drawerTitle.innerHTML = '<i class="fas fa-edit"></i> Cập nhật tỷ giá: <b>' + escapeHtml(brand) + '</b>';
-          formRate.focus();
-          formRate.select();
-        } else {
-          drawerTitle.innerHTML = '<i class="fas fa-plus"></i> Thêm tỷ giá mới';
-          formBrand.focus();
-        }
-        singleDrawer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }
-
-      function closeDrawer() {
-        singleDrawer.classList.remove('open');
-        formBrand.value = '';
-        formRate.value = '';
-        originalBrand = '';
-        originalRate = '';
-        dirtyIndicator.style.display = 'none';
-        drawerError.style.display = 'none';
-        if (activeRow) {
-          activeRow.classList.remove('editing');
-          activeRow = null;
-        }
-      }
-
-      if (toggleAddBtn) {
-        toggleAddBtn.addEventListener('click', function () {
-          if (singleDrawer.classList.contains('open') && !originalBrand) {
-            closeDrawer();
-          } else {
-            openDrawerForEdit('', '', null);
-          }
-        });
-      }
-
-      if (cancelBtn) {
-        cancelBtn.addEventListener('click', closeDrawer);
-      }
-
-      // Hook up row edit buttons
-      document.querySelectorAll('.edit-row-btn').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          const b = this.getAttribute('data-brand') || '';
-          const r = this.getAttribute('data-rate') || '';
-          const row = this.closest('tr');
-          openDrawerForEdit(b, r, row);
-        });
-      });
-
-      // Bulk drawer toggle
-      if (toggleBulkBtn && bulkDrawer) {
-        toggleBulkBtn.addEventListener('click', function () {
-          if (singleDrawer) closeDrawer();
-          bulkDrawer.classList.toggle('open');
-          if (bulkDrawer.classList.contains('open')) {
-            bulkDrawer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-          }
-        });
-      }
-
-      // Bulk tabs
-      document.querySelectorAll('.tab-btn').forEach(function (tBtn) {
-        tBtn.addEventListener('click', function () {
-          document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
-          document.querySelectorAll('.tab-content').forEach(function (c) { c.classList.remove('active'); });
-          this.classList.add('active');
-          const target = document.getElementById(this.getAttribute('data-tab'));
-          if (target) target.classList.add('active');
-        });
-      });
-
-      // Single Form AJAX submit for smooth inline update
-      if (singleForm) {
-        singleForm.addEventListener('submit', function (e) {
-          e.preventDefault();
-          const brandVal = formBrand.value.trim();
-          const rateVal = formRate.value.trim();
-          drawerError.style.display = 'none';
-
-          if (!brandVal) {
-            showDrawerError('Vui lòng nhập tên brand.');
-            formBrand.focus();
-            return;
-          }
-          if (!rateVal) {
-            showDrawerError('Vui lòng nhập tỷ giá.');
-            formRate.focus();
-            return;
-          }
-
-          const saveBtn = document.getElementById('saveBtn');
-          saveBtn.disabled = true;
-          saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang lưu...';
-
-          const formData = new FormData();
-          formData.append('csrf_token', csrfToken);
-          formData.append('brand', brandVal);
-          formData.append('rate', rateVal);
-
-          fetch('/admin/exchange-rates', {
-            method: 'POST',
-            body: formData,
-            headers: {
-              'X-Requested-With': 'XMLHttpRequest',
-              'Accept': 'application/json'
-            }
-          })
-          .then(function (res) {
-            return res.json().then(function (data) {
-              return { status: res.status, data: data };
-            });
-          })
-          .then(function (resObj) {
-            saveBtn.disabled = false;
-            saveBtn.innerHTML = '<i class="fas fa-save"></i> Lưu tỷ giá';
-
-            if (!resObj.data.ok || resObj.status !== 200) {
-              showDrawerError(resObj.data.error || 'Có lỗi xảy ra khi lưu.');
-            } else {
-              // Success!
-              showAlert(resObj.data.message || 'Đã lưu tỷ giá thành công.', false);
-              closeDrawer();
-              // Reload page or update row smoothly
-              setTimeout(function () {
-                window.location.reload();
-              }, 400);
-            }
-          })
-          .catch(function (err) {
-            saveBtn.disabled = false;
-            saveBtn.innerHTML = '<i class="fas fa-save"></i> Lưu tỷ giá';
-            // Fallback to normal submit if fetch fails
-            singleForm.submit();
-          });
-        });
-      }
-
-      function showDrawerError(msg) {
-        drawerError.textContent = msg;
-        drawerError.style.display = 'block';
-      }
 
       function showAlert(msg, isError) {
         if (!statusAlert || !statusAlertText) return;
         statusAlert.className = 'alert ' + (isError ? 'alert-danger' : 'alert-success');
         const icon = statusAlert.querySelector('.alert-icon i');
-        if (icon) {
-          icon.className = 'fas ' + (isError ? 'fa-exclamation-triangle' : 'fa-check-circle');
-        }
+        if (icon) icon.className = 'fas ' + (isError ? 'fa-exclamation-triangle' : 'fa-check-circle');
         statusAlertText.textContent = msg;
         statusAlert.style.display = 'flex';
         statusAlert.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }
 
-      function escapeHtml(str) {
-        return (str || '').replace(/[&<>"']/g, function (m) {
-          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m];
-        });
+      function ajaxSubmit(form, onSuccess) {
+        const formData = new FormData(form);
+        const btn = form.querySelector('button[type="submit"]');
+        const originalHtml = btn ? btn.innerHTML : '';
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
+
+        fetch(form.action, {
+          method: 'POST',
+          body: formData,
+          headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' },
+        })
+          .then(function (res) { return res.json().then(function (data) { return { status: res.status, data: data }; }); })
+          .then(function (resObj) {
+            if (btn) { btn.disabled = false; btn.innerHTML = originalHtml; }
+            if (!resObj.data.ok || resObj.status !== 200) {
+              showAlert(resObj.data.error || 'Có lỗi xảy ra.', true);
+            } else {
+              showAlert(resObj.data.message || 'Đã lưu thành công.', false);
+              if (onSuccess) onSuccess();
+            }
+          })
+          .catch(function () {
+            if (btn) { btn.disabled = false; btn.innerHTML = originalHtml; }
+            form.submit();
+          });
       }
 
-      // Safe confirmations
-      window.confirmDelete = function (e, brand) {
-        if (!confirm('Xóa tỷ giá tùy chỉnh của brand "' + brand + '"? Hệ thống sẽ quay về dùng tỷ giá từ file JSON mặc định.')) {
+      // Currency rate update forms
+      document.querySelectorAll('form[data-currency-form]').forEach(function (form) {
+        form.addEventListener('submit', function (e) {
           e.preventDefault();
-          return false;
-        }
-        return true;
-      };
+          ajaxSubmit(form, function () {
+            const row = document.getElementById('currency-row-' + form.getAttribute('data-currency'));
+            if (row) {
+              const rateInput = form.querySelector('input[name="rate"]');
+              const rateText = row.querySelector('.rate-text');
+              if (rateText && rateInput) rateText.textContent = rateInput.value;
+              row.classList.remove('row-saved');
+              void row.offsetWidth;
+              row.classList.add('row-saved');
+            }
+          });
+        });
+      });
 
-      window.confirmSeed = function (e) {
-        if (!confirm('Bạn có chắc muốn đồng bộ tất cả brand từ file JSON vào database? Các bản ghi đã tồn tại sẽ được cập nhật.')) {
+      // Brand currency mapping forms
+      document.querySelectorAll('form[data-brand-currency-form]').forEach(function (form) {
+        form.addEventListener('submit', function (e) {
           e.preventDefault();
-          return false;
-        }
-        return true;
-      };
+          ajaxSubmit(form, function () {
+            const brandId = form.getAttribute('data-brand-id');
+            const row = document.getElementById('brand-row-' + brandId);
+            const select = form.querySelector('select[name="currency_code"]');
+            const label = document.getElementById('brand-currency-label-' + brandId);
+            if (row && select) row.setAttribute('data-currency', select.value);
+            if (label && select) label.textContent = select.value;
+            if (row) {
+              row.classList.remove('row-saved');
+              void row.offsetWidth;
+              row.classList.add('row-saved');
+            }
+          });
+        });
+      });
+
+      // Brand filter (search + currency), client-side over the 35 rows already rendered.
+      const brandFilter = document.getElementById('brandFilter');
+      const currencyFilter = document.getElementById('currencyFilter');
+      const brandTableBody = document.getElementById('brandTableBody');
+      const emptyBrandFilterMsg = document.getElementById('emptyBrandFilterMsg');
+      const visibleBrandCount = document.getElementById('visibleBrandCount');
+
+      function applyBrandFilters() {
+        if (!brandTableBody) return;
+        const q = (brandFilter && brandFilter.value || '').trim().toLowerCase();
+        const cur = (currencyFilter && currencyFilter.value || '').trim().toUpperCase();
+        const rows = brandTableBody.querySelectorAll('tr[data-brand-name]');
+        let count = 0;
+        rows.forEach(function (row) {
+          const name = row.getAttribute('data-brand-name') || '';
+          const rowCur = (row.getAttribute('data-currency') || '').toUpperCase();
+          const matchName = !q || name.includes(q);
+          const matchCur = !cur || rowCur === cur;
+          const match = matchName && matchCur;
+          row.style.display = match ? '' : 'none';
+          if (match) count++;
+        });
+        if (visibleBrandCount) visibleBrandCount.textContent = count;
+        if (emptyBrandFilterMsg) emptyBrandFilterMsg.style.display = (rows.length > 0 && count === 0) ? 'block' : 'none';
+      }
+
+      if (brandFilter) brandFilter.addEventListener('input', applyBrandFilters);
+      if (currencyFilter) currencyFilter.addEventListener('change', applyBrandFilters);
     })();
   </script>
 </body>

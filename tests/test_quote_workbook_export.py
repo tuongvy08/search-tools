@@ -615,7 +615,13 @@ class FakeCursor:
     def execute(self, query, params=None):
         self.conn.queries.append(query)
         if "SELECT brand, rate FROM exchange_rates" in query:
-            self.rows = []
+            # Phase 6B2B2-R2: the resolver's legacy path now fails closed
+            # (LEGACY_RATE_MISSING) for any brand absent from this overlay
+            # instead of silently defaulting to rate=1.0 -- so this fixture
+            # must explicitly provide a rate for the fixture brand ("Brand")
+            # used throughout this test file's rows, exactly like a real
+            # `exchange_rates` row would.
+            self.rows = [("Brand", 26500)]
             return
         self.rows = self.conn.export_rows
 

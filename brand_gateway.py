@@ -19,9 +19,13 @@ from typing import Any, Optional
 # `pg_advisory_xact_lock` is session/transaction-scoped and auto-releases at
 # COMMIT/ROLLBACK -- it only serializes OTHER transactions that also request
 # this exact key. It does NOT block plain reads/writes from sessions that
-# never call it (e.g. the standalone `scripts/import_excel.py` CLI tool,
-# which bypasses the Brand Gateway entirely and is intentionally NOT part of
-# this lock's coordination domain -- see Phase 6B2B1-E report).
+# never call it. As of Phase 6B2B2, `scripts/import_excel.py` DOES call this
+# (via the Brand Gateway) as the first statement of its mutating transaction
+# and is part of this lock's coordination domain; only the two deprecated,
+# fail-closed-on-canonical-schema legacy scripts
+# (`scripts/migrate_sqlite_to_postgres.py`,
+# `scripts/migrate_legacy_regulatory_from_products.py`) remain outside it
+# (see Phase 6B2B1-E report for the original rationale, since superseded).
 PRODUCTS_IMPORT_LOCK_KEY = 872316401
 
 
@@ -175,6 +179,42 @@ def load_brand_gateway(cur) -> BrandGatewayCache:
     cache = BrandGatewayCache()
     cache.load(cur)
     return cache
+
+
+class LegacyMigrationBlockedError(RuntimeError):
+    """Raised when a one-time legacy CLI script is run against a database
+    that already has the canonical Brand Master schema (migration_017+)."""
+
+
+def refuse_if_canonical_brand_master_present(cur, script_name: str) -> None:
+    """Preflight guard for one-time legacy migration CLI scripts.
+
+    `scripts/migrate_sqlite_to_postgres.py` and
+    `scripts/migrate_legacy_regulatory_from_products.py` predate the
+    canonical Brand Master (migration_017): they either bulk-write
+    `products` without ever setting `products.source_brand` (violates the
+    `chk_products_source_brand_not_null` constraint) or read/delete
+    `products.brand` values assuming free-form legacy brand strings, with
+    no Brand Gateway normalization at all.
+
+    Once `brand_master` exists on the target database, these two scripts
+    are no longer safe or meaningful to run: they were one-time tools for
+    a data shape that migration_017 has already superseded. Rather than
+    attempting to patch them to satisfy the new constraints (out of scope,
+    and risks silently reintroducing non-canonical brand strings), this
+    guard makes them fail closed with a clear, actionable message BEFORE
+    touching any data.
+    """
+    cur.execute("SELECT to_regclass('brand_master')")
+    row = cur.fetchone()
+    if row and row[0]:
+        raise LegacyMigrationBlockedError(
+            f"{script_name}: database đích đã có bảng 'brand_master' (canonical Brand Master, "
+            "migration_017+). Script legacy này KHÔNG được chạy trên database đã canonical hóa "
+            "brand -- nó không dùng Brand Gateway và sẽ vi phạm ràng buộc products.source_brand "
+            "NOT NULL / FK brand_master. Dùng scripts/import_excel.py (đã nâng cấp Brand Gateway) "
+            "cho mọi import trên database này."
+        )
 
 
 def validate_import_rows_brands(

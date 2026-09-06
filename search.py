@@ -37,6 +37,15 @@ from brand_gateway import (
     resolve_replace_by_brand_target_ids,
     acquire_products_import_lock,
 )
+from currency_rates import (
+    ALLOWED_CURRENCIES,
+    CurrencyRateError,
+    apply_brand_currency_update,
+    apply_currency_rate_update,
+    fetch_brand_currency_rows,
+    fetch_currency_rate_rows,
+    load_currency_rate_resolver,
+)
 from middleware_access import register_ip_access_control
 from product_import_manual import (
     HEADER_MODE_ABSENT,
@@ -290,7 +299,21 @@ def _default_exchange_rates_from_json() -> dict[str, float]:
 
 
 def _exchange_rate_map(conn) -> dict[str, float]:
-    """JSON làm mặc định; dòng trong bảng exchange_rates ghi đè theo brand."""
+    """JSON làm mặc định; dòng trong bảng exchange_rates ghi đè theo brand.
+
+    Legacy per-brand overlay (Phase 6B2A). Kept ONLY as the compatibility
+    input for `currency_rates.CurrencyRateResolver`'s pre-migration-017/018
+    fallback path (see `_load_pricing_resolver` below) -- no runtime pricing
+    call site should read this dict directly anymore once migration
+    017+018 have run. `static/exchange_rates.json` itself is now
+    currency-keyed (5 entries), not brand-keyed, so this overlay in
+    practice only returns the JSON's currency codes as if they were brand
+    names plus whatever raw brand rows still exist in the legacy
+    `exchange_rates` table. As of Phase 6B2B2-R2, a real brand string that
+    misses this map is NOT silently defaulted to rate=1.0 anymore --
+    `CurrencyRateResolver.resolve()` fails closed with
+    `LEGACY_RATE_MISSING` (`is_valid=False`, `rate=None`) for it instead.
+    """
     base = _default_exchange_rates_from_json()
     try:
         with conn.cursor() as cur:
@@ -305,6 +328,61 @@ def _exchange_rate_map(conn) -> dict[str, float]:
     except Exception:
         pass
     return base
+
+
+UNAVAILABLE_PRICE_LABEL = "Giá không khả dụng"
+
+
+def _load_pricing_resolver(conn):
+    """Loads the single source of truth for runtime brand->currency->rate.
+
+    Returns a `currency_rates.CurrencyRateResolver`. When `brand_master` +
+    `currency_rates` both exist (post migration 017+018), lookups are
+    strict/fail-closed by currency. Otherwise (older/test schema) it
+    transparently falls back to the exact legacy `_exchange_rate_map`
+    overlay so pre-existing behavior/tests are unaffected -- see
+    `currency_rates.py`'s module docstring for the full rationale.
+
+    `_exchange_rate_map(conn)` (a JSON file read + an `exchange_rates` table
+    scan) is only ever needed on that legacy/back-compat path, so it's
+    passed in as a lazily-evaluated loader instead of computed eagerly here
+    -- a fully-migrated (post 017+018) request, which is the normal
+    production case, must not pay for that extra query + file read on
+    every single pricing request.
+    """
+    resolver = load_currency_rate_resolver(
+        conn, app.root_path, legacy_rate_map_loader=lambda: _exchange_rate_map(conn)
+    )
+    for w in resolver.warnings:
+        app.logger.warning(w)
+    return resolver
+
+
+def _compute_unit_price(price, ship, brand, rate_map) -> tuple[float, str, bool]:
+    """Computes (unit_price_value, display_string, rate_valid).
+
+    `unit_price_value` is 0.0 when the currency rate could not be resolved
+    (unknown brand, unmapped currency, or missing/invalid rate) -- NEVER a
+    silent fallback to rate=1.0. `display_string` is a formatted VND amount
+    when valid, or a clear Vietnamese "unavailable" label otherwise, so
+    Search/batch endpoints never show a price computed with a wrong or
+    fabricated rate.
+    """
+    try:
+        ship_f = float(ship) if ship is not None else 0
+    except (TypeError, ValueError):
+        ship_f = 0
+    try:
+        price_f = float(price) if price is not None else 0
+    except (TypeError, ValueError):
+        price_f = 0
+
+    resolution = rate_map.resolve((brand or "").strip())
+    if not resolution.is_valid or resolution.rate is None:
+        return 0.0, UNAVAILABLE_PRICE_LABEL, False
+
+    unit_price = round(price_f * ship_f * float(resolution.rate), -3)
+    return unit_price, "{:,.0f}".format(unit_price), True
 
 
 def _visibility_sql(alias: str):
@@ -433,23 +511,13 @@ def _product_row_to_result(
     note,
     compliance_status,
     compliance_note,
-    rate_map: dict,
+    rate_map,
     *,
     brand_manual_enabled=False,
     manual_compliance=None,
     manual_compliance_note=None,
 ) -> dict:
-    try:
-        ship_f = float(ship) if ship is not None else 0
-    except (TypeError, ValueError):
-        ship_f = 0
-    try:
-        price_f = float(price) if price is not None else 0
-    except (TypeError, ValueError):
-        price_f = 0
-    bkey = (brand or "").strip()
-    exchange_rate = rate_map.get(bkey, 1.0)
-    unit_price = round(price_f * ship_f * exchange_rate, -3)
+    unit_price, unit_price_display, rate_valid = _compute_unit_price(price, ship, brand, rate_map)
     resolved = resolve_compliance_precedence(
         brand_manual_enabled=bool(brand_manual_enabled),
         manual_compliance=manual_compliance,
@@ -464,7 +532,8 @@ def _product_row_to_result(
         "Cas": cas or "",
         "Brand": brand or "",
         "Size": size or "",
-        "Unit_Price": "{:,.0f}".format(unit_price),
+        "Unit_Price": unit_price_display,
+        "Unit_Price_Available": rate_valid,
         "Note": note or "",
         "Compliance_Status": resolved["compliance"],
         "Compliance_Note": resolved["compliance_note"],
@@ -985,7 +1054,20 @@ def _quote_parse_payload(payload: dict) -> tuple[list[dict], dict, str]:
     return parsed, filters_out, strategy
 
 
-def _quote_unit_price_value(ship, price, brand, rate_map: dict) -> float:
+def _quote_unit_price_value(ship, price, brand, rate_map) -> tuple[float, Optional[str]]:
+    """Returns (unit_price, currency_rate_status).
+
+    `currency_rate_status` is None when the brand's currency rate resolved
+    successfully; otherwise it carries the resolver's status code
+    (`BRAND_UNKNOWN` / `CURRENCY_MISSING` / `RATE_MISSING` /
+    `LEGACY_RATE_MISSING` / `CURRENCY_SCHEMA_INCOMPLETE` /
+    `RESOLVER_LOAD_ERROR`) -- used ONLY internally by
+    `_quote_candidate_from_row` to decide whether to render the unavailable
+    label instead of a real amount; it is never a silent 1.0. The caller
+    still folds any non-None status into the existing, well-tested
+    `NO_VALID_PRICE` -> `REVIEW` lifecycle (`Unit_Price_Value` is 0.0 in
+    that case, same as any other "no valid price" candidate).
+    """
     try:
         ship_f = float(ship) if ship is not None else 0
     except (TypeError, ValueError):
@@ -994,11 +1076,13 @@ def _quote_unit_price_value(ship, price, brand, rate_map: dict) -> float:
         price_f = float(price) if price is not None else 0
     except (TypeError, ValueError):
         price_f = 0
-    exchange_rate = rate_map.get((brand or "").strip(), 1.0)
-    return round(price_f * ship_f * exchange_rate, -3)
+    resolution = rate_map.resolve((brand or "").strip())
+    if not resolution.is_valid or resolution.rate is None:
+        return 0.0, resolution.status
+    return round(price_f * ship_f * float(resolution.rate), -3), None
 
 
-def _quote_candidate_from_row(row: tuple, rate_map: dict) -> dict:
+def _quote_candidate_from_row(row: tuple, rate_map) -> dict:
     (
         _ord,
         product_id,
@@ -1017,7 +1101,7 @@ def _quote_candidate_from_row(row: tuple, rate_map: dict) -> dict:
         compliance_status,
         compliance_note,
     ) = row
-    unit_price = _quote_unit_price_value(ship, price, brand, rate_map)
+    unit_price, currency_rate_status = _quote_unit_price_value(ship, price, brand, rate_map)
     resolved = resolve_compliance_precedence(
         brand_manual_enabled=bool(brand_manual_enabled),
         manual_compliance=manual_compliance,
@@ -1034,6 +1118,18 @@ def _quote_candidate_from_row(row: tuple, rate_map: dict) -> dict:
     elif unit_price <= 0:
         ineligible_reason = "NO_VALID_PRICE"
     eligible = ineligible_reason == ""
+    # `currency_rate_status` is None only when the resolver actually
+    # resolved a valid rate -- so `unit_price == 0` in that case is a real
+    # computed amount (e.g. price/ship data itself is 0), not a missing
+    # rate, and is safe to render as "0". When the resolver failed to
+    # resolve a rate at all (unknown brand/currency, missing rate, partial
+    # migration, DB load error, etc.) we must NEVER render the digit "0" as
+    # if it were a real price -- show the same Vietnamese "unavailable"
+    # label Search/batch already use instead.
+    if currency_rate_status is not None:
+        unit_price_display = UNAVAILABLE_PRICE_LABEL
+    else:
+        unit_price_display = "{:,.0f}".format(unit_price)
     return {
         "product_id": product_id,
         "Name": name or "",
@@ -1041,7 +1137,7 @@ def _quote_candidate_from_row(row: tuple, rate_map: dict) -> dict:
         "Cas": cas or "",
         "Brand": brand or "",
         "Size": size or "",
-        "Unit_Price": "{:,.0f}".format(unit_price),
+        "Unit_Price": unit_price_display,
         "Unit_Price_Value": unit_price,
         "Note": note or "",
         "preparation_type": preparation_type,
@@ -1860,7 +1956,7 @@ def _quote_match_rows(conn, parsed_rows: list[dict], filters: dict, strategy: st
     params += vis_params  # code_cas_verified
     params += branch_params + branch_params + branch_params + branch_params + branch_params
 
-    rate_map = _exchange_rate_map(conn)
+    rate_map = _load_pricing_resolver(conn)
     by_ord: dict[int, list[dict]] = {row["ord"]: [] for row in lookup_rows}
     match_modes: dict[int, str] = {}
     code_cas_counts: dict[int, int] = {}
@@ -3678,8 +3774,29 @@ def admin_template_regulatory_rules():
     return _xlsx_response(wb, "regulatory_rules_import_template.xlsx")
 
 
+def _currency_rate_display(rate) -> str:
+    try:
+        return f"{rate:,.2f}".rstrip("0").rstrip(".") if isinstance(rate, (Decimal, float)) else str(rate)
+    except Exception:
+        return str(rate)
+
+
+def _currency_updated_at_display(updated_at) -> str:
+    return updated_at.strftime("%d/%m/%Y %H:%M") if hasattr(updated_at, "strftime") else (str(updated_at) if updated_at else "—")
+
+
 @app.route("/admin/exchange-rates", methods=["GET", "POST"])
 def admin_exchange_rates():
+    """Phase 6B2B2: Central Currency Rates + Brand -> Currency mapping.
+
+    Single source of truth going forward: `brand_master.currency_code` maps
+    each of the 35 canonical brands to one of 5 currencies; `currency_rates`
+    holds exactly one current VND rate per currency. Updating a currency's
+    rate here immediately changes the effective price for every brand that
+    uses it, on the very next read -- no per-brand rate rows, no per-product
+    updates. The legacy per-brand `exchange_rates` table is intentionally
+    left untouched by this route (rollback-only, see migration_018).
+    """
     guard = _require_admin_page()
     if guard is not None:
         return guard
@@ -3698,199 +3815,78 @@ def admin_exchange_rates():
             return "CSRF token không hợp lệ hoặc đã hết hạn.", 400
 
         action = (request.form.get("action") or "").strip()
+        actor_user_id = session.get("user_id")
         conn = get_connection()
         try:
-            if request.form.get("seed_json") or action == "seed_json":
-                base = _default_exchange_rates_from_json()
-                if not base:
-                    err = "Không đọc được static/exchange_rates.json hoặc file rỗng."
-                else:
-                    valid_items: list[tuple[str, Decimal]] = []
-                    for brand, r_raw in base.items():
-                        b_str = (brand or "").strip()
-                        if not b_str:
-                            continue
-                        try:
-                            rate_dec = parse_exchange_rate(r_raw)
-                            valid_items.append((b_str, rate_dec))
-                        except ValueError:
-                            continue
-
-                    if not valid_items:
-                        err = "Không có tỷ giá hợp lệ nào trong file JSON."
-                    else:
-                        with conn:
-                            with conn.cursor() as cur:
-                                has_updated_at = _check_table_has_column(cur, "exchange_rates", "updated_at")
-                                sql = _exchange_rates_upsert_sql(has_updated_at)
-                                for b_str, rate_dec in valid_items:
-                                    cur.execute(sql, (b_str, rate_dec))
-                        msg = f"Đã đồng bộ {len(valid_items)} brand từ file JSON vào database."
-
-            elif request.form.get("delete_brand") or action == "delete":
-                b = (request.form.get("delete_brand") or request.form.get("brand") or "").strip()
-                if not b:
-                    err = "Thiếu tên brand cần xóa."
-                else:
+            if action == "update_rate":
+                currency_code = (request.form.get("currency_code") or "").strip().upper()
+                rate_raw = (request.form.get("rate") or "").strip()
+                try:
+                    rate_dec = parse_exchange_rate(rate_raw)
                     with conn:
-                        with conn.cursor() as cur:
-                            cur.execute("DELETE FROM exchange_rates WHERE brand = %s", (b,))
-                    msg = f"Đã xóa tỷ giá cho brand: {b}"
+                        apply_currency_rate_update(conn, currency_code, rate_dec, actor_user_id, source="ADMIN_UI")
+                    msg = f"Đã cập nhật tỷ giá {currency_code} = {rate_dec:,}."
+                except (ValueError, CurrencyRateError) as ve:
+                    err = str(ve)
 
-            elif request.form.get("bulk_same_apply") or action == "bulk_same":
-                brands = _parse_brand_list(request.form.get("bulk_brands") or "")
-                rate_raw = (request.form.get("bulk_rate") or "").strip()
-                if not brands:
-                    err = "Nhập danh sách brand (mỗi dòng hoặc cách nhau bởi dấu phẩy)."
-                elif len(brands) > 2000:
-                    err = "Tối đa 2000 brand mỗi lần."
+            elif action == "update_brand_currency":
+                brand_id_raw = (request.form.get("brand_id") or "").strip()
+                currency_code = (request.form.get("currency_code") or "").strip().upper()
+                try:
+                    brand_id = int(brand_id_raw)
+                except (TypeError, ValueError):
+                    err = "Thiếu hoặc sai brand_id."
                 else:
                     try:
-                        rate_dec = parse_exchange_rate(rate_raw)
-                    except ValueError as ve:
+                        with conn:
+                            apply_brand_currency_update(conn, brand_id, currency_code, actor_user_id)
+                        msg = f"Đã cập nhật currency cho brand id={brand_id} thành {currency_code}."
+                    except CurrencyRateError as ve:
                         err = str(ve)
-                    else:
-                        with conn:
-                            with conn.cursor() as cur:
-                                has_updated_at = _check_table_has_column(cur, "exchange_rates", "updated_at")
-                                sql = _exchange_rates_upsert_sql(has_updated_at)
-                                for brand in brands:
-                                    cur.execute(sql, (brand, rate_dec))
-                        msg = f"Đã áp dụng tỷ giá {rate_dec} cho {len(brands)} brand."
-
-            elif request.form.get("bulk_lines_apply") or action == "bulk_lines":
-                text = request.form.get("bulk_lines") or ""
-                rows_parsed: list[tuple[str, Decimal]] = []
-                line_errors: list[str] = []
-                for idx, raw in enumerate(text.splitlines(), start=1):
-                    line = raw.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    if "\t" in line and "," not in line:
-                        parts = [p.strip() for p in line.split("\t", 1)]
-                    else:
-                        parts = [p.strip() for p in line.split(",", 1)]
-                    if len(parts) < 2 or not parts[0]:
-                        line_errors.append(f"Dòng {idx}: sai định dạng 'brand,tỷ_giá' ({line[:60]})")
-                        continue
-                    b, rraw = parts[0], parts[1]
-                    try:
-                        r = parse_exchange_rate(rraw)
-                        rows_parsed.append((b, r))
-                    except ValueError as ve:
-                        line_errors.append(f"Dòng {idx} ({b}): {ve}")
-
-                if len(rows_parsed) + len(line_errors) > 2000:
-                    err = "Tối đa 2000 dòng mỗi lần."
-                elif line_errors:
-                    sample_errs = "; ".join(line_errors[:3])
-                    if len(line_errors) > 3:
-                        sample_errs += f" và {len(line_errors) - 3} lỗi khác"
-                    err = f"Dữ liệu có dòng không hợp lệ, đã dừng toàn bộ: {sample_errs}."
-                elif not rows_parsed:
-                    err = "Không có dòng hợp lệ. Định dạng: brand,tỷ_giá (mỗi dòng một cặp)."
-                else:
-                    with conn:
-                        with conn.cursor() as cur:
-                            has_updated_at = _check_table_has_column(cur, "exchange_rates", "updated_at")
-                            sql = _exchange_rates_upsert_sql(has_updated_at)
-                            for brand, rate_dec in rows_parsed:
-                                cur.execute(sql, (brand, rate_dec))
-                    msg = f"Đã cập nhật thành công {len(rows_parsed)} dòng tỷ giá."
 
             else:
-                brand = (request.form.get("brand") or "").strip()
-                rate_raw = (request.form.get("rate") or "").strip()
-                if not brand:
-                    err = "Vui lòng nhập tên brand."
-                elif len(brand) > 255:
-                    err = "Tên brand quá dài (tối đa 255 ký tự)."
-                else:
-                    try:
-                        rate_dec = parse_exchange_rate(rate_raw)
-                    except ValueError as ve:
-                        err = str(ve)
-                    else:
-                        with conn:
-                            with conn.cursor() as cur:
-                                has_updated_at = _check_table_has_column(cur, "exchange_rates", "updated_at")
-                                sql = _exchange_rates_upsert_sql(has_updated_at)
-                                cur.execute(sql, (brand, rate_dec))
-                        msg = f"Đã lưu tỷ giá cho {brand} = {rate_dec}."
+                err = "Hành động không hợp lệ."
 
         except Exception as e:
-            app.logger.exception("Lỗi xử lý exchange_rates: %s", e)
+            app.logger.exception("Lỗi xử lý currency_rates/brand_master.currency_code: %s", e)
             err = "Đã xảy ra lỗi hệ thống khi lưu tỷ giá. Vui lòng thử lại sau."
         finally:
             conn.close()
 
         if is_ajax:
             status_code = 400 if err else 200
-            return jsonify({
-                "ok": not bool(err),
-                "message": msg,
-                "error": err,
-                "brand": request.form.get("brand"),
-            }), status_code
+            return jsonify({"ok": not bool(err), "message": msg, "error": err}), status_code
 
-    rows = []
+    currency_rows = []
+    brand_rows = []
     conn = get_connection()
     try:
-        with conn.cursor() as cur:
-            try:
-                cur.execute(
-                    "SELECT brand, rate, updated_at FROM exchange_rates ORDER BY brand ASC LIMIT 2000"
-                )
-                raw_rows = cur.fetchall()
-            except Exception:
-                conn.rollback()
-                cur.execute(
-                    "SELECT brand, rate FROM exchange_rates ORDER BY brand ASC LIMIT 2000"
-                )
-                raw_rows = [(r[0], r[1], None) for r in cur.fetchall()]
+        raw_currency_rows = fetch_currency_rate_rows(conn)
+        for r in raw_currency_rows:
+            currency_rows.append({
+                "currency_code": r["currency_code"],
+                "rate_display": _currency_rate_display(r["rate_vnd"]),
+                "rate_raw": str(r["rate_vnd"]),
+                "brand_count": r["brand_count"],
+                "updated_at_display": _currency_updated_at_display(r["updated_at"]),
+                "editable": r["currency_code"] != "VND",
+            })
 
-            for r in raw_rows:
-                b_name, b_rate, b_updated_at = r[0], r[1], r[2]
-                rate_num = (
-                    f"{b_rate:.8f}".rstrip("0").rstrip(".")
-                    if isinstance(b_rate, (Decimal, float))
-                    else str(b_rate)
-                )
-                try:
-                    rate_display = (
-                        f"{b_rate:,.2f}".rstrip("0").rstrip(".")
-                        if isinstance(b_rate, (Decimal, float))
-                        else str(b_rate)
-                    )
-                except Exception:
-                    rate_display = str(b_rate)
-
-                updated_at_display = (
-                    b_updated_at.strftime("%d/%m/%Y %H:%M")
-                    if hasattr(b_updated_at, "strftime")
-                    else (str(b_updated_at) if b_updated_at else "—")
-                )
-
-                rows.append({
-                    "brand": b_name,
-                    "rate": b_rate,
-                    "rate_num": rate_num,
-                    "rate_display": rate_display,
-                    "updated_at": b_updated_at,
-                    "updated_at_display": updated_at_display,
-                })
+        raw_brand_rows = fetch_brand_currency_rows(conn)
+        brand_rows = raw_brand_rows
     except Exception as e:
-        app.logger.exception("Không đọc được bảng exchange_rates: %s", e)
-        err = err or "Không thể tải danh sách tỷ giá từ cơ sở dữ liệu."
+        app.logger.exception("Không đọc được currency_rates/brand_master: %s", e)
+        err = err or "Không thể tải dữ liệu tỷ giá/brand từ cơ sở dữ liệu. Kiểm tra migration_017/018 đã được áp dụng chưa."
     finally:
         conn.close()
 
     return render_template(
         "admin_exchange_rates.html",
-        rows=rows,
+        currency_rows=currency_rows,
+        brand_rows=brand_rows,
+        allowed_currencies=ALLOWED_CURRENCIES,
         message=msg or request.args.get("msg"),
         error=err or request.args.get("err"),
-        json_fallback_count=len(_default_exchange_rates_from_json()),
     )
 
 
@@ -4461,7 +4457,7 @@ def search_products():
             cursor.execute(query, (pattern, pattern, pattern) + vis_params)
             products = cursor.fetchall()
 
-        rate_map = _exchange_rate_map(conn)
+        rate_map = _load_pricing_resolver(conn)
         results = []
         for product in products:
             (
@@ -4479,19 +4475,7 @@ def search_products():
                 compliance_status,
                 compliance_note,
             ) = product
-            try:
-                ship = float(ship) if ship is not None else 0
-            except (TypeError, ValueError):
-                ship = 0
-            try:
-                price = float(price) if price is not None else 0
-            except (TypeError, ValueError):
-                price = 0
-
-            bkey = (brand or "").strip()
-            exchange_rate = rate_map.get(bkey, 1.0)
-            unit_price = round(price * ship * exchange_rate, -3)
-            formatted_unit_price = "{:,.0f}".format(unit_price)
+            unit_price, formatted_unit_price, _rate_valid = _compute_unit_price(price, ship, brand, rate_map)
             resolved = resolve_compliance_precedence(
                 brand_manual_enabled=bool(brand_manual_enabled),
                 manual_compliance=manual_compliance,
@@ -4509,6 +4493,7 @@ def search_products():
                     "Brand": brand,
                     "Size": size,
                     "Unit_Price": formatted_unit_price,
+                    "Unit_Price_Available": _rate_valid,
                     "Note": note,
                     "Compliance_Status": resolved["compliance"],
                     "Compliance_Note": resolved["compliance_note"],
@@ -4642,7 +4627,7 @@ def find_code_batch():
     vis, vis_params = _visibility_sql("p")
     conn = get_connection()
     try:
-        rate_map = _exchange_rate_map(conn)
+        rate_map = _load_pricing_resolver(conn)
         with conn.cursor() as cursor:
             # Mỗi code lookup riêng qua LATERAL để planner dùng idx_products_code_upper_trim.
             query = f"""
@@ -4795,10 +4780,9 @@ def find_code_batch():
                 price_f = None
 
             if ship_f is not None and price_f is not None:
-                bkey = (brand or "").strip()
-                exchange_rate = rate_map.get(bkey, 1.0)
-                unit_price = round(price_f * ship_f * exchange_rate, -3)
-                results[idx]["Unit_Price"] = "{:,.0f}".format(unit_price)
+                _unit_price, unit_price_display, rate_valid = _compute_unit_price(price_f, ship_f, brand, rate_map)
+                results[idx]["Unit_Price"] = unit_price_display
+                results[idx]["Unit_Price_Available"] = rate_valid
 
         return jsonify({"results": results})
     finally:
@@ -4904,7 +4888,7 @@ def advanced_search():
 
     conn = get_connection()
     try:
-        rate_map = _exchange_rate_map(conn)
+        rate_map = _load_pricing_resolver(conn)
         with conn.cursor() as cursor:
             # Mỗi CAS lookup riêng qua LATERAL để planner dùng idx_products_cas_upper_trim.
             query = f"""
@@ -5493,7 +5477,7 @@ def _quote_export_parse_placeholder(placeholder_raw, index: int) -> dict:
 
 def _quote_export_products(conn, selections: list[dict]) -> list[dict]:
     vis, vis_params = _visibility_sql("p")
-    rate_map = _exchange_rate_map(conn)
+    rate_map = _load_pricing_resolver(conn)
     query = f"""
         WITH input AS (
             SELECT u.ord, u.product_id

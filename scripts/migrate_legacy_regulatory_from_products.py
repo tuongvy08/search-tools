@@ -2,6 +2,17 @@
 """
 Chuyển dữ liệu pháp lý cũ khỏi products.brand sang regulatory_rules.
 
+*** DEPRECATED (Phase 6B2B2) ***
+Đây là công cụ one-time legacy chạy TRƯỚC canonical Brand Master
+(migration_017): các pseudo-brand 'CẤM NHẬP'/'Phụ lục II'/'Phụ lục III'/
+'TỒN KHO' không nằm trong brand_master, và migration_017's preflight fail
+closed nếu products.brand còn brand chưa được map -- nghĩa là script này
+(và --delete-legacy) đáng lẽ đã phải chạy XONG trước khi migration_017 có
+thể pass. Chạy lại nó SAU khi brand_master đã tồn tại không còn ý nghĩa
+(dữ liệu nguồn đáng lẽ không còn) và không an toàn để "sửa rộng" cho phù
+hợp Brand Master. Script fail closed nếu phát hiện `brand_master` đã tồn
+tại trên database đích.
+
 Nguồn legacy: products.brand IN ('CẤM NHẬP','Phụ lục II','Phụ lục III','TỒN KHO')
 Đích mới: regulatory_rules (ưu tiên match theo CAS, fallback theo NAME nếu thiếu CAS).
 
@@ -18,6 +29,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from db import get_connection  # noqa: E402
+from brand_gateway import LegacyMigrationBlockedError, refuse_if_canonical_brand_master_present  # noqa: E402
 
 LEGACY_MAP = {
     'CẤM NHẬP': ('CAM_NHAP', 'CẤM NHẬP', 10),
@@ -36,6 +48,12 @@ def main() -> None:
     try:
         with conn:
             with conn.cursor() as cur:
+                try:
+                    refuse_if_canonical_brand_master_present(cur, "migrate_legacy_regulatory_from_products.py")
+                except LegacyMigrationBlockedError as e:
+                    print(str(e), file=sys.stderr)
+                    sys.exit(2)
+
                 cur.execute(
                     """
                     SELECT DISTINCT brand, NULLIF(TRIM(cas), ''), NULLIF(TRIM(name), '')

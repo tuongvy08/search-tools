@@ -357,7 +357,13 @@ class SearchCompliancePrecedenceTests(unittest.TestCase):
     def test_search_has_no_per_row_query(self):
         rows, recorder = self._call_search()
         self.assertGreaterEqual(len(rows), 7)
-        self.assertEqual(len(recorder), 2)
+        # Phase 6B2B2: 1 legacy `exchange_rates` overlay query (backward-compat
+        # path for this pre-migration-017/018 temp DB) + 1 single combined
+        # `to_regclass('brand_master'), to_regclass('currency_rates')`
+        # schema-detection query (currency_rates.CurrencyRateResolver) +
+        # 1 main search query = 3 total. Still O(1) regardless of result
+        # count -- the point of this test (no N+1 per-row query) still holds.
+        self.assertEqual(len(recorder), 3)
 
     def test_specific_search_plan_uses_trigram_index(self):
         _rows, recorder = self._call_search(f"{self.PREFIX}_MANUAL_CONFLICT")

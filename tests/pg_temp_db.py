@@ -184,6 +184,30 @@ def create_full_schema_temp_db():
     return db_name, dsn
 
 
+def apply_brand_master_and_currency_migrations(cur):
+    """Applies migration_017 (canonical Brand Master) + migration_018
+    (central currency_rates) on top of an already-created
+    `create_full_schema_temp_db()` database.
+
+    Deliberately NOT folded into `_FULL_SCHEMA_SQL_FILES`/
+    `create_full_schema_temp_db()` itself: dozens of pre-existing test files
+    build their fixtures against the pre-017 shape (arbitrary ad-hoc brand
+    strings with no `brand_master`/`source_brand` at all) and must keep
+    working unmodified. Only tests that specifically exercise the Phase
+    6B2B1/6B2B2 canonical-brand/currency-rate behavior should call this
+    helper, right after `create_full_schema_temp_db()`, before inserting
+    any fixture rows.
+
+    Both migration files are additive/idempotent and contain no
+    `CREATE INDEX CONCURRENTLY` statements, so they can run as a single
+    `cur.execute(full_text)` inside the caller's existing transaction --
+    migration_017's preflight checks are satisfied trivially on a
+    freshly-created, empty `products` table (0 unmapped brands).
+    """
+    for fname in ("migration_017_brand_master.sql", "migration_018_currency_rates.sql"):
+        cur.execute(_read_sql(fname))
+
+
 def apply_sql_file_statement_by_statement(cur, sql_path):
     """Execute a `.sql` file one statement per `cur.execute()` call, instead
     of the whole file text in one call.

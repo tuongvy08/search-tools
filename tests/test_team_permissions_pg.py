@@ -194,6 +194,13 @@ class _RealPgTestBase(unittest.TestCase):
                     # fallback; simplest is to give it a real (empty)
                     # table, exactly like `products_local` already has.
                     cur.execute("CREATE TABLE IF NOT EXISTS exchange_rates (brand TEXT PRIMARY KEY, rate NUMERIC NOT NULL)")
+                    # Phase 6B2B2-R2: seed explicit rate=1 rows for the mock VND
+                    # test brands (BrandA, BrandB) used by team visibility tests.
+                    # This is explicit fixture data, not a runtime fallback.
+                    cur.execute(
+                        "INSERT INTO exchange_rates (brand, rate) VALUES ('BrandA', 1), ('BrandB', 1) "
+                        "ON CONFLICT (brand) DO UPDATE SET rate = 1"
+                    )
         finally:
             conn.close()
 

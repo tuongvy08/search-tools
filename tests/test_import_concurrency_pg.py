@@ -40,6 +40,8 @@ load_dotenv()
 _ROOT = Path(__file__).resolve().parents[1]
 _MIGRATION_004_PATH = _ROOT / "sql" / "migration_004_import_jobs.sql"
 _MIGRATION_017_PATH = _ROOT / "sql" / "migration_017_brand_master.sql"
+_MIGRATION_018_PATH = _ROOT / "sql" / "migration_018_currency_rates.sql"
+_MIGRATION_019_PATH = _ROOT / "sql" / "migration_019_dynamic_brand_currency.sql"
 
 
 def _xlsx_bytes(headers, rows):
@@ -67,6 +69,8 @@ class ImportConcurrencyPgTests(unittest.TestCase):
             with conn.cursor() as cur:
                 cur.execute(_MIGRATION_004_PATH.read_text(encoding="utf-8"))
                 cur.execute(_MIGRATION_017_PATH.read_text(encoding="utf-8"))
+                cur.execute(_MIGRATION_018_PATH.read_text(encoding="utf-8"))
+                cur.execute(_MIGRATION_019_PATH.read_text(encoding="utf-8"))
                 # session_security's before_request hook re-validates every
                 # authenticated session against a REAL app_users row
                 # (account_status + auth_version) -- give it one real admin.
@@ -115,7 +119,7 @@ class ImportConcurrencyPgTests(unittest.TestCase):
         with client.session_transaction() as sess:
             sess.clear()
             sess.update(authenticated=True, user_id=ImportConcurrencyPgTests.admin_user_id, is_admin=True,
-                        auth_version=1, role="admin", username="admin1")
+                        auth_version=1, role="admin", username="admin1", csrf_token="import-csrf")
         return client
 
     def _preview(self, client, rows, mode="upsert"):
@@ -132,7 +136,10 @@ class ImportConcurrencyPgTests(unittest.TestCase):
 
     @staticmethod
     def _apply(client, token):
-        return client.post("/admin/imports/apply", data={"preview_token": token})
+        return client.post(
+            "/admin/imports/apply",
+            data={"preview_token": token, "csrf_token": "import-csrf"},
+        )
 
     def _seed_products(self, rows):
         """rows: list of dict(name, code, cas, brand, source_brand, size)."""
@@ -146,6 +153,55 @@ class ImportConcurrencyPgTests(unittest.TestCase):
                     (r.get("name"), r.get("code"), r.get("cas"), r["brand"],
                      r.get("source_brand") or r["brand"], r.get("size")),
                 )
+
+    def test_preview_reports_new_brand_without_write_then_apply_registers_it(self):
+        client = self._admin_client()
+        token = self._preview(
+            client,
+            [
+                {"brand": "Dynamic Upload", "code": "DYN-UP-1", "name": "Upload One"},
+                {"brand": " dynamic upload ", "code": "DYN-UP-2", "name": "Upload Two"},
+            ],
+        )
+        preview = search.IMPORT_PREVIEWS[token]
+        self.assertEqual(preview["new_brands"][0]["name"], "Dynamic Upload")
+        self.assertEqual(preview["new_brands"][0]["row_count"], 2)
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM brand_master WHERE normalized_name='DYNAMIC UPLOAD'")
+            self.assertEqual(cur.fetchone()[0], 0, "preview must be read-only")
+
+        response = self._apply(client, token)
+        self.assertEqual(response.status_code, 302)
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT currency_code FROM brand_master WHERE normalized_name='DYNAMIC UPLOAD'"
+            )
+            self.assertIsNone(cur.fetchone()[0])
+            cur.execute(
+                "SELECT COUNT(*), COUNT(DISTINCT brand) FROM products "
+                "WHERE code IN ('DYN-UP-1','DYN-UP-2')"
+            )
+            self.assertEqual(cur.fetchone(), (2, 1))
+            cur.execute("SELECT COUNT(*) FROM team_brands WHERE brand='Dynamic Upload'")
+            self.assertEqual(cur.fetchone()[0], 0)
+
+    def test_apply_and_quick_product_reject_missing_csrf_without_mutation(self):
+        client = self._admin_client()
+        token = self._preview(
+            client, [{"brand": "Dynamic Csrf", "code": "DYN-CSRF-1", "name": "No Write"}]
+        )
+        response = client.post("/admin/imports/apply", data={"preview_token": token})
+        self.assertEqual(response.status_code, 400)
+        response = client.post(
+            "/admin/imports/quick-product",
+            data={"brand": "Dynamic Csrf", "code": "DYN-CSRF-2", "name": "No Write"},
+        )
+        self.assertEqual(response.status_code, 400)
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM brand_master WHERE normalized_name='DYNAMIC CSRF'")
+            self.assertEqual(cur.fetchone()[0], 0)
+            cur.execute("SELECT COUNT(*) FROM products WHERE code LIKE 'DYN-CSRF-%'")
+            self.assertEqual(cur.fetchone()[0], 0)
 
     def _fetch_names_by_brand(self, brand):
         with self.conn.cursor() as cur:
@@ -425,7 +481,10 @@ class ImportConcurrencyPgTests(unittest.TestCase):
             def quick_upsert():
                 resp = client.post(
                     "/admin/imports/quick-product",
-                    data={"brand": "PhytoLab", "code": "QP-1", "name": "Quick"},
+                    data={
+                        "brand": "PhytoLab", "code": "QP-1", "name": "Quick",
+                        "csrf_token": "import-csrf",
+                    },
                 )
                 results["status"] = resp.status_code
                 results["json"] = resp.get_json()

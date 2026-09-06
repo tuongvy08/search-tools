@@ -60,7 +60,7 @@ from psycopg2 import errors as pg_errors
 
 import search
 from currency_rates import (
-    ALLOWED_CURRENCIES,
+    SEEDED_CURRENCIES,
     CurrencyRateError,
     CurrencyRateResolver,
     apply_brand_currency_update,
@@ -119,13 +119,13 @@ class CurrencyRateResolverUnitTests(unittest.TestCase):
         self.assertIsNone(res.rate)
         self.assertEqual(res.status, "RATE_MISSING")
 
-    def test_static_fallback_used_and_logged_when_db_row_missing(self):
+    def test_static_json_is_never_used_when_db_row_missing(self):
         r = self._manual_resolver({"A2S": "EUR"}, {"USD": "26500"}, static_fallback={"EUR": "31500"})
         res = r.resolve("A2S")
-        self.assertTrue(res.is_valid)
-        self.assertEqual(res.rate, Decimal("31500"))
-        self.assertEqual(res.status, "STATIC_FALLBACK")
-        self.assertTrue(any("A2S" in w and "EUR" in w for w in r.warnings))
+        self.assertFalse(res.is_valid)
+        self.assertIsNone(res.rate)
+        self.assertEqual(res.status, "RATE_MISSING")
+        self.assertFalse(r.warnings)
 
     def test_zero_or_negative_rate_never_used_even_if_present_in_memory(self):
         r = self._manual_resolver({"A2S": "EUR"}, {"EUR": "0"})
@@ -133,12 +133,11 @@ class CurrencyRateResolverUnitTests(unittest.TestCase):
         self.assertFalse(res.is_valid)
         self.assertIsNone(res.rate)
 
-    def test_non_vnd_currency_resolving_to_exactly_one_is_rejected(self):
-        """Defense in depth: a non-VND currency ever equal to 1 is treated as
-        invalid, since that value is reserved for VND alone."""
+    def test_non_vnd_currency_rate_one_is_valid_positive_rate(self):
         r = self._manual_resolver({"Sigma": "USD"}, {"USD": "1"})
         res = r.resolve("Sigma")
-        self.assertFalse(res.is_valid)
+        self.assertTrue(res.is_valid)
+        self.assertEqual(res.rate, Decimal("1"))
 
     def test_get_convenience_accessor_returns_none_not_one(self):
         r = self._manual_resolver({"Sigma": "USD"}, {"USD": "26500"})
@@ -254,7 +253,7 @@ class CurrencyRateMigrationAndResolverPgTests(unittest.TestCase):
         with self.conn.cursor() as cur:
             cur.execute("SELECT currency_code, rate_vnd FROM currency_rates ORDER BY currency_code")
             rows = dict(cur.fetchall())
-        self.assertEqual(set(rows.keys()), set(ALLOWED_CURRENCIES))
+        self.assertEqual(set(rows.keys()), set(SEEDED_CURRENCIES))
         self.assertEqual(rows["VND"], 1)
         self.assertEqual(rows["AUD"], 17200)
         self.assertEqual(rows["USD"], 26500)
@@ -483,9 +482,8 @@ class CurrencyRateMigrationAndResolverPgTests(unittest.TestCase):
         self.assertEqual(candidate["Unit_Price_Value"], 0.0)
         self.assertFalse(candidate["eligible"])
         self.assertEqual(candidate["ineligible_reason"], "NO_VALID_PRICE")
-        # Dead diagnostic field removed -- never a raw enum leaked to the
-        # frontend contract.
-        self.assertNotIn("currency_rate_status", candidate)
+        self.assertEqual(candidate["currency_rate_status"], "BRAND_UNKNOWN")
+        self.assertEqual(candidate["currency_rate_message"], search.UNAVAILABLE_PRICE_LABEL)
 
     def test_quick_quote_candidate_shows_real_zero_only_when_rate_is_valid(self):
         """A genuinely zero computed amount (valid rate, but ship=0 in the

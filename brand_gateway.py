@@ -54,8 +54,8 @@ class BrandGatewayCache:
     """In-memory cache of canonical brands and aliases loaded from PostgreSQL."""
 
     def __init__(self) -> None:
-        self._aliases: dict[str, tuple[str, str, str]] = {}
-        self._canonical: dict[str, tuple[str, str]] = {}
+        self._aliases: dict[str, tuple[str, Optional[str], str]] = {}
+        self._canonical: dict[str, tuple[str, Optional[str]]] = {}
         self._loaded: bool = False
         self._table_exists: bool = False
 
@@ -172,6 +172,110 @@ class BrandGatewayCache:
             is_valid=False,
             error_message=f"Brand không tồn tại trong danh mục Brand Master: '{brand_str}'.",
         )
+
+
+def normalize_brand_key(raw_brand: Any) -> str:
+    """Canonical import identity: trim then case-insensitive uppercase."""
+    return ("" if raw_brand is None else str(raw_brand)).strip().upper()
+
+
+def preview_import_rows_brands(
+    rows: list[dict], gateway: BrandGatewayCache
+) -> tuple[list[dict], list[str], list[dict]]:
+    """Resolve known brands and classify unknown values as proposed masters.
+
+    This function is read-only. Unknown spellings are grouped by the same
+    normalized key enforced by ``brand_master.normalized_name``; the first
+    trimmed spelling becomes the proposed canonical name, while each row keeps
+    its own raw spelling in ``source_brand``.
+    """
+    resolved_rows: list[dict] = []
+    errors: list[str] = []
+    proposed_by_key: dict[str, dict] = {}
+
+    for idx, row in enumerate(rows, start=2):
+        raw_brand = "" if row.get("brand") is None else str(row.get("brand")).strip()
+        if not raw_brand:
+            errors.append(f"Dòng {idx}: Trường brand không được để trống.")
+            continue
+
+        resolution = gateway.resolve(raw_brand, row.get("source_brand"))
+        row_copy = dict(row)
+        if resolution.is_valid:
+            row_copy["canonical_brand"] = resolution.canonical_brand
+            row_copy["brand"] = resolution.canonical_brand
+            row_copy["source_brand"] = resolution.source_brand
+        elif gateway.table_exists:
+            norm_key = normalize_brand_key(raw_brand)
+            proposed = proposed_by_key.setdefault(
+                norm_key,
+                {"name": raw_brand, "normalized_name": norm_key, "row_count": 0},
+            )
+            proposed["row_count"] += 1
+            row_copy["canonical_brand"] = proposed["name"]
+            row_copy["brand"] = proposed["name"]
+            # New brand provenance is always the raw brand from this row.
+            row_copy["source_brand"] = raw_brand
+        else:
+            # Pre-017 compatibility remains a passthrough.
+            row_copy["canonical_brand"] = resolution.canonical_brand
+            row_copy["brand"] = resolution.canonical_brand
+            row_copy["source_brand"] = resolution.source_brand
+        resolved_rows.append(row_copy)
+
+    return resolved_rows, errors, list(proposed_by_key.values())
+
+
+def register_and_resolve_import_rows(cur, rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Atomically register unknown canonical brands, then resolve all rows.
+
+    Caller must already hold ``PRODUCTS_IMPORT_LOCK_KEY`` and must commit this
+    work in the same transaction as product writes. ``ON CONFLICT`` plus the
+    normalized-name unique key protects against case/trim duplicates even if a
+    non-cooperating writer races this transaction.
+    """
+    gateway = load_brand_gateway(cur)
+    preview_rows, errors, proposed = preview_import_rows_brands(rows, gateway)
+    if errors:
+        raise ValueError(errors[0])
+    if not gateway.table_exists:
+        return preview_rows, []
+
+    created: list[dict] = []
+    for item in proposed:
+        cur.execute(
+            """
+            INSERT INTO brand_master (name, normalized_name, currency_code)
+            VALUES (%s, %s, NULL)
+            ON CONFLICT DO NOTHING
+            RETURNING id, name
+            """,
+            (item["name"], item["normalized_name"]),
+        )
+        inserted = cur.fetchone()
+        cur.execute(
+            """
+            SELECT id, name
+            FROM brand_master
+            WHERE normalized_name = %s AND is_active = TRUE
+            """,
+            (item["normalized_name"],),
+        )
+        canonical = cur.fetchone()
+        if canonical is None:
+            raise ValueError(
+                f"Không thể đăng ký brand '{item['name']}' do xung đột dữ liệu Brand Master."
+            )
+        if inserted is not None:
+            created.append({**item, "id": canonical[0], "name": canonical[1]})
+
+    # Reload after inserts (or a concurrent ON CONFLICT winner) so every row
+    # uses the authoritative stored spelling and existing aliases still win.
+    gateway = load_brand_gateway(cur)
+    final_rows, final_errors = validate_import_rows_brands(preview_rows, gateway)
+    if final_errors:
+        raise ValueError(final_errors[0])
+    return final_rows, created
 
 
 def load_brand_gateway(cur) -> BrandGatewayCache:
@@ -318,11 +422,15 @@ def inspect_replace_by_brand_scopes(
     # Group file rows by (canonical_brand, source_brand)
     brand_to_sources: dict[str, set[str]] = {}
     for r in rows:
-        res = gateway.resolve(r.get("brand"), r.get("source_brand"))
-        if not res.is_valid:
-            continue
-        c_brand = res.canonical_brand
-        s_brand = res.source_brand
+        if r.get("canonical_brand"):
+            c_brand = str(r["canonical_brand"]).strip()
+            s_brand = str(r.get("source_brand") or c_brand).strip()
+        else:
+            res = gateway.resolve(r.get("brand"), r.get("source_brand"))
+            if not res.is_valid:
+                continue
+            c_brand = res.canonical_brand
+            s_brand = res.source_brand
         if c_brand not in brand_to_sources:
             brand_to_sources[c_brand] = set()
         if s_brand:

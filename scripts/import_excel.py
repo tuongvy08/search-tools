@@ -10,8 +10,8 @@ brand_master.name`). Mọi dòng phải được resolve qua Brand Gateway TRƯ�
 ghi bất kỳ thay đổi nào xuống DB:
   - brand trong file (alias hoặc canonical) -> canonical brand chuẩn.
   - source_brand được ghi lại (giá trị alias/brand gốc trong file).
-  - Unknown brand (không có trong brand_master/brand_aliases) làm TOÀN BỘ
-    import fail closed TRƯỚC KHI mutate DB (không import một phần).
+  - Unknown brand được báo trong --dry-run và được tự tạo trong brand_master
+    khi apply, chưa gán currency và không tự cấp quyền team.
   - `--replace-brands-from-file` không còn xóa theo brand text thô của file
     (đã lỗi thời từ khi products.brand là canonical) -- dùng cùng logic an
     toàn phạm vi (`inspect_replace_by_brand_scopes` /
@@ -53,6 +53,8 @@ from brand_gateway import (  # noqa: E402
     acquire_products_import_lock,
     inspect_replace_by_brand_scopes,
     load_brand_gateway,
+    preview_import_rows_brands,
+    register_and_resolve_import_rows,
     resolve_replace_by_brand_target_ids,
 )
 
@@ -62,38 +64,20 @@ INSERT_SQL = """
 """
 
 
-def _resolve_rows_or_die(data_rows: list[tuple], gateway) -> list[tuple]:
-    """Resolves every row's brand via the Brand Gateway BEFORE any mutation.
+def _rows_as_dicts(data_rows: list[tuple]) -> list[dict]:
+    keys = ("name", "code", "cas", "brand", "size", "ship", "price", "note")
+    return [dict(zip(keys, row)) for row in data_rows]
 
-    Fails closed (prints every unknown brand, exits 1, touches nothing) if
-    ANY row's brand cannot be resolved to a canonical brand -- an import is
-    all-or-nothing, never partially applied with some rows silently
-    skipped/dropped.
-    """
-    resolved: list[tuple] = []
-    errors: list[str] = []
 
-    for idx, row in enumerate(data_rows, start=2):
-        name, code, cas, raw_brand, size, ship, price, note = row
-        res = gateway.resolve(raw_brand)
-        if not res.is_valid:
-            errors.append(f"Dòng {idx}: {res.error_message}")
-            continue
-        resolved.append((name, code, cas, res.canonical_brand, size, ship, price, note, res.source_brand))
-
-    if errors:
-        print(
-            f"Import bị TỪ CHỐI (chưa ghi gì vào DB): {len(errors)} dòng có brand "
-            "không xác định trong Brand Master.",
-            file=sys.stderr,
+def _rows_as_insert_tuples(rows: list[dict]) -> list[tuple]:
+    return [
+        (
+            row.get("name"), row.get("code"), row.get("cas"), row.get("brand"),
+            row.get("size"), row.get("ship"), row.get("price"), row.get("note"),
+            row.get("source_brand"),
         )
-        for e in errors[:20]:
-            print(f"  - {e}", file=sys.stderr)
-        if len(errors) > 20:
-            print(f"  ... và {len(errors) - 20} lỗi khác", file=sys.stderr)
-        sys.exit(1)
-
-    return resolved
+        for row in rows
+    ]
 
 
 def main() -> None:
@@ -140,13 +124,43 @@ def main() -> None:
             )
             sys.exit(1)
 
-        # Fail closed BEFORE any mutation: resolve/validate every row first.
-        resolved_rows = _resolve_rows_or_die(data_rows, gateway)
-        scope_rows = [{"brand": r[3], "source_brand": r[8]} for r in resolved_rows]
+        import_rows = _rows_as_dicts(data_rows)
+        preview_rows, preview_errors, new_brands = preview_import_rows_brands(import_rows, gateway)
+        if preview_errors:
+            for error in preview_errors[:20]:
+                print(f"  - {error}", file=sys.stderr)
+            sys.exit(1)
+
+        if args.dry_run:
+            print(f"[DRY-RUN] Brand Gateway kiểm tra OK: {len(preview_rows)}/{len(data_rows)} dòng hợp lệ.")
+            for brand in new_brands:
+                print(f"[DRY-RUN] Brand mới: {brand['name']} ({brand['row_count']} dòng).")
+            with pg.cursor() as cur:
+                if args.replace_brands:
+                    _, scope_errors, delete_count = inspect_replace_by_brand_scopes(cur, preview_rows, gateway)
+                    if scope_errors:
+                        for error in scope_errors:
+                            print(f"  - {error}", file=sys.stderr)
+                        pg.rollback()
+                        sys.exit(1)
+                    print(f"[DRY-RUN] Sẽ xóa {delete_count} dòng hiện có theo brand/source scope.")
+                elif not args.append:
+                    cur.execute("SELECT COUNT(*) FROM products")
+                    print(f"[DRY-RUN] Sẽ xóa TOÀN BỘ {cur.fetchone()[0]} dòng hiện có.")
+                else:
+                    print("[DRY-RUN] Chế độ --append: không xóa dòng nào.")
+            print(f"[DRY-RUN] Sẽ chèn {len(preview_rows)} dòng mới. KHÔNG có gì được ghi vào DB.")
+            pg.rollback()
+            return
 
         try:
             with pg.cursor() as cur:
                 acquire_products_import_lock(cur)
+
+                resolved_dicts, created_brands = register_and_resolve_import_rows(cur, import_rows)
+                resolved_rows = _rows_as_insert_tuples(resolved_dicts)
+                scope_rows = resolved_dicts
+                gateway = load_brand_gateway(cur)
 
                 delete_target_ids: list[int] = []
                 full_delete_count = 0
@@ -167,18 +181,6 @@ def main() -> None:
                     cur.execute("SELECT COUNT(*) FROM products")
                     full_delete_count = cur.fetchone()[0]
 
-                if args.dry_run:
-                    print(f"[DRY-RUN] Brand Gateway resolve OK: {len(resolved_rows)}/{len(data_rows)} dòng hợp lệ.")
-                    if args.replace_brands:
-                        print(f"[DRY-RUN] Sẽ xóa {len(delete_target_ids)} dòng hiện có (canonical brand + source scope).")
-                    elif not args.append:
-                        print(f"[DRY-RUN] Sẽ xóa TOÀN BỘ {full_delete_count} dòng hiện có (full replace).")
-                    else:
-                        print("[DRY-RUN] Chế độ --append: không xóa dòng nào.")
-                    print(f"[DRY-RUN] Sẽ chèn {len(resolved_rows)} dòng mới. KHÔNG có gì được ghi vào DB.")
-                    pg.rollback()
-                    return
-
                 if args.replace_brands:
                     if delete_target_ids:
                         cur.execute("DELETE FROM products WHERE id = ANY(%s)", (delete_target_ids,))
@@ -192,6 +194,8 @@ def main() -> None:
             raise
 
         print(f"Đã import {len(resolved_rows)} dòng.")
+        if created_brands:
+            print(f"Đã tạo {len(created_brands)} brand mới chưa gán tiền tệ.")
     finally:
         pg.close()
 

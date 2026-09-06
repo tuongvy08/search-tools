@@ -721,6 +721,26 @@ class QuoteWorkbookExportApiTests(unittest.TestCase):
         self.assertEqual(zero.status_code, 400)
         self.assertIn("Unit_Price", zero.get_json()["error"])
 
+    def test_export_returns_stable_missing_currency_reason_after_live_recheck(self):
+        from currency_rates import CurrencyRateResolver
+
+        resolver = CurrencyRateResolver()
+        resolver.schema_ready = True
+        resolver.brand_currency = {"Brand": None}
+        missing_currency_row = (
+            1, 9, "No Currency", "NC", "CAS", "Brand", "1g", "1", "100", "",
+            "NEAT", "Được bán", "", True, None, None,
+        )
+        with patch("search._load_pricing_resolver", return_value=resolver):
+            response, _conn, export_mock = self._post(
+                [missing_currency_row], [{"product_id": 9}]
+            )
+        self.assertEqual(response.status_code, 400)
+        payload = response.get_json()
+        self.assertEqual(payload["reason_code"], "CURRENCY_MISSING")
+        self.assertIn("chưa được gán tiền tệ", payload["currency_rate_message"])
+        export_mock.assert_not_called()
+
 
 def _export_items_payload(items):
     return {"export_items": items}
@@ -1219,4 +1239,3 @@ class QuoteWorkbookSttRenderingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

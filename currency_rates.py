@@ -73,14 +73,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Callable, Optional
-import json
-import os
+import re
 
-ALLOWED_CURRENCIES = ("VND", "AUD", "USD", "EUR", "GBP")
-NON_VND_CURRENCIES = ("AUD", "USD", "EUR", "GBP")
+SEEDED_CURRENCIES = ("VND", "AUD", "USD", "EUR", "GBP")
+CURRENCY_CODE_RE = re.compile(r"^[A-Z]{3}$", re.ASCII)
 
 STATUS_OK = "OK"
-STATUS_STATIC_FALLBACK = "STATIC_FALLBACK"
 STATUS_LEGACY_SCHEMA = "LEGACY_SCHEMA"
 STATUS_BRAND_UNKNOWN = "BRAND_UNKNOWN"
 STATUS_CURRENCY_MISSING = "CURRENCY_MISSING"
@@ -92,6 +90,19 @@ STATUS_LEGACY_RATE_MISSING = "LEGACY_RATE_MISSING"
 # Exactly ONE of `brand_master`/`currency_rates` exists: a partial
 # Phase 6B2B2 migration is in progress. Fails closed for every brand.
 STATUS_CURRENCY_SCHEMA_INCOMPLETE = "CURRENCY_SCHEMA_INCOMPLETE"
+
+STATUS_LABELS_VI = {
+    STATUS_BRAND_UNKNOWN: "Giá không khả dụng",
+    STATUS_CURRENCY_MISSING: "Brand chưa được gán tiền tệ; chưa thể tính giá.",
+    STATUS_RATE_MISSING: "Tiền tệ của brand chưa có tỷ giá VND hợp lệ.",
+    STATUS_RESOLVER_LOAD_ERROR: "Giá không khả dụng",
+    STATUS_LEGACY_RATE_MISSING: "Giá không khả dụng",
+    STATUS_CURRENCY_SCHEMA_INCOMPLETE: "Giá không khả dụng",
+}
+
+
+def currency_status_label_vi(status: str) -> str:
+    return STATUS_LABELS_VI.get(status, "Giá không khả dụng")
 
 
 @dataclass(frozen=True)
@@ -111,37 +122,6 @@ def _table_exists(cur, table_name: str) -> bool:
     return bool(row and row[0])
 
 
-def load_static_currency_fallback(root_path: str) -> dict[str, Decimal]:
-    """Loads the currency-keyed fallback rates from `static/exchange_rates.json`.
-
-    Post-6B2B2 this file holds at most the 5 approved currency codes (no
-    longer 35 duplicated per-brand entries). Only used as a defensive
-    fallback when `currency_rates` exists but is missing a row for a given
-    currency (should not happen after migration_018's seed, but the design
-    explicitly calls for a logged, non-silent fallback instead of a crash
-    or an implicit 1.0).
-    """
-    path = os.path.join(root_path, "static", "exchange_rates.json")
-    out: dict[str, Decimal] = {}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            raw = json.load(f) or {}
-        for k, v in raw.items():
-            code = str(k).strip().upper()
-            if code not in ALLOWED_CURRENCIES:
-                continue
-            try:
-                dec = Decimal(str(v))
-            except Exception:
-                continue
-            if dec <= 0:
-                continue
-            out[code] = dec
-    except Exception:
-        pass
-    return out
-
-
 class CurrencyRateResolver:
     """Per-request cache of brand->currency and currency->rate maps."""
 
@@ -149,7 +129,6 @@ class CurrencyRateResolver:
         self.schema_ready: bool = False
         self.brand_currency: dict[str, str] = {}
         self.currency_rate: dict[str, Decimal] = {}
-        self.static_fallback: dict[str, Decimal] = {}
         self.legacy_rate_map: dict[str, float] = {}
         self.warnings: list[str] = []
         # Set only when `brand_master`/`currency_rates` are BOTH confirmed to
@@ -174,8 +153,6 @@ class CurrencyRateResolver:
         legacy_rate_map: Optional[dict] = None,
         legacy_rate_map_loader: Optional[Callable[[], dict]] = None,
     ) -> "CurrencyRateResolver":
-        self.static_fallback = load_static_currency_fallback(root_path)
-
         brand_master_exists = False
         currency_rates_exists = False
         try:
@@ -344,8 +321,7 @@ class CurrencyRateResolver:
                 source="legacy_exchange_rates",
             )
 
-        currency = self.brand_currency.get(bkey)
-        if not currency:
+        if bkey not in self.brand_currency:
             return RateResolution(
                 requested_brand=bkey,
                 canonical_brand=None,
@@ -356,34 +332,20 @@ class CurrencyRateResolver:
                 source="none",
             )
 
-        rate = self.currency_rate.get(currency)
-        source = "currency_rates"
-        if rate is None:
-            rate = self.static_fallback.get(currency)
-            source = "static_fallback"
-            if rate is not None:
-                self.warnings.append(
-                    f"Currency rate fallback used: currency={currency} brand={bkey!r} "
-                    f"-- currency_rates has no row, using static/exchange_rates.json={rate}"
-                )
-
-        if rate is None or rate <= 0:
+        currency = self.brand_currency[bkey]
+        if not currency:
             return RateResolution(
                 requested_brand=bkey,
                 canonical_brand=bkey,
-                currency_code=currency,
+                currency_code=None,
                 rate=None,
                 is_valid=False,
-                status=STATUS_RATE_MISSING,
+                status=STATUS_CURRENCY_MISSING,
                 source="none",
             )
 
-        # Extra defense-in-depth mirroring the DB CHECK constraint: only VND
-        # may ever resolve to a rate of exactly 1. A non-VND currency
-        # resolving to 1 almost certainly means a bug upstream (e.g. an
-        # accidental default leaking through) -- fail closed instead of
-        # quoting a wrong price.
-        if currency != "VND" and Decimal(rate) == 1:
+        rate = self.currency_rate.get(currency)
+        if rate is None or rate <= 0:
             return RateResolution(
                 requested_brand=bkey,
                 canonical_brand=bkey,
@@ -400,8 +362,8 @@ class CurrencyRateResolver:
             currency_code=currency,
             rate=Decimal(rate),
             is_valid=True,
-            status=STATUS_OK if source == "currency_rates" else STATUS_STATIC_FALLBACK,
-            source=source,
+            status=STATUS_OK,
+            source="currency_rates",
         )
 
     def get(self, raw_brand) -> Optional[Decimal]:
@@ -430,8 +392,15 @@ class CurrencyRateError(ValueError):
     pass
 
 
+def normalize_currency_code(currency_code: str) -> str:
+    code = (currency_code or "").strip().upper()
+    if not CURRENCY_CODE_RE.fullmatch(code):
+        raise CurrencyRateError("Mã tiền tệ phải gồm đúng 3 chữ cái ASCII viết hoa, ví dụ JPY.")
+    return code
+
+
 def fetch_currency_rate_rows(conn) -> list[dict]:
-    """Returns the (at most 5) currency rows for the admin currency table,
+    """Returns all dynamic currency rows for the admin currency table,
     each with the count of active canonical brands currently using it.
     """
     with conn.cursor() as cur:
@@ -479,9 +448,7 @@ def apply_currency_rate_update(conn, currency_code: str, new_rate: Decimal, acto
     first so the admin sees a clear Vietnamese message instead of a raw
     IntegrityError.
     """
-    code = (currency_code or "").strip().upper()
-    if code not in ALLOWED_CURRENCIES:
-        raise CurrencyRateError(f"Currency không hợp lệ: '{currency_code}'.")
+    code = normalize_currency_code(currency_code)
     if code == "VND":
         raise CurrencyRateError("VND luôn cố định bằng 1 và không thể chỉnh sửa.")
     if new_rate is None or new_rate <= 0:
@@ -515,6 +482,44 @@ def apply_currency_rate_update(conn, currency_code: str, new_rate: Decimal, acto
     return new_rate
 
 
+def apply_currency_create(
+    conn,
+    currency_code: str,
+    rate_vnd: Decimal,
+    actor_user_id: Optional[int],
+    source: str = "ADMIN_UI",
+) -> str:
+    """Create one dynamic currency and its initial audit row atomically."""
+    code = normalize_currency_code(currency_code)
+    if code == "VND" and rate_vnd != 1:
+        raise CurrencyRateError("VND luôn cố định bằng 1.")
+    if rate_vnd is None or rate_vnd <= 0:
+        raise CurrencyRateError("Tỷ giá phải là số dương lớn hơn 0.")
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO currency_rates
+                (currency_code, rate_vnd, updated_at, updated_by, update_source)
+            VALUES (%s, %s, NOW(), %s, %s)
+            ON CONFLICT (currency_code) DO NOTHING
+            RETURNING currency_code
+            """,
+            (code, rate_vnd, actor_user_id, source),
+        )
+        if cur.fetchone() is None:
+            raise CurrencyRateError(f"Currency '{code}' đã tồn tại.")
+        cur.execute(
+            """
+            INSERT INTO currency_rate_history
+                (currency_code, old_rate, new_rate, actor_user_id, source)
+            VALUES (%s, NULL, %s, %s, %s)
+            """,
+            (code, rate_vnd, actor_user_id, source),
+        )
+    return code
+
+
 def fetch_brand_currency_rows(conn, search_query: Optional[str] = None, currency_filter: Optional[str] = None) -> list[dict]:
     """Returns canonical brand rows (id, name, currency_code) for the brand
     mapping admin table, optionally filtered by name substring / currency.
@@ -526,9 +531,11 @@ def fetch_brand_currency_rows(conn, search_query: Optional[str] = None, currency
         params.append(f"%{search_query.strip()}%")
     if currency_filter:
         code = currency_filter.strip().upper()
-        if code in ALLOWED_CURRENCIES:
+        if CURRENCY_CODE_RE.fullmatch(code):
             sql += " AND currency_code = %s"
             params.append(code)
+        elif code == "__UNASSIGNED__":
+            sql += " AND currency_code IS NULL"
     sql += " ORDER BY name ASC"
     with conn.cursor() as cur:
         cur.execute(sql, params)
@@ -543,11 +550,12 @@ def apply_brand_currency_update(conn, brand_id: int, new_currency_code: str, act
     immediately for the next read (no product rows are touched -- pricing
     is resolved live from `brand_master.currency_code` + `currency_rates`).
     """
-    code = (new_currency_code or "").strip().upper()
-    if code not in ALLOWED_CURRENCIES:
-        raise CurrencyRateError(f"Currency không hợp lệ: '{new_currency_code}'.")
+    code = normalize_currency_code(new_currency_code)
 
     with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM currency_rates WHERE currency_code = %s", (code,))
+        if cur.fetchone() is None:
+            raise CurrencyRateError(f"Currency '{code}' chưa tồn tại trong Currency Master.")
         cur.execute(
             "SELECT id, currency_code FROM brand_master WHERE id = %s FOR UPDATE",
             (brand_id,),

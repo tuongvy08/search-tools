@@ -222,6 +222,11 @@ def apply_brand_master_and_currency_migrations(cur):
         cur.execute(_read_sql(fname))
 
 
+def apply_dynamic_brand_currency_migration(cur):
+    """Apply Phase 6B2B3 migration_019 after 017/018."""
+    cur.execute(_read_sql("migration_019_dynamic_brand_currency.sql"))
+
+
 def apply_sql_file_statement_by_statement(cur, sql_path):
     """Execute a `.sql` file one statement per `cur.execute()` call, instead
     of the whole file text in one call.

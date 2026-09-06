@@ -1,7 +1,7 @@
 """Focused tests for Phase 6B2B2 Section 6 (Legacy CLI blocker).
 
 1. `scripts/import_excel.py` upgraded to use the Brand Gateway:
-   - unknown brand fails the WHOLE import before any DB mutation.
+   - unknown brand is registered atomically, with no team grant.
    - alias -> canonical resolution + `source_brand` written correctly.
    - `--dry-run` resolves/counts but writes nothing.
    - `--replace-brands-from-file` refuses to wipe an entire canonical brand
@@ -34,7 +34,13 @@ from dotenv import load_dotenv
 from openpyxl import Workbook
 
 from brand_gateway import LegacyMigrationBlockedError, refuse_if_canonical_brand_master_present
-from pg_temp_db import create_full_schema_temp_db, drop_temp_db, probe_postgres_reachable
+from pg_temp_db import (
+    apply_brand_master_and_currency_migrations,
+    apply_dynamic_brand_currency_migration,
+    create_full_schema_temp_db,
+    drop_temp_db,
+    probe_postgres_reachable,
+)
 
 load_dotenv(dotenv_path=".env")
 
@@ -89,7 +95,8 @@ class ImportExcelBrandGatewayCompatibilityTests(unittest.TestCase):
         conn = psycopg2.connect(cls.dsn)
         conn.autocommit = True
         with conn.cursor() as cur:
-            cur.execute(_MIGRATION_017_PATH.read_text(encoding="utf-8"))
+            apply_brand_master_and_currency_migrations(cur)
+            apply_dynamic_brand_currency_migration(cur)
         conn.close()
         cls._env_patch = mock.patch.dict(os.environ, {"DATABASE_URL": cls.dsn})
         cls._env_patch.start()
@@ -124,7 +131,7 @@ class ImportExcelBrandGatewayCompatibilityTests(unittest.TestCase):
         finally:
             sys.argv = old_argv
 
-    def test_unknown_brand_fails_closed_before_any_mutation(self):
+    def test_unknown_brand_is_registered_atomically(self):
         path = self._xlsx_path()
         _write_xlsx(
             path,
@@ -135,10 +142,23 @@ class ImportExcelBrandGatewayCompatibilityTests(unittest.TestCase):
             ],
         )
         exit_code = self._run_main([path])
-        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(exit_code, 0)
         with self.conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM products")
-            self.assertEqual(cur.fetchone()[0], 0, "Unknown brand must block the ENTIRE import, not just that row")
+            self.assertEqual(cur.fetchone()[0], 2)
+            cur.execute(
+                "SELECT currency_code FROM brand_master "
+                "WHERE normalized_name = 'COMPLETELY UNKNOWN BRAND XYZ'"
+            )
+            self.assertIsNone(cur.fetchone()[0])
+            cur.execute(
+                "SELECT source_brand FROM products WHERE code='C-2'"
+            )
+            self.assertEqual(cur.fetchone()[0], "Completely Unknown Brand Xyz")
+            cur.execute(
+                "SELECT COUNT(*) FROM team_brands WHERE brand='Completely Unknown Brand Xyz'"
+            )
+            self.assertEqual(cur.fetchone()[0], 0)
 
     def test_alias_resolves_to_canonical_and_writes_source_brand(self):
         path = self._xlsx_path()

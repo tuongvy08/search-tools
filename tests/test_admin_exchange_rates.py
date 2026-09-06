@@ -31,6 +31,7 @@ from auth_test_helpers import start_auth_db_patch
 from currency_rates import load_currency_rate_resolver
 from pg_temp_db import (
     apply_brand_master_and_currency_migrations,
+    apply_dynamic_brand_currency_migration,
     create_full_schema_temp_db,
     drop_temp_db,
     probe_postgres_reachable,
@@ -107,6 +108,7 @@ class AdminCurrencyRatesIntegrationTests(unittest.TestCase):
             cls.conn.autocommit = True
             with cls.conn.cursor() as cur:
                 apply_brand_master_and_currency_migrations(cur)
+                apply_dynamic_brand_currency_migration(cur)
                 cur.execute(
                     "INSERT INTO teams (name, ip_policy) VALUES ('Currency Rates Test Team', 'INHERIT') RETURNING id"
                 )
@@ -137,6 +139,9 @@ class AdminCurrencyRatesIntegrationTests(unittest.TestCase):
         self.client = search.app.test_client()
         start_auth_db_patch(self)
         with self.conn.cursor() as cur:
+            cur.execute("DELETE FROM brand_master WHERE normalized_name = 'DYNAMIC ADMIN BRAND'")
+            cur.execute("DELETE FROM currency_rate_history WHERE currency_code = 'JPY'")
+            cur.execute("DELETE FROM currency_rates WHERE currency_code = 'JPY'")
             cur.execute(
                 """
                 UPDATE currency_rates SET rate_vnd = CASE currency_code
@@ -219,6 +224,72 @@ class AdminCurrencyRatesIntegrationTests(unittest.TestCase):
         self.assertIn('name="csrf_token"', html)
         self.assertIn('id="brandFilter"', html)
         self.assertIn('id="currencyFilter"', html)
+
+    def test_create_dynamic_currency_writes_initial_history(self):
+        csrf = self._auth_session(is_admin=True)
+        resp = self.client.post(
+            "/admin/exchange-rates",
+            data={
+                "action": "create_currency",
+                "currency_code": "jpy",
+                "rate": "180",
+                "csrf_token": csrf,
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT rate_vnd FROM currency_rates WHERE currency_code = 'JPY'")
+            self.assertEqual(cur.fetchone()[0], Decimal("180"))
+            cur.execute(
+                "SELECT old_rate, new_rate, actor_user_id, source "
+                "FROM currency_rate_history WHERE currency_code='JPY' ORDER BY id DESC LIMIT 1"
+            )
+            self.assertEqual(cur.fetchone(), (None, Decimal("180"), self.admin_user_id, "ADMIN_UI"))
+
+    def test_create_currency_rejects_bad_code_and_staff(self):
+        csrf = self._auth_session(is_admin=True)
+        resp = self.client.post(
+            "/admin/exchange-rates",
+            data={"action": "create_currency", "currency_code": "JP1", "rate": "180", "csrf_token": csrf},
+        )
+        self.assertEqual(resp.status_code, 200)
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM currency_rates WHERE currency_code = 'JP1'")
+            self.assertEqual(cur.fetchone()[0], 0)
+
+        csrf = self._auth_session(is_admin=False)
+        resp = self.client.post(
+            "/admin/exchange-rates",
+            data={"action": "create_currency", "currency_code": "JPY", "rate": "180", "csrf_token": csrf},
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_unconfigured_brand_listed_and_assignable_to_dynamic_currency(self):
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO brand_master (name, normalized_name, currency_code) "
+                "VALUES ('Dynamic Admin Brand', 'DYNAMIC ADMIN BRAND', NULL) RETURNING id"
+            )
+            brand_id = cur.fetchone()[0]
+            cur.execute("INSERT INTO currency_rates (currency_code, rate_vnd) VALUES ('JPY', 180)")
+
+        csrf = self._auth_session(is_admin=True)
+        html = self.client.get("/admin/exchange-rates").get_data(as_text=True)
+        self.assertIn("Dynamic Admin Brand", html)
+        self.assertIn("Chưa gán", html)
+        resp = self.client.post(
+            "/admin/exchange-rates",
+            data={
+                "action": "update_brand_currency",
+                "brand_id": str(brand_id),
+                "currency_code": "JPY",
+                "csrf_token": csrf,
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT currency_code FROM brand_master WHERE id=%s", (brand_id,))
+            self.assertEqual(cur.fetchone()[0], "JPY")
 
     # --- update_rate Tests ---
 

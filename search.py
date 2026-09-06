@@ -32,16 +32,19 @@ from db import get_connection
 from brand_gateway import (
     load_brand_gateway,
     validate_import_rows_brands,
+    preview_import_rows_brands,
+    register_and_resolve_import_rows,
     resolve_product_candidates,
     inspect_replace_by_brand_scopes,
     resolve_replace_by_brand_target_ids,
     acquire_products_import_lock,
 )
 from currency_rates import (
-    ALLOWED_CURRENCIES,
     CurrencyRateError,
     apply_brand_currency_update,
+    apply_currency_create,
     apply_currency_rate_update,
+    currency_status_label_vi,
     fetch_brand_currency_rows,
     fetch_currency_rate_rows,
     load_currency_rate_resolver,
@@ -162,6 +165,15 @@ QUOTE_TEMPLATE_MAPPING_SNAPSHOT = {
 
 class QuoteTemplateError(ValueError):
     pass
+
+
+class QuotePricingUnavailableError(ValueError):
+    """Stable export error when live currency configuration blocks pricing."""
+
+    def __init__(self, selection_ord: int, reason_code: str):
+        self.reason_code = reason_code
+        self.currency_rate_message = currency_status_label_vi(reason_code)
+        super().__init__(f"Selection {selection_ord}: {self.currency_rate_message}")
 
 
 MAX_EXCHANGE_RATE = Decimal("1000000000")
@@ -358,7 +370,7 @@ def _load_pricing_resolver(conn):
     return resolver
 
 
-def _compute_unit_price(price, ship, brand, rate_map) -> tuple[float, str, bool]:
+def _compute_unit_price_details(price, ship, brand, rate_map) -> tuple[float, str, bool, Optional[str]]:
     """Computes (unit_price_value, display_string, rate_valid).
 
     `unit_price_value` is 0.0 when the currency rate could not be resolved
@@ -379,10 +391,16 @@ def _compute_unit_price(price, ship, brand, rate_map) -> tuple[float, str, bool]
 
     resolution = rate_map.resolve((brand or "").strip())
     if not resolution.is_valid or resolution.rate is None:
-        return 0.0, UNAVAILABLE_PRICE_LABEL, False
+        return 0.0, currency_status_label_vi(resolution.status), False, resolution.status
 
     unit_price = round(price_f * ship_f * float(resolution.rate), -3)
-    return unit_price, "{:,.0f}".format(unit_price), True
+    return unit_price, "{:,.0f}".format(unit_price), True, None
+
+
+def _compute_unit_price(price, ship, brand, rate_map) -> tuple[float, str, bool]:
+    """Backward-compatible pricing tuple used by existing internal callers."""
+    value, display, valid, _status = _compute_unit_price_details(price, ship, brand, rate_map)
+    return value, display, valid
 
 
 def _visibility_sql(alias: str):
@@ -517,7 +535,9 @@ def _product_row_to_result(
     manual_compliance=None,
     manual_compliance_note=None,
 ) -> dict:
-    unit_price, unit_price_display, rate_valid = _compute_unit_price(price, ship, brand, rate_map)
+    unit_price, unit_price_display, rate_valid, rate_status = _compute_unit_price_details(
+        price, ship, brand, rate_map
+    )
     resolved = resolve_compliance_precedence(
         brand_manual_enabled=bool(brand_manual_enabled),
         manual_compliance=manual_compliance,
@@ -534,6 +554,8 @@ def _product_row_to_result(
         "Size": size or "",
         "Unit_Price": unit_price_display,
         "Unit_Price_Available": rate_valid,
+        "Currency_Rate_Status": rate_status,
+        "Currency_Rate_Message": currency_status_label_vi(rate_status) if rate_status else "",
         "Note": note or "",
         "Compliance_Status": resolved["compliance"],
         "Compliance_Note": resolved["compliance_note"],
@@ -1127,7 +1149,7 @@ def _quote_candidate_from_row(row: tuple, rate_map) -> dict:
     # if it were a real price -- show the same Vietnamese "unavailable"
     # label Search/batch already use instead.
     if currency_rate_status is not None:
-        unit_price_display = UNAVAILABLE_PRICE_LABEL
+        unit_price_display = currency_status_label_vi(currency_rate_status)
     else:
         unit_price_display = "{:,.0f}".format(unit_price)
     return {
@@ -1147,6 +1169,10 @@ def _quote_candidate_from_row(row: tuple, rate_map) -> dict:
         "compliance_css": resolved["compliance_css"],
         "eligible": eligible,
         "ineligible_reason": ineligible_reason,
+        "currency_rate_status": currency_rate_status,
+        "currency_rate_message": (
+            currency_status_label_vi(currency_rate_status) if currency_rate_status else ""
+        ),
         "warnings": warnings,
     }
 
@@ -2782,6 +2808,7 @@ def admin_imports_preview():
         )
 
     deletable_count = None
+    new_brands = []
     if dataset == "products":
         try:
             validate_product_import_rows(rows, header_cols)
@@ -2794,7 +2821,7 @@ def admin_imports_preview():
             with conn.cursor() as cur:
                 gateway = load_brand_gateway(cur)
                 if gateway.table_exists:
-                    resolved_rows, brand_errors = validate_import_rows_brands(rows, gateway)
+                    resolved_rows, brand_errors, new_brands = preview_import_rows_brands(rows, gateway)
                     if brand_errors:
                         sample_err = "; ".join(brand_errors[:3])
                         if len(brand_errors) > 3:
@@ -2802,7 +2829,7 @@ def admin_imports_preview():
                         return redirect(url_for("admin_imports", err=f"Brand không hợp lệ: {sample_err}"))
 
                     if mode == "replace_by_brand":
-                        _, scope_errors, deletable_count = inspect_replace_by_brand_scopes(cur, rows, gateway)
+                        _, scope_errors, deletable_count = inspect_replace_by_brand_scopes(cur, resolved_rows, gateway)
                         if scope_errors:
                             return redirect(url_for("admin_imports", err="; ".join(scope_errors)))
                     elif mode == "upsert":
@@ -2829,6 +2856,7 @@ def admin_imports_preview():
         "row_count": len(rows),
         "sample_rows": rows[:10],
         "hints": _preview_hints(dataset, mode, rows, deletable_count=deletable_count, ambiguous_count=ambiguous_preview_count),
+        "new_brands": new_brands,
         "preview_deletable_count": deletable_count,
     }
     return redirect(url_for("admin_imports", preview=token))
@@ -2841,6 +2869,8 @@ def admin_imports_apply():
         return guard
     if request.method != "POST":
         return redirect(url_for("admin_imports", err="Vui lòng bấm 'Xem trước' rồi mới 'Xác nhận ghi vào database'."))
+    if not session_security.verify_csrf_token(request.form.get("csrf_token", "")):
+        return "CSRF token không hợp lệ hoặc đã hết hạn.", 400
 
     token = request.form.get("preview_token")
     data = IMPORT_PREVIEWS.pop(token, None)
@@ -2861,6 +2891,7 @@ def admin_imports_apply():
         with conn:
             with conn.cursor() as cur:
                 ambiguous_count = 0
+                created_brands = []
                 if dataset == "products":
                     # MUST be first: serialize with every other product-mutating
                     # import path (bulk apply + quick-product upsert/delete) before
@@ -2875,10 +2906,8 @@ def admin_imports_apply():
 
                     gateway = load_brand_gateway(cur)
                     if gateway.table_exists:
-                        resolved_rows, brand_errors = validate_import_rows_brands(rows, gateway)
-                        if brand_errors:
-                            raise ValueError(f"Brand không hợp lệ: {brand_errors[0]}")
-                        rows_to_process = resolved_rows
+                        rows_to_process, created_brands = register_and_resolve_import_rows(cur, rows)
+                        gateway = load_brand_gateway(cur)
                     else:
                         rows_to_process = rows
 
@@ -2888,7 +2917,7 @@ def admin_imports_apply():
                             raise ValueError("Mode replace_by_brand yêu cầu ít nhất 1 brand hợp lệ trong file.")
 
                         if gateway.table_exists:
-                            brand_to_sources, scope_errors, _preview_count = inspect_replace_by_brand_scopes(cur, rows, gateway)
+                            brand_to_sources, scope_errors, _preview_count = inspect_replace_by_brand_scopes(cur, rows_to_process, gateway)
                             if scope_errors:
                                 raise ValueError(scope_errors[0])
 
@@ -3120,6 +3149,8 @@ def admin_imports_apply():
                 meta_payload = {"preview_token": token}
                 if ambiguous_count > 0:
                     meta_payload["ambiguous_count"] = ambiguous_count
+                if created_brands:
+                    meta_payload["created_brands"] = [b["name"] for b in created_brands]
 
                 _insert_import_job(
                     cur,
@@ -3136,6 +3167,8 @@ def admin_imports_apply():
                 )
 
         msg = f"Import OK: inserted={inserted}, updated={updated}, deleted={deleted}"
+        if created_brands:
+            msg += f"; đã tạo {len(created_brands)} brand mới chưa gán tiền tệ"
         if ambiguous_count > 0:
             msg += f" (Bỏ qua {ambiguous_count} bản ghi ambiguous để chống ghi đè nhầm)"
         return redirect(url_for("admin_imports", msg=msg))
@@ -3251,20 +3284,17 @@ def _parse_is_active(raw) -> bool:
     return s in {"1", "true", "yes", "y", "on"}
 
 
-def _upsert_single_product(cur, row: dict) -> tuple[str, str]:
+def _upsert_single_product(cur, row: dict) -> tuple[str, str, list[dict]]:
     """UPSERT 1 dòng products theo cặp code + brand (qua Brand Gateway, an toàn va chạm)."""
     raw_code = _norm(row.get("code"))
     raw_brand = _norm(row.get("brand"))
     if not raw_code or not raw_brand:
         raise ValueError("Trường code và brand là bắt buộc.")
 
-    gateway = load_brand_gateway(cur)
-    res = gateway.resolve(raw_brand, row.get("source_brand"))
-    if not res.is_valid:
-        raise ValueError(res.error_message)
-
-    canonical_brand = res.canonical_brand
-    source_brand = res.source_brand
+    resolved_rows, created_brands = register_and_resolve_import_rows(cur, [dict(row)])
+    resolved_row = resolved_rows[0]
+    canonical_brand = resolved_row["brand"]
+    source_brand = resolved_row["source_brand"]
     size = _norm(row.get("size"))
 
     vals = (
@@ -3299,7 +3329,7 @@ def _upsert_single_product(cur, row: dict) -> tuple[str, str]:
             source_brand=source_brand,
             has_source_brand=has_source_brand,
         )
-        return "updated", label
+        return "updated", label, created_brands
 
     _insert_product_row(
         cur,
@@ -3310,7 +3340,7 @@ def _upsert_single_product(cur, row: dict) -> tuple[str, str]:
         source_brand=source_brand,
         has_source_brand=has_source_brand,
     )
-    return "inserted", label
+    return "inserted", label, created_brands
 
 
 def _upsert_single_regulatory_rule(cur, row: dict) -> tuple[str, str]:
@@ -3470,11 +3500,20 @@ def _quick_edit_json_response(ok: bool, message: str, action: str = "", label: s
     return jsonify({"ok": ok, "message": message, "action": action, "label": label}), status
 
 
+def _require_quick_edit_csrf():
+    if session_security.verify_csrf_token(request.values.get("csrf_token", "")):
+        return None
+    return _quick_edit_json_response(False, "CSRF token không hợp lệ hoặc đã hết hạn.", status=400)
+
+
 @app.route("/admin/imports/quick-product", methods=["POST"])
 def admin_imports_quick_product():
     guard = _require_admin_api()
     if guard is not None:
         return guard
+    csrf_guard = _require_quick_edit_csrf()
+    if csrf_guard is not None:
+        return csrf_guard
 
     actor = _current_actor()
     conn = get_connection()
@@ -3485,7 +3524,7 @@ def admin_imports_quick_product():
                 # apply + quick-product delete) so concurrent single-row edits can
                 # never race a bulk import's candidate scan/mutation.
                 acquire_products_import_lock(cur)
-                action, label = _upsert_single_product(cur, request.values)
+                action, label, created_brands = _upsert_single_product(cur, request.values)
                 inserted = 1 if action == "inserted" else 0
                 updated = 1 if action == "updated" else 0
                 _insert_import_job(
@@ -3499,12 +3538,18 @@ def admin_imports_quick_product():
                     updated_count=updated,
                     deleted_count=0,
                     created_by=actor,
-                    meta={"label": label, "code": _norm(request.values.get("code")), "brand": _norm(request.values.get("brand"))},
+                    meta={
+                        "label": label,
+                        "code": _norm(request.values.get("code")),
+                        "brand": _norm(request.values.get("brand")),
+                        "created_brands": [b["name"] for b in created_brands],
+                    },
                 )
         verb = "cập nhật" if action == "updated" else "thêm mới"
         return _quick_edit_json_response(
             True,
-            f"Đã {verb} thành công dữ liệu của {label}",
+            f"Đã {verb} thành công dữ liệu của {label}"
+            + ("; brand mới đã được tạo và đang chờ gán tiền tệ" if created_brands else ""),
             action=action,
             label=label,
         )
@@ -3521,6 +3566,9 @@ def admin_imports_quick_rule():
     guard = _require_admin_api()
     if guard is not None:
         return guard
+    csrf_guard = _require_quick_edit_csrf()
+    if csrf_guard is not None:
+        return csrf_guard
 
     actor = _current_actor()
     conn = get_connection()
@@ -3563,6 +3611,9 @@ def admin_imports_quick_product_delete():
     guard = _require_admin_api()
     if guard is not None:
         return guard
+    csrf_guard = _require_quick_edit_csrf()
+    if csrf_guard is not None:
+        return csrf_guard
 
     actor = _current_actor()
     conn = get_connection()
@@ -3605,6 +3656,9 @@ def admin_imports_quick_rule_delete():
     guard = _require_admin_api()
     if guard is not None:
         return guard
+    csrf_guard = _require_quick_edit_csrf()
+    if csrf_guard is not None:
+        return csrf_guard
 
     actor = _current_actor()
     conn = get_connection()
@@ -3787,10 +3841,10 @@ def _currency_updated_at_display(updated_at) -> str:
 
 @app.route("/admin/exchange-rates", methods=["GET", "POST"])
 def admin_exchange_rates():
-    """Phase 6B2B2: Central Currency Rates + Brand -> Currency mapping.
+    """Dynamic Currency Master + Brand -> Currency mapping.
 
     Single source of truth going forward: `brand_master.currency_code` maps
-    each of the 35 canonical brands to one of 5 currencies; `currency_rates`
+    each canonical brand to an optional configured currency; `currency_rates`
     holds exactly one current VND rate per currency. Updating a currency's
     rate here immediately changes the effective price for every brand that
     uses it, on the very next read -- no per-brand rate rows, no per-product
@@ -3826,6 +3880,19 @@ def admin_exchange_rates():
                     with conn:
                         apply_currency_rate_update(conn, currency_code, rate_dec, actor_user_id, source="ADMIN_UI")
                     msg = f"Đã cập nhật tỷ giá {currency_code} = {rate_dec:,}."
+                except (ValueError, CurrencyRateError) as ve:
+                    err = str(ve)
+
+            elif action == "create_currency":
+                currency_code = (request.form.get("currency_code") or "").strip().upper()
+                rate_raw = (request.form.get("rate") or "").strip()
+                try:
+                    rate_dec = parse_exchange_rate(rate_raw)
+                    with conn:
+                        code = apply_currency_create(
+                            conn, currency_code, rate_dec, actor_user_id, source="ADMIN_UI"
+                        )
+                    msg = f"Đã thêm tiền tệ {code} với tỷ giá {rate_dec:,} VND."
                 except (ValueError, CurrencyRateError) as ve:
                     err = str(ve)
 
@@ -3884,7 +3951,8 @@ def admin_exchange_rates():
         "admin_exchange_rates.html",
         currency_rows=currency_rows,
         brand_rows=brand_rows,
-        allowed_currencies=ALLOWED_CURRENCIES,
+        allowed_currencies=[r["currency_code"] for r in currency_rows],
+        unconfigured_brand_count=sum(1 for b in brand_rows if not b["currency_code"]),
         message=msg or request.args.get("msg"),
         error=err or request.args.get("err"),
     )
@@ -4475,7 +4543,9 @@ def search_products():
                 compliance_status,
                 compliance_note,
             ) = product
-            unit_price, formatted_unit_price, _rate_valid = _compute_unit_price(price, ship, brand, rate_map)
+            unit_price, formatted_unit_price, _rate_valid, rate_status = _compute_unit_price_details(
+                price, ship, brand, rate_map
+            )
             resolved = resolve_compliance_precedence(
                 brand_manual_enabled=bool(brand_manual_enabled),
                 manual_compliance=manual_compliance,
@@ -4494,6 +4564,8 @@ def search_products():
                     "Size": size,
                     "Unit_Price": formatted_unit_price,
                     "Unit_Price_Available": _rate_valid,
+                    "Currency_Rate_Status": rate_status,
+                    "Currency_Rate_Message": currency_status_label_vi(rate_status) if rate_status else "",
                     "Note": note,
                     "Compliance_Status": resolved["compliance"],
                     "Compliance_Note": resolved["compliance_note"],
@@ -4780,9 +4852,15 @@ def find_code_batch():
                 price_f = None
 
             if ship_f is not None and price_f is not None:
-                _unit_price, unit_price_display, rate_valid = _compute_unit_price(price_f, ship_f, brand, rate_map)
+                _unit_price, unit_price_display, rate_valid, rate_status = _compute_unit_price_details(
+                    price_f, ship_f, brand, rate_map
+                )
                 results[idx]["Unit_Price"] = unit_price_display
                 results[idx]["Unit_Price_Available"] = rate_valid
+                results[idx]["Currency_Rate_Status"] = rate_status
+                results[idx]["Currency_Rate_Message"] = (
+                    currency_status_label_vi(rate_status) if rate_status else ""
+                )
 
         return jsonify({"results": results})
     finally:
@@ -5568,6 +5646,10 @@ def _quote_export_products(conn, selections: list[dict]) -> list[dict]:
             raise ValueError(f"Selection {selection['ord']} không visible hoặc product_id không tồn tại.")
         if candidate.get("ineligible_reason") == "COMPLIANCE_BLOCKED":
             raise ValueError(f"Selection {selection['ord']} bị chặn compliance: {candidate.get('Compliance')}.")
+        if candidate.get("currency_rate_status"):
+            raise QuotePricingUnavailableError(
+                selection["ord"], candidate["currency_rate_status"]
+            )
         if not candidate.get("eligible") or float(candidate.get("Unit_Price_Value") or 0) <= 0:
             raise ValueError(f"Selection {selection['ord']} không có Unit_Price hợp lệ.")
         products.append(candidate)
@@ -5751,6 +5833,12 @@ def quote_assistant_workbook_export():
         exported = export_quick_quote_workbook(raw, products)
     except QuoteTemplateError as e:
         return _quote_json_error(str(e), status=409)
+    except QuotePricingUnavailableError as e:
+        return jsonify({
+            "error": str(e),
+            "reason_code": e.reason_code,
+            "currency_rate_message": e.currency_rate_message,
+        }), 400
     except Exception as e:
         if _is_table_missing_error(e):
             app.logger.warning("quote_assistant_workbook_export: quote_templates table not found (migration_013 missing)")

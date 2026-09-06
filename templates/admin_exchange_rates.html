@@ -199,14 +199,25 @@
       <div id="statusAlertText">{% if error %}{{ error }}{% elif message %}{{ message }}{% endif %}</div>
     </div>
 
-    <!-- Panel 1: Currency Rates (max 5 rows) -->
+    <!-- Panel 1: Dynamic Currency Master -->
     <div class="panel">
       <div class="panel-head">
         <div>
           <h3 class="panel-title"><i class="fas fa-coins"></i> Bảng tỷ giá tiền tệ</h3>
-          <p class="panel-sub">VND luôn cố định = 1. AUD/USD/EUR/GBP chỉnh trực tiếp bên dưới.</p>
+          <p class="panel-sub">VND luôn cố định = 1. Có thể thêm mã tiền tệ ISO 3 chữ cái và chỉnh tỷ giá trực tiếp.</p>
         </div>
       </div>
+      <form method="post" action="/admin/exchange-rates" class="rate-edit-form" style="padding:14px 16px;border-bottom:1px solid #e2e8f0;display:flex;gap:10px;flex-wrap:wrap;align-items:end;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="create_currency">
+        <label>Mã tiền tệ
+          <input type="text" name="currency_code" pattern="[A-Za-z]{3}" maxlength="3" placeholder="JPY" required autocomplete="off" style="text-transform:uppercase;">
+        </label>
+        <label>Tỷ giá VND
+          <input type="text" name="rate" inputmode="decimal" placeholder="180" required autocomplete="off">
+        </label>
+        <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-plus"></i> Thêm tiền tệ</button>
+      </form>
       <div class="table-wrap">
         <table class="data-table">
           <thead>
@@ -256,7 +267,7 @@
       </div>
     </div>
 
-    <!-- Panel 2: Brand -> Currency mapping (35 canonical brands) -->
+    <!-- Panel 2: Brand -> Currency mapping -->
     <div class="panel">
       <div class="panel-head">
         <div class="toolbar">
@@ -266,6 +277,7 @@
           </div>
           <select id="currencyFilter" class="form-control-inline" aria-label="Lọc theo currency">
             <option value="">Tất cả currency</option>
+            <option value="__UNASSIGNED__">Chưa gán tiền tệ ({{ unconfigured_brand_count }})</option>
             {% for c in allowed_currencies %}
               <option value="{{ c }}">{{ c }}</option>
             {% endfor %}
@@ -284,15 +296,16 @@
           </thead>
           <tbody id="brandTableBody">
             {% for b in brand_rows %}
-              <tr id="brand-row-{{ b.id }}" data-brand-name="{{ b.name|lower }}" data-currency="{{ b.currency_code }}">
+              <tr id="brand-row-{{ b.id }}" data-brand-name="{{ b.name|lower }}" data-currency="{{ b.currency_code or '' }}">
                 <td>{{ b.name }}</td>
-                <td><span class="pill" id="brand-currency-label-{{ b.id }}">{{ b.currency_code }}</span></td>
+                <td><span class="pill" id="brand-currency-label-{{ b.id }}">{{ b.currency_code or 'Chưa gán' }}</span></td>
                 <td>
                   <form class="brand-currency-form" method="post" action="/admin/exchange-rates" data-brand-currency-form data-brand-id="{{ b.id }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="action" value="update_brand_currency">
                     <input type="hidden" name="brand_id" value="{{ b.id }}">
                     <select name="currency_code" aria-label="Currency cho {{ b.name }}">
+                      <option value="" {% if not b.currency_code %}selected{% endif %} disabled>Chọn tiền tệ</option>
                       {% for c in allowed_currencies %}
                         <option value="{{ c }}" {% if c == b.currency_code %}selected{% endif %}>{{ c }}</option>
                       {% endfor %}
@@ -400,7 +413,7 @@
         });
       });
 
-      // Brand filter (search + currency), client-side over the 35 rows already rendered.
+      // Brand filter (search + currency), client-side over all dynamic rows.
       const brandFilter = document.getElementById('brandFilter');
       const currencyFilter = document.getElementById('currencyFilter');
       const brandTableBody = document.getElementById('brandTableBody');
@@ -417,7 +430,7 @@
           const name = row.getAttribute('data-brand-name') || '';
           const rowCur = (row.getAttribute('data-currency') || '').toUpperCase();
           const matchName = !q || name.includes(q);
-          const matchCur = !cur || rowCur === cur;
+          const matchCur = !cur || (cur === '__UNASSIGNED__' ? !rowCur : rowCur === cur);
           const match = matchName && matchCur;
           row.style.display = match ? '' : 'none';
           if (match) count++;

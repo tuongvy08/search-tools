@@ -41,6 +41,10 @@ class QuickQuoteStaticTests(unittest.TestCase):
         self.assertIn("Xóa tất cả", html)
         self.assertIn("qq-request-wrap", html)
 
+    def test_quick_quote_does_not_load_jquery_cdn(self):
+        html = QUICK_QUOTE_HTML.read_text(encoding="utf-8")
+        self.assertNotIn("ajax.googleapis.com/ajax/libs/jquery", html)
+
     def test_template_has_equiv_toggle_and_scope_column(self):
         html = QUICK_QUOTE_HTML.read_text(encoding="utf-8")
         self.assertIn('id="qqEquivDefault"', html)

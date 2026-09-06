@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Giới hạn IP văn phòng</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
   <style>
     body { font-family: system-ui, sans-serif; max-width: 900px; margin: 24px auto; padding: 0 12px; }
     .card { border: 1px solid #ddd; border-radius: 8px; padding: 14px; margin-bottom: 16px; }
@@ -12,19 +14,12 @@
     table { border-collapse: collapse; width: 100%; margin-top: 8px; }
     th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; }
     code { background: #f6f6f6; padding: 1px 4px; }
-    .nav a { margin-right: 12px; }
     .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
     .muted { color: #555; font-size: 0.95rem; }
   </style>
 </head>
 <body>
-  <p class="nav">
-    <a href="/">Search</a>
-    <a href="/admin/imports">Imports</a>
-    <a href="/admin/exchange-rates">Tỷ giá</a>
-    <a href="/admin/network"><b>Mạng / IP</b></a>
-    <a href="/admin/users">Users</a>
-  </p>
+  {% include "_user_nav.html" %}
   <h1>Giới hạn IP (văn phòng)</h1>
 
   <div class="card muted">
@@ -42,6 +37,12 @@
   {% if disable_allowlist %}
   <p class="ok">Cảnh báo: <code>DISABLE_IP_ALLOWLIST</code> đang bật — mọi IP đều vào được (phù hợp máy dev).</p>
   {% endif %}
+
+  <div class="card muted">
+    <p><b>Chính sách IP theo team:</b> mỗi team có thể chọn "Kế thừa cấu hình IP hiện tại" (mặc định, dùng đúng các rule bên dưới),
+      "Chỉ IP trong danh sách mạng được phép" (bắt buộc khớp rule, không có rule thì từ chối), hoặc
+      "Mọi IP (chỉ cần tài khoản hợp lệ)". Quản lý ở <a href="/admin/teams">trang Team</a>.</p>
+  </div>
 
   {% if env_allowlist %}
   <div class="card">

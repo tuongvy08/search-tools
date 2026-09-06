@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quick Quote</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260829b') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
+</head>
+<body class="quick-quote-page">
+    {% include "_user_nav.html" %}
+    <header class="qq-header">
+        <h1>Quick Quote</h1>
+        <p class="qq-subtitle">Tra cứu nhanh theo Code/CAS — tên chỉ để tham khảo, không dùng để match.</p>
+        <nav class="qq-nav">
+            <a href="{{ url_for('home') }}">← Product Search</a>
+        </nav>
+    </header>
+
+    <main class="qq-layout">
+
+        <!-- ===== 1. DANH SÁCH YÊU CẦU ===== -->
+        <section class="qq-card" aria-labelledby="qq-request-title">
+            <h2 id="qq-request-title" class="qq-card-title">Danh sách yêu cầu</h2>
+            <p class="qq-hint">Dán từ Excel (tab hoặc xuống dòng). Dòng trống hoàn toàn sẽ bỏ qua khi gửi match.</p>
+
+            <div class="qq-source-segmented qq-segmented" role="group" aria-label="Nguồn danh sách yêu cầu">
+                <button type="button" class="qq-segment is-active" data-request-source="manual">Nhập trực tiếp</button>
+                <button type="button" class="qq-segment" data-request-source="file">
+                    <i class="fas fa-file-upload" aria-hidden="true"></i> Tải Excel/CSV
+                </button>
+            </div>
+
+            <label class="qq-field qq-equiv-toggle-field">
+                <input type="checkbox" id="qqEquivDefault">
+                <span class="qq-equiv-label">Tìm sản phẩm tương đương cho các dòng có Code</span>
+            </label>
+
+            <div id="qqManualEntryWrap">
+                <div class="qq-grid-toolbar">
+                    <button type="button" class="nav-button" id="qqAddRowBtn">+ Thêm dòng</button>
+                    <button type="button" class="btn-secondary nav-button" id="qqRemoveRowBtn">− Xóa dòng cuối</button>
+                    <button type="button" class="btn-secondary nav-button" id="qqClearAllBtn">Xóa tất cả</button>
+                </div>
+
+                <div class="qq-table-wrap qq-request-wrap">
+                    <table class="qq-grid" id="qqRequestGrid">
+                        <thead>
+                            <tr>
+                                <th class="qq-col-idx">#</th>
+                                <th class="qq-col-name">Tên tham khảo</th>
+                                <th class="qq-col-code">Code</th>
+                                <th class="qq-col-cas">CAS</th>
+                                <th class="qq-col-scope">Phạm vi</th>
+                                <th class="qq-col-policy">Chính sách hãng</th>
+                            </tr>
+                        </thead>
+                        <tbody id="qqRequestBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="qqFileWizard" class="qq-file-wizard" hidden>
+                <div class="qq-file-upload-row">
+                    <label class="qq-file-drop" for="qqRequestFileInput" id="qqRequestFileDrop">
+                        <i class="fas fa-file-excel" aria-hidden="true"></i>
+                        <span>Chọn hoặc thả file .xlsx/.csv</span>
+                        <small>Tối đa 10 MB</small>
+                    </label>
+                    <input type="file" id="qqRequestFileInput" accept=".xlsx,.csv" hidden>
+                    <div class="qq-file-meta">
+                        <p id="qqRequestFileInfo" class="qq-file-info">Chưa chọn file.</p>
+                        <button type="button" class="btn-secondary nav-button qq-file-reset" id="qqRequestFileResetBtn" hidden>Reset file</button>
+                    </div>
+                </div>
+
+                <div id="qqRequestFileStatus" class="qq-file-status" aria-live="polite"></div>
+                <div id="qqRequestFileWarnings" class="qq-file-warnings" hidden></div>
+
+                <div id="qqMappingPanel" class="qq-mapping-panel" hidden>
+                    <div class="qq-mapping-grid">
+                        <label class="qq-field">
+                            <span class="qq-label">Sheet</span>
+                            <select id="qqRequestSheetSelect" class="qq-cond-select"></select>
+                        </label>
+                        <label class="qq-field">
+                            <span class="qq-label">Header row</span>
+                            <select id="qqRequestHeaderRowSelect" class="qq-cond-select"></select>
+                        </label>
+                        <label class="qq-field">
+                            <span class="qq-label">Tên tham khảo</span>
+                            <select id="qqMapNameSelect" class="qq-cond-select" data-map-field="requested_name"></select>
+                        </label>
+                        <label class="qq-field">
+                            <span class="qq-label">Code</span>
+                            <select id="qqMapCodeSelect" class="qq-cond-select" data-map-field="code"></select>
+                        </label>
+                        <label class="qq-field">
+                            <span class="qq-label">CAS</span>
+                            <select id="qqMapCasSelect" class="qq-cond-select" data-map-field="cas"></select>
+                        </label>
+                    </div>
+
+                    <p id="qqMappingError" class="qq-mapping-error" hidden></p>
+
+                    <div class="qq-file-preview-wrap">
+                        <table class="qq-file-preview" id="qqFilePreviewTable">
+                            <thead>
+                                <tr>
+                                    <th>Số dòng Excel</th>
+                                    <th>Tên tham khảo</th>
+                                    <th>Code</th>
+                                    <th>CAS</th>
+                                </tr>
+                            </thead>
+                            <tbody id="qqFilePreviewBody"></tbody>
+                        </table>
+                    </div>
+
+                    <div class="qq-file-actions">
+                        <button type="button" class="nav-button" id="qqImportFileRowsBtn">
+                            <i class="fas fa-file-upload" aria-hidden="true"></i> Đưa vào Quick Quote
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===== 2. ĐIỀU KIỆN ===== -->
+        <section class="qq-card" aria-labelledby="qq-conditions-title">
+            <h2 id="qq-conditions-title" class="qq-card-title">Điều kiện</h2>
+
+            <!-- Brand policy row (full width) -->
+            <div class="qq-cond-brand-row">
+                <div class="qq-field qq-policy-field" id="qqPolicyWidget">
+                    <span class="qq-label">Cách chọn hãng</span>
+
+                    <div class="qq-segmented qq-policy-mode-segmented" role="group" aria-label="Cách chọn hãng">
+                        <button type="button" class="qq-segment" data-policy-mode="PRIORITY_FALLBACK"
+                                title="Ưu tiên theo thứ tự — tự động fallback nếu ưu tiên trên không có kết quả"
+                                {% if brand_load_error %}disabled{% endif %}>
+                            <i class="fas fa-sort-amount-down-alt" aria-hidden="true"></i> Ưu tiên theo thứ tự
+                        </button>
+                        <button type="button" class="qq-segment" data-policy-mode="ALLOWLIST_ONLY"
+                                title="Chỉ dùng các hãng được chọn"
+                                {% if brand_load_error %}disabled{% endif %}>
+                            <i class="fas fa-list-ul" aria-hidden="true"></i> Chỉ các hãng được chọn
+                        </button>
+                        <button type="button" class="qq-segment is-active" data-policy-mode="ALL_AVAILABLE"
+                                title="Không giới hạn hãng — lấy tất cả hãng có sẵn">
+                            <i class="fas fa-globe" aria-hidden="true"></i> Tất cả hãng có sẵn
+                        </button>
+                    </div>
+
+                    <!-- ALLOWLIST_ONLY: reuse combobox pattern -->
+                    <div id="qqAllowlistPanel" class="qq-policy-panel qq-allowlist-panel" hidden>
+                        <div id="qqAllowlistChips" class="qq-brand-chips" aria-live="polite"></div>
+                        <div class="qq-brand-combo">
+                            <input type="text" id="qqAllowlistSearchInput" class="qq-brand-search-input"
+                                   placeholder="Gõ để lọc hoặc dán: LGC, TRC, Accu… — Enter để chọn"
+                                   autocomplete="off" aria-label="Tìm hoặc dán brand cho danh sách được chọn"
+                                   aria-haspopup="listbox" aria-controls="qqAllowlistList"
+                                   {% if brand_load_error %}disabled{% endif %}>
+                            <div id="qqAllowlistDropdown" class="qq-brand-dropdown" hidden>
+                                <ul id="qqAllowlistList" class="qq-brand-list" role="listbox" aria-label="Gợi ý brand"></ul>
+                                <p class="qq-brand-empty qq-picker-empty" hidden>Không tìm thấy brand phù hợp.</p>
+                            </div>
+                        </div>
+                        <p class="qq-hint qq-brand-paste-feedback qq-picker-feedback" hidden></p>
+                        <p class="qq-hint qq-brand-required-hint qq-allowlist-required-hint" hidden>
+                            <i class="fas fa-exclamation-triangle"></i>
+                            Cần chọn ít nhất một brand cho "Chỉ các hãng được chọn".
+                        </p>
+                    </div>
+
+                    <!-- PRIORITY_FALLBACK: tier builder -->
+                    <div id="qqTierPanel" class="qq-policy-panel qq-tier-panel" hidden>
+                        <div id="qqTierList" class="qq-tier-list"></div>
+                        <button type="button" class="btn-secondary nav-button qq-tier-add-btn" id="qqAddTierBtn"
+                                title="Thêm mức ưu tiên mới">
+                            <i class="fas fa-plus" aria-hidden="true"></i> Thêm ưu tiên
+                        </button>
+                        <p class="qq-hint qq-brand-required-hint qq-tier-required-hint" hidden>
+                            <i class="fas fa-exclamation-triangle"></i>
+                            Cần ít nhất một mức ưu tiên có chọn brand.
+                        </p>
+                    </div>
+
+                    {% if brand_load_error %}
+                    <p class="qq-hint qq-brand-load-error" id="qqBrandLoadError">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        Không tải được danh sách brand — chỉ dùng được "Tất cả hãng có sẵn". Vui lòng tải lại trang hoặc liên hệ quản trị.
+                    </p>
+                    {% else %}
+                    <p class="qq-hint" id="qqPolicyHint">Tất cả hãng có sẵn — không cần chọn brand.</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Canonical brand option list, cloned into every allowlist/tier combobox -->
+            <template id="qqBrandOptionsTemplate">
+                {% for brand in brand_options %}
+                <li class="qq-brand-option" data-brand="{{ brand }}" role="option" tabindex="-1">{{ brand }}</li>
+                {% endfor %}
+            </template>
+
+            <!-- Controls row: Dạng cung cấp / Quy cách / Kết quả -->
+            <div class="qq-cond-controls-row">
+                <div class="qq-field">
+                    <span class="qq-label">Dạng cung cấp</span>
+                    <div class="qq-segmented" role="group" aria-label="Dạng cung cấp">
+                        <button type="button" class="qq-segment is-active" data-preparation-type="ANY">Tất cả</button>
+                        <button type="button" class="qq-segment" data-preparation-type="NEAT">Nguyên chất</button>
+                        <button type="button" class="qq-segment" data-preparation-type="SOLUTION">Dạng dung dịch</button>
+                        <button type="button" class="qq-segment" data-preparation-type="MIXTURE">Hỗn hợp</button>
+                    </div>
+                </div>
+
+                <div class="qq-field">
+                    <label class="qq-label" for="qqSizeModeSelect">Quy cách</label>
+                    <select id="qqSizeModeSelect" class="qq-cond-select">
+                        <option value="ANY">Tất cả</option>
+                        <option value="MIN">Nhỏ nhất</option>
+                        <option value="MAX">Lớn nhất</option>
+                        <option value="EXACT">Chính xác</option>
+                    </select>
+                    <div id="qqExactSizeWrap" class="qq-exact-size-wrap" hidden>
+                        <input type="text" id="qqSizeFilter" class="qq-size-input" placeholder="vd. 1g, 100mg">
+                    </div>
+                </div>
+
+                <div class="qq-field">
+                    <label class="qq-label" for="qqStrategySelect">Kết quả</label>
+                    <select id="qqStrategySelect" class="qq-cond-select">
+                        <option value="MANUAL">Chọn thủ công</option>
+                        <option value="LOWEST_PER_BRAND">Giá thấp nhất mỗi brand</option>
+                        <option value="LOWEST_OVERALL">Một giá thấp nhất</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="qq-actions qq-cond-actions-row">
+                <button type="button" class="nav-button is-soft-disabled" id="qqMatchBtn" aria-disabled="true">Match</button>
+                <button type="button" class="btn-secondary nav-button btn-export is-soft-disabled" id="qqCopyBtn" aria-disabled="true">
+                    <i class="fas fa-copy"></i> Copy kết quả
+                </button>
+                <button type="button" class="btn-secondary nav-button btn-excel-export is-soft-disabled" id="qqExportBtn" aria-disabled="true">
+                    <i class="fas fa-file-excel"></i> Xuất Excel
+                </button>
+                <span id="qqTemplateStatus" class="qq-template-status" aria-live="polite">Đang kiểm tra mẫu báo giá…</span>
+            </div>
+        </section>
+
+        <div id="qqStatus" class="operation-status" role="status" aria-live="polite"></div>
+
+        <!-- ===== 3. KẾT QUẢ ===== -->
+        <section class="qq-card qq-preview-card" id="qqPreviewSection" hidden>
+            <div class="qq-result-header">
+                <h2 class="qq-card-title">Kết quả</h2>
+                <div class="qq-result-actions">
+                    <span class="qq-selected-count"></span>
+                    <button type="button" class="btn-secondary nav-button btn-export is-soft-disabled" id="qqCopyBtnBottom" aria-disabled="true">
+                        <i class="fas fa-copy"></i> Copy kết quả
+                    </button>
+                    <button type="button" class="btn-secondary nav-button btn-excel-export is-soft-disabled" id="qqExportBtnBottom" aria-disabled="true">
+                        <i class="fas fa-file-excel"></i> Xuất Excel
+                    </button>
+                    <span class="qq-template-status" aria-live="polite">Đang kiểm tra mẫu báo giá…</span>
+                </div>
+            </div>
+            <div id="qqSummary" class="qq-summary" aria-live="polite"></div>
+            <p id="qqManualHint" class="qq-manual-hint" hidden>Chọn sản phẩm ở cột đầu để copy.</p>
+            <div id="qqResultGroups"></div>
+            <p id="qqEmptyPreview" class="qq-empty" hidden>Chưa có kết quả.</p>
+        </section>
+
+    </main>
+
+    <dialog id="qqReplaceDialog" class="qq-replace-dialog">
+        <form method="dialog">
+            <h2>Thay danh sách hiện tại?</h2>
+            <p>Grid đang có dữ liệu. Nhập file sẽ thay toàn bộ danh sách yêu cầu hiện tại.</p>
+            <div class="qq-dialog-actions">
+                <button type="submit" class="btn-secondary nav-button" value="cancel">Giữ lại</button>
+                <button type="submit" class="nav-button" value="replace">Thay thế</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Phase 3B2: per-row brand policy override — one shared dialog, rebound
+         to whichever row's edit button was clicked. Reuses the same tier
+         builder + canonical brand combobox markup pattern as qqPolicyWidget. -->
+    <dialog id="qqRowPolicyDialog" class="qq-row-policy-dialog">
+        <form method="dialog">
+            <h2 id="qqRowPolicyDialogTitle">Thiết lập hãng cho dòng</h2>
+
+            <div class="qq-segmented qq-row-policy-mode-segmented" role="group" aria-label="Chính sách hãng riêng cho dòng này">
+                <button type="button" class="qq-segment is-active" data-row-policy-mode="INHERIT">Theo thiết lập chung</button>
+                <button type="button" class="qq-segment" data-row-policy-mode="PRIORITY_FALLBACK">Ưu tiên riêng</button>
+                <button type="button" class="qq-segment" data-row-policy-mode="ALLOWLIST_ONLY">Chỉ hãng riêng</button>
+                <button type="button" class="qq-segment" data-row-policy-mode="ALL_AVAILABLE">Tất cả hãng</button>
+            </div>
+
+            <div id="qqRowAllowlistPanel" class="qq-policy-panel qq-allowlist-panel" hidden>
+                <div class="qq-brand-chips" aria-live="polite"></div>
+                <div class="qq-brand-combo">
+                    <input type="text" class="qq-brand-search-input" id="qqRowAllowlistSearchInput"
+                           placeholder="Gõ để lọc hoặc dán: LGC, TRC, Accu… — Enter để chọn"
+                           autocomplete="off" aria-label="Tìm hoặc dán brand riêng cho dòng này"
+                           aria-haspopup="listbox">
+                    <div class="qq-brand-dropdown" hidden>
+                        <ul class="qq-brand-list" role="listbox" aria-label="Gợi ý brand"></ul>
+                        <p class="qq-brand-empty qq-picker-empty" hidden>Không tìm thấy brand phù hợp.</p>
+                    </div>
+                </div>
+                <p class="qq-hint qq-brand-paste-feedback qq-picker-feedback" hidden></p>
+                <p class="qq-hint qq-brand-required-hint qq-row-allowlist-required-hint" hidden>
+                    <i class="fas fa-exclamation-triangle"></i>
+                    Cần chọn ít nhất một hãng riêng cho dòng này.
+                </p>
+            </div>
+
+            <div id="qqRowTierPanel" class="qq-policy-panel qq-tier-panel" hidden>
+                <div id="qqRowTierList" class="qq-tier-list"></div>
+                <button type="button" class="btn-secondary nav-button qq-tier-add-btn" id="qqRowAddTierBtn"
+                        title="Thêm mức ưu tiên riêng cho dòng này">
+                    <i class="fas fa-plus" aria-hidden="true"></i> Thêm ưu tiên
+                </button>
+                <p class="qq-hint qq-brand-required-hint qq-row-tier-required-hint" hidden>
+                    <i class="fas fa-exclamation-triangle"></i>
+                    Cần ít nhất một mức ưu tiên có chọn hãng riêng.
+                </p>
+            </div>
+
+            <p class="qq-hint" id="qqRowPolicyHint"></p>
+
+            <div class="qq-dialog-actions">
+                <button type="submit" class="nav-button" value="done">Xong</button>
+            </div>
+        </form>
+    </dialog>
+
+    <script src="{{ url_for('static', filename='quick_quote.js', v='20260829b') }}"></script>
+</body>
+</html>

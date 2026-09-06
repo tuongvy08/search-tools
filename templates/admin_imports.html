@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nhập dữ liệu — Admin</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
   <style>
     :root {
       --bg: #f1f5f9;
@@ -42,19 +44,6 @@
       font-size: 0.95rem;
       max-width: 52rem;
     }
-    .nav {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px 16px;
-      margin-top: 14px;
-    }
-    .nav a {
-      color: var(--primary);
-      text-decoration: none;
-      font-weight: 500;
-    }
-    .nav a:hover { text-decoration: underline; }
-
     .flow {
       background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
       border: 1px solid #bfdbfe;
@@ -319,16 +308,11 @@
   </style>
 </head>
 <body>
+  {% include "_user_nav.html" %}
   <div class="wrap">
     <header>
       <h1>Nhập dữ liệu (Admin)</h1>
       <p class="sub">Import sản phẩm hoặc quy tắc từ Excel. Hệ thống dùng hai bước để tránh ghi nhầm vào cơ sở dữ liệu.</p>
-      <nav class="nav">
-        <a href="/">← Search</a>
-        <a href="/admin/exchange-rates">Tỷ giá</a>
-        <a href="/admin/network">Mạng / IP</a>
-        <a href="/admin/users"><b>Users</b></a>
-      </nav>
     </header>
 
     <div class="flow">
@@ -354,6 +338,7 @@
       <div id="quick-product" class="tab-panel active" role="tabpanel">
         <p class="hint" style="margin-top:0;">Thêm/sửa: khóa <code>code</code> + <code>brand</code>. Xóa: bắt buộc <code>brand</code> + một trong <code>code</code> / <code>CAS</code> / <code>name</code> — dùng <strong>brand + CAS</strong> cho dòng legacy không có code (vd. <code>CẤM NHẬP</code> + <code>634-90-2</code>). Thêm <code>size</code> nếu cần xóa đúng một quy cách.</p>
         <form id="formQuickProduct" class="quick-form" autocomplete="off">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
           <div class="quick-grid">
             <div class="field"><span class="lbl">Name</span><input type="text" name="name" placeholder="Tên sản phẩm" /></div>
             <div class="field"><span class="lbl req">Code</span><input type="text" name="code" placeholder="Mã SP (bắt buộc khi thêm/sửa)" /></div>
@@ -374,6 +359,7 @@
       <div id="quick-rule" class="tab-panel" role="tabpanel">
         <p class="hint" style="margin-top:0;">Khóa khi thêm/sửa/xóa: <code>rule_type</code> + <code>match_field</code> + <code>match_value</code>.</p>
         <form id="formQuickRule" class="quick-form" autocomplete="off">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
           <div class="quick-grid">
             <div class="field">
               <span class="lbl req">Rule Type</span>
@@ -480,6 +466,18 @@
         </ul>
       {% endif %}
 
+      {% if preview.new_brands %}
+        <div class="alert" style="background:#fffbeb;color:#92400e;border:1px solid #fde68a;">
+          <strong>Brand mới sẽ được tạo khi xác nhận:</strong>
+          <ul style="margin:8px 0 0;padding-left:1.25rem;">
+            {% for b in preview.new_brands %}
+              <li>{{ b.name }} — {{ b.row_count }} dòng</li>
+            {% endfor %}
+          </ul>
+          Các brand này chưa có tiền tệ và staff chưa thấy cho đến khi admin cấp brand cho team.
+        </div>
+      {% endif %}
+
       {% if preview.sample_rows %}
       <h3 style="font-size:0.9rem; margin:16px 0 8px; color:var(--muted);">Mẫu tối đa 10 dòng đầu</h3>
       <table class="data">
@@ -497,6 +495,7 @@
       {% endif %}
 
       <form method="post" action="/admin/imports/apply" class="apply-actions">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
         <input type="hidden" name="preview_token" value="{{ preview.token }}" />
         <button type="submit" class="btn btn-success" onclick="return confirm('Ghi dữ liệu này vào database? Thao tác không hoàn tác tự động.');">Xác nhận ghi vào database</button>
         <a href="/admin/imports" class="btn btn-ghost">Huỷ — làm lại từ đầu</a>

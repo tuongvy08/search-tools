@@ -5,3 +5,5 @@ __pycache__/
 *.py[cod]
 *.db
 .DS_Store
+tmp/
+rehearsal_results.json

@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lịch sử đăng nhập</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 1200px; margin: 24px auto; padding: 0 12px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin-bottom: 16px; background: #fff; }
+    .err { color: #b00020; white-space: pre-wrap; margin-bottom: 12px; }
+    .muted { color: #555; font-size: 0.95rem; }
+    .small { font-size: 0.9rem; color: #666; }
+    table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+    th, td { border: 1px solid #ddd; padding: 8px 10px; text-align: left; vertical-align: top; white-space: nowrap; }
+    th { background: #f4f7fe; color: #2e45b6; }
+    .lh-table-scroll { width: 100%; overflow-x: auto; }
+    #lh-table { min-width: 980px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    input[type="text"], input[type="date"], select {
+      padding: 8px 10px; border: 1px solid #ddd; border-radius: 8px; background: #fff; font-family: inherit;
+      min-width: 160px;
+    }
+    button { padding: 10px 14px; border-radius: 8px; border: 1px solid #ddd; background: #fff; cursor: pointer; font-weight: 600; }
+    button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+    .lh-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.8rem; }
+    .lh-badge-admin { background: #ede9fe; color: #5b21b6; }
+    .lh-badge-auth { background: #e0f2fe; color: #075985; }
+    .lh-badge-other { background: #f3f4f6; color: #4b5563; }
+    .lh-pagination { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+    .lh-pagination a { color: #2563eb; text-decoration: none; }
+    .lh-pagination .disabled { color: #aaa; pointer-events: none; }
+  </style>
+</head>
+<body>
+  {% include "_user_nav.html" %}
+
+  <h1 style="margin-top:0;">Lịch sử đăng nhập</h1>
+  <p class="muted">
+    Chỉ xem — không thêm/sửa/xoá dữ liệu audit tại đây. Không hiển thị Google ID,
+    token, cookie, mã OAuth hoặc bất kỳ secret nào.
+  </p>
+
+  {% if load_error %}<p class="err">{{ load_error }}</p>{% endif %}
+
+  <div class="card">
+    <form method="get" action="{{ url_for('admin_login_history.index') }}" class="row">
+      <div class="field">
+        <label for="lh-date-from">Từ ngày (giờ VN)</label>
+        <input type="date" id="lh-date-from" name="date_from" value="{{ filters.date_from or '' }}">
+      </div>
+      <div class="field">
+        <label for="lh-date-to">Đến ngày (giờ VN)</label>
+        <input type="date" id="lh-date-to" name="date_to" value="{{ filters.date_to or '' }}">
+      </div>
+      <div class="field">
+        <label for="lh-outcome">Kết quả</label>
+        <select id="lh-outcome" name="outcome">
+          <option value="" {{ 'selected' if not filters.outcome else '' }}>Tất cả</option>
+          {% for oc in valid_outcomes %}
+            <option value="{{ oc }}" {{ 'selected' if filters.outcome == oc else '' }}>{{ outcome_labels[oc] }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="lh-event-type">Loại sự kiện</label>
+        <select id="lh-event-type" name="event_type">
+          <option value="ALL" {{ 'selected' if filters.event_type == 'ALL' else '' }}>Tất cả</option>
+          <option value="AUTH" {{ 'selected' if filters.event_type == 'AUTH' else '' }}>Đăng nhập / Đăng xuất</option>
+          <option value="ADMIN" {{ 'selected' if filters.event_type == 'ADMIN' else '' }}>Hành động quản trị</option>
+          <option value="OTHER" {{ 'selected' if filters.event_type == 'OTHER' else '' }}>Sự kiện khác</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="lh-account">Tài khoản</label>
+        <input type="text" id="lh-account" name="account" value="{{ filters.account or '' }}" placeholder="username hoặc email">
+      </div>
+      <div class="field">
+        <label for="lh-page-size">Số dòng/trang</label>
+        <select id="lh-page-size" name="page_size">
+          <option value="50" {{ 'selected' if filters.page_size == 50 else '' }}>50</option>
+          <option value="100" {{ 'selected' if filters.page_size == 100 else '' }}>100</option>
+        </select>
+      </div>
+      <button class="primary" type="submit">Lọc</button>
+      <a href="{{ url_for('admin_login_history.index') }}" class="small" style="align-self:center;">Xoá lọc</a>
+    </form>
+  </div>
+
+  <div class="card">
+    <p class="small">Tổng số dòng phù hợp: <strong>{{ total_count }}</strong></p>
+
+    <div class="lh-table-scroll">
+      <table id="lh-table">
+        <thead>
+          <tr>
+            <th>Thời gian (giờ Việt Nam, UTC+7)</th>
+            <th>Loại sự kiện</th>
+            <th>Tài khoản</th>
+            <th>Phương thức</th>
+            <th>Kết quả</th>
+            <th>Lý do</th>
+            <th>Người thực hiện</th>
+            <th>IP nguồn</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for ev in events %}
+          <tr>
+            <td>{{ ev.time_vn }}</td>
+            <td>
+              <span class="lh-badge {{ 'lh-badge-admin' if ev.event_type == 'ADMIN' else ('lh-badge-auth' if ev.event_type == 'AUTH' else 'lh-badge-other') }}">
+                {{ ev.event_type_label }}
+              </span>
+            </td>
+            <td>{{ ev.account }}</td>
+            <td>{{ ev.provider_label }}</td>
+            <td>{{ ev.outcome_label }}</td>
+            <td>{{ ev.reason_label }}</td>
+            <td>{{ ev.actor or '—' }}</td>
+            <td>{{ ev.source_ip or '—' }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8" class="muted">Không có dữ liệu phù hợp với bộ lọc.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="lh-pagination">
+      {% set base_args = {
+        'date_from': filters.date_from, 'date_to': filters.date_to, 'outcome': filters.outcome,
+        'event_type': filters.event_type, 'account': filters.account, 'page_size': filters.page_size
+      } %}
+      {% if page > 1 %}
+        <a href="{{ url_for('admin_login_history.index', page=page - 1, **base_args) }}">&laquo; Trang trước</a>
+      {% else %}
+        <span class="disabled">&laquo; Trang trước</span>
+      {% endif %}
+      <span>Trang {{ page }} / {{ total_pages }}</span>
+      {% if page < total_pages %}
+        <a href="{{ url_for('admin_login_history.index', page=page + 1, **base_args) }}">Trang sau &raquo;</a>
+      {% else %}
+        <span class="disabled">Trang sau &raquo;</span>
+      {% endif %}
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Đang chờ phê duyệt</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+            font-family: system-ui, sans-serif;
+        }
+        .card {
+            background-color: #ffffff;
+            padding: 32px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            max-width: 420px;
+            text-align: center;
+        }
+        .card p { color: #555; }
+        .back-link { display: inline-block; margin-top: 16px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>Đang chờ quản trị viên phê duyệt</h2>
+        <p>Tài khoản Google của bạn đã được xác thực, nhưng chưa được quản trị viên duyệt để truy cập ứng dụng.</p>
+        <p>Vui lòng liên hệ quản trị viên để được cấp quyền.</p>
+        <a class="back-link" href="/login">Quay lại trang đăng nhập</a>
+    </div>
+</body>
+</html>

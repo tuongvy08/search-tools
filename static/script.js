@@ -9,8 +9,9 @@ const EXPORT_COLUMNS = [
     { key: 'Brand', label: 'Brand' },
     { key: 'Size', label: 'Size' },
     { key: 'Unit_Price', label: 'Unit_Price' },
-    { key: 'Note', label: 'Note', format: formatNoteCell },
-    { key: 'Compliance_Status', label: 'Compliance' },
+    { key: 'Note', label: 'Note', resolve: productNote },
+    { key: 'Compliance', label: 'Compliance', resolve: productCompliance },
+    { key: 'Compliance_Note', label: 'Compliance_Note', resolve: productComplianceNote },
 ];
 
 const COMPLIANCE_CLASS = {
@@ -18,6 +19,9 @@ const COMPLIANCE_CLASS = {
     'Phụ lục II': 'warning-phu-luc-ii',
     'Phụ lục III': 'warning-phu-luc-iii',
     'TỒN KHO': 'warning-ton-kho',
+    'Được bán': 'warning-duoc-ban',
+    'Chưa xác định': 'warning-chua-xac-dinh',
+    'Không phát hiện hạn chế': 'warning-khong-phat-hien',
 };
 
 const AJAX_LONG_TIMEOUT_MS = 180000;
@@ -118,6 +122,11 @@ function syncRowSelectionFromCheckbox(checkbox) {
 
 function updateSelectionUI() {
     const count = selectedProductKeys.size;
+    const btnCopy = document.getElementById('btnCopySelected');
+    if (btnCopy) {
+        btnCopy.disabled = count === 0;
+    }
+
     const bar = document.getElementById('selectionBar');
     const countEl = document.getElementById('selectionCount');
     if (bar && countEl) {
@@ -150,20 +159,20 @@ function copySelectedRows() {
         return;
     }
 
-    const products = searchResults.filter((product) => selectedProductKeys.has(productRowKey(product)));
+    const products = displayedProducts.filter((product) => selectedProductKeys.has(productRowKey(product)));
     if (!products.length) {
         setOperationStatus('Không tìm thấy dòng đã chọn để sao chép.', 'error');
         return;
     }
 
-    const headers = EXPORT_COLUMNS.map((col) => _excelSafeCell(col.label));
-    const lines = [headers.join('\t')];
-    products.forEach((product) => {
+    const lines = products.map((product) => {
         const cells = EXPORT_COLUMNS.map((col) => {
-            const raw = col.format ? col.format(product) : (product[col.key] || '');
+            const raw = col.resolve
+                ? col.resolve(product)
+                : (col.format ? col.format(product) : (product[col.key] || ''));
             return _excelSafeCell(raw);
         });
-        lines.push(cells.join('\t'));
+        return cells.join('\t');
     });
     const payload = lines.join('\n');
 
@@ -314,24 +323,70 @@ function updateSizeFilterOptions() {
     });
 }
 
+function productNote(product) {
+    return product.Note || product.note || '';
+}
+
+function productCompliance(product) {
+    return product.compliance || product.Compliance_Status || '';
+}
+
+function productComplianceNote(product) {
+    return product.compliance_note || product.Compliance_Note || '';
+}
+
+function productComplianceCss(product) {
+    const fromApi = product.Compliance_Css || product.compliance_css || '';
+    if (fromApi) {
+        return fromApi;
+    }
+    return COMPLIANCE_CLASS[productCompliance(product)] || '';
+}
+
+function setTextCell(row, text, className) {
+    const cell = row.insertCell(-1);
+    if (className) {
+        cell.className = className;
+    }
+    cell.textContent = text || '';
+    return cell;
+}
+
+function setComplianceBadgeCell(row, product) {
+    const cell = row.insertCell(-1);
+    cell.className = 'cell-compliance';
+    const label = productCompliance(product);
+    if (!label) {
+        cell.textContent = '';
+        return cell;
+    }
+    const span = document.createElement('span');
+    span.className = 'compliance-badge';
+    const cssClass = productComplianceCss(product);
+    if (cssClass) {
+        span.classList.add(cssClass);
+    }
+    span.textContent = label;
+    cell.appendChild(span);
+    return cell;
+}
+
 function badgeForCompliance(label) {
     if (!label) {
         return '';
     }
-    return `<span class="button-brand">${label}</span>`;
+    const cssClass = COMPLIANCE_CLASS[label] || '';
+    const span = document.createElement('span');
+    span.className = 'compliance-badge';
+    if (cssClass) {
+        span.classList.add(cssClass);
+    }
+    span.textContent = label;
+    return span.outerHTML;
 }
 
 function formatNoteCell(product) {
-    const mainNote = product.Note || '';
-    const complianceNote = product.Compliance_Note || '';
-    if (!complianceNote) {
-        return mainNote;
-    }
-    if (!mainNote) {
-        return `Compliance: ${complianceNote}`;
-    }
-    // Giữ 1 dòng để copy sang Excel không bị xuống dòng trong cùng ô.
-    return `${mainNote} | Compliance: ${complianceNote}`;
+    return productNote(product);
 }
 
 function displayResults(products) {
@@ -357,16 +412,17 @@ function displayResults(products) {
         });
         selectCell.appendChild(checkbox);
 
-        row.insertCell(1).innerHTML = product.Name || '';
-        row.insertCell(2).innerHTML = product.Code || '';
-        row.insertCell(3).innerHTML = product.Cas || '';
-        row.insertCell(4).innerHTML = product.Brand || '';
-        row.insertCell(5).innerHTML = product.Size || '';
-        row.insertCell(6).innerHTML = product.Unit_Price || '';
-        row.insertCell(7).innerHTML = formatNoteCell(product);
-        row.insertCell(8).innerHTML = badgeForCompliance(product.Compliance_Status);
+        setTextCell(row, product.Name || '');
+        setTextCell(row, product.Code || '');
+        setTextCell(row, product.Cas || '');
+        setTextCell(row, product.Brand || '');
+        setTextCell(row, product.Size || '');
+        setTextCell(row, product.Unit_Price || '');
+        setTextCell(row, productNote(product), 'cell-note');
+        setComplianceBadgeCell(row, product);
+        setTextCell(row, productComplianceNote(product), 'cell-compliance-note');
 
-        const cssClass = product.Compliance_Css || COMPLIANCE_CLASS[product.Compliance_Status];
+        const cssClass = productComplianceCss(product);
         if (cssClass) {
             row.classList.add(cssClass);
         }
@@ -616,6 +672,8 @@ function runAdvancedSearch() {
 }
 
 $(document).ready(function() {
+    updateSelectionUI();
+
     if (!$('#operationStatus').length) {
         $('.search-container').after(
             '<div id="operationStatus" class="operation-status" role="status" aria-live="polite"></div>'

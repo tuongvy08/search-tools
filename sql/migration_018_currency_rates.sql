@@ -18,6 +18,23 @@
 --
 -- Depends on migration_017_brand_master.sql (brand_master.currency_code).
 -- Requires `app_users` (for the actor FK) which predates this phase.
+--
+-- Atomicity (Phase 6B2B2-Fix1): wrapped in one explicit BEGIN/COMMIT, same
+-- as migration_017. Audit finding: this file has no `CREATE TEMP TABLE`, so
+-- it never hits migration_017's exact "relation does not exist" failure --
+-- but it shares the same underlying defect class. Its own Section 5
+-- fail-closed preflight (`RAISE EXCEPTION` if currency_rates doesn't end up
+-- with exactly 5 rows / VND <> 1) runs AFTER the Section 4 INSERTs. Under
+-- plain `psql -v ON_ERROR_STOP=1 -f` autocommit (this file's documented
+-- production invocation), each statement commits individually the instant
+-- it runs, so by the time Section 5 could raise, Section 4's inserts are
+-- already permanently committed -- the "fail closed" check could not
+-- actually roll anything back, only report after the fact. Explicit
+-- BEGIN/COMMIT closes that gap for free: no business logic, rates, or
+-- values changed. Audited for CREATE INDEX CONCURRENTLY / VACUUM / other
+-- transaction-incompatible statements -- none present, safe to wrap.
+
+BEGIN;
 
 -- ============================================================================
 -- 1. DDL: currency_rates (single runtime source of truth for rates)
@@ -190,3 +207,5 @@ BEGIN
         RAISE EXCEPTION 'Migration 018 preflight failed: VND rate must be exactly 1';
     END IF;
 END $$;
+
+COMMIT;

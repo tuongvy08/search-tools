@@ -52,9 +52,14 @@ Usage (see any of the files above for the exact wiring):
 """
 import os
 import secrets
+import shutil
+import subprocess
+from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
 import psycopg2
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 
 _SQL_DIR = os.path.join(os.path.dirname(__file__), "..", "sql")
 
@@ -200,7 +205,16 @@ def apply_brand_master_and_currency_migrations(cur):
 
     Both migration files are additive/idempotent and contain no
     `CREATE INDEX CONCURRENTLY` statements, so they can run as a single
-    `cur.execute(full_text)` inside the caller's existing transaction --
+    `cur.execute(full_text)` call. As of Phase 6B2B2-Fix1 both files also
+    carry their own explicit `BEGIN;`/`COMMIT;` wrapper (added to fix a
+    real staging incident: under plain `psql -v ON_ERROR_STOP=1 -f`
+    autocommit, each top-level statement used to commit individually,
+    dropping migration_017's `CREATE TEMP TABLE ... ON COMMIT DROP`
+    mapping tables before the very next statement could use them). That
+    explicit wrapper is harmless here regardless of the caller's own
+    connection `autocommit` setting: PostgreSQL treats a multi-statement
+    string containing its own `BEGIN`/`COMMIT` as defining its own
+    transaction boundaries, so this still executes as one atomic unit --
     migration_017's preflight checks are satisfied trivially on a
     freshly-created, empty `products` table (0 unmapped brands).
     """
@@ -239,6 +253,173 @@ def apply_sql_file_statement_by_statement(cur, sql_path):
         statement = statement.strip()
         if statement:
             cur.execute(statement)
+
+
+def psql_available():
+    """True if the `psql` CLI binary is directly on PATH (host-installed).
+    """
+    return shutil.which("psql") is not None
+
+
+def _docker_compose_db_available():
+    """True if `docker compose`'s `db` service (this repo's local Postgres,
+    per docker-compose.yml / AGENTS.md) is up and reachable, as a fallback
+    `psql` runner for the common case of no host-installed `psql` client
+    (this is the project's own documented convention -- see
+    HUONG_DAN_LOCAL.md -- for every local migration file).
+    """
+    if shutil.which("docker") is None:
+        return False
+    try:
+        proc = subprocess.run(
+            ["docker", "compose", "ps", "--status=running", "--services"],
+            cwd=str(_REPO_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return proc.returncode == 0 and "db" in proc.stdout.split()
+    except Exception:
+        return False
+
+
+def psql_runner_available():
+    """True if a real `psql` binary can be invoked one way or another for
+    `run_migration_via_psql()` -- either directly on PATH, or via this
+    repo's local-dev `docker compose` `db` service. Regression tests that
+    need to reproduce the exact staging invocation
+    (`psql -v ON_ERROR_STOP=1 -f ...`) must skip -- not fail -- when
+    neither is available, same policy as `probe_postgres_reachable()` for a
+    missing local Postgres.
+    """
+    return psql_available() or _docker_compose_db_available()
+
+
+def _env_for_dsn(dsn):
+    """Build a subprocess environment carrying the connection as PG*
+    variables (PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE) instead of a
+    postgresql:// URI. Deliberately never passes the DSN/password as a CLI
+    argument: argv is visible to every local user via `ps`, while PG*
+    env vars are only visible to the same OS user (and never captured in
+    this helper's own return values/output).
+    """
+    parsed = urlparse(dsn)
+    env = os.environ.copy()
+    env.pop("PGSERVICE", None)
+    if parsed.hostname:
+        env["PGHOST"] = parsed.hostname
+    if parsed.port:
+        env["PGPORT"] = str(parsed.port)
+    if parsed.username:
+        env["PGUSER"] = parsed.username
+    if parsed.password:
+        env["PGPASSWORD"] = parsed.password
+    env["PGDATABASE"] = (parsed.path or "").lstrip("/")
+    return env, parsed
+
+
+def _redact(text, parsed_dsn):
+    """Strip anything password/DSN-shaped out of captured psql output
+    before a caller ever prints or asserts on it, so a failing test's
+    output cannot leak a credential even incidentally.
+    """
+    if not text:
+        return text
+    redacted = text
+    if parsed_dsn.password:
+        redacted = redacted.replace(parsed_dsn.password, "<REDACTED>")
+    return redacted
+
+
+def run_migration_via_psql(dsn, sql_path, timeout=120):
+    """Execute a single `.sql` file against `dsn` using the exact same
+    invocation the deploy runbook documents for staging:
+
+        psql -v ON_ERROR_STOP=1 -f <sql_path>
+
+    -- psql's *default* per-statement autocommit, no `--single-transaction`,
+    no `-1`. This is deliberately a real subprocess call to the `psql`
+    binary, NOT a psycopg2 `cur.execute()`: a psycopg2 connection (even
+    with `autocommit=True`) sends a whole multi-statement file as ONE
+    simple-query protocol message, and PostgreSQL implicitly wraps that
+    single message in its own transaction unless the message itself
+    contains explicit `BEGIN`/`COMMIT` -- which is a DIFFERENT code path
+    from `psql -f`, which sends one statement per protocol message and
+    autocommits each individually unless an explicit `BEGIN` is in effect.
+    That difference is exactly what let migration_017's `ON COMMIT DROP`
+    bug pass unnoticed through psycopg2-based rehearsals/tests while
+    failing for real on staging under plain `psql -f`. Only this function
+    (or an actual `psql` invocation) proves a migration file is safe under
+    the real production execution method.
+
+    Uses a host-installed `psql` binary if present; otherwise falls back to
+    this repo's local-dev `docker compose` `db` service (same `psql`
+    binary, just invoked as `docker compose exec -T db psql ...`, the
+    project's own documented convention for machines with no host `psql`
+    client -- see HUONG_DAN_LOCAL.md). Either way the invocation is the
+    same plain `-v ON_ERROR_STOP=1 -f`/stdin form; no extra transaction
+    flags.
+
+    Returns `(exit_code, redacted_output)`. Never raises on a non-zero
+    migration exit code -- that is an expected, assertable outcome for the
+    forced-failure/atomicity tests. Raises `RuntimeError` if no `psql`
+    runner is available at all (callers should guard with
+    `psql_runner_available()` and skip instead).
+    """
+    env, parsed = _env_for_dsn(dsn)
+    dbname = (parsed.path or "").lstrip("/")
+
+    if psql_available():
+        proc = subprocess.run(
+            # `-X` (skip ~/.psqlrc) is the only addition beyond the
+            # runbook's documented plain invocation -- pure hygiene against
+            # a developer's local .psqlrc silently changing
+            # autocommit/verbosity for this subprocess; it does not alter
+            # ON_ERROR_STOP or transaction semantics. No
+            # `--single-transaction`, no `-1`.
+            ["psql", "-X", "-v", "ON_ERROR_STOP=1", "-f", str(sql_path)],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    elif _docker_compose_db_available():
+        with open(sql_path, "r", encoding="utf-8") as f:
+            sql_text = f.read()
+        docker_env = os.environ.copy()
+        if parsed.username:
+            docker_env["PGUSER"] = parsed.username
+        if parsed.password:
+            docker_env["PGPASSWORD"] = parsed.password
+        proc = subprocess.run(
+            [
+                "docker", "compose", "exec", "-T",
+                # Bare `-e VARNAME` (no `=value`) forwards the value from
+                # THIS subprocess's own environment into the container --
+                # the password/user never appear in argv (never visible via
+                # `ps`/process listing on this host).
+                "-e", "PGUSER",
+                "-e", "PGPASSWORD",
+                "db", "psql", "-X", "-v", "ON_ERROR_STOP=1",
+                "-U", parsed.username or "searchlocal",
+                "-d", dbname,
+                "-f", "-",
+            ],
+            cwd=str(_REPO_ROOT),
+            env=docker_env,
+            input=sql_text,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    else:
+        raise RuntimeError(
+            "No psql runner available: neither a host-installed `psql` binary nor a "
+            "running docker compose `db` service was found."
+        )
+
+    combined = (proc.stdout or "") + (proc.stderr or "")
+    return proc.returncode, _redact(combined, parsed)
 
 
 def drop_temp_db(db_name):

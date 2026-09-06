@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import subprocess
 import time
 from decimal import Decimal
 from pathlib import Path
@@ -46,6 +47,49 @@ load_dotenv()
 _TEST_PREFIX = "p6b2b2_rehearsal_"
 _MIGRATION_017_PATH = Path(__file__).resolve().parents[1] / "sql" / "migration_017_brand_master.sql"
 _MIGRATION_018_PATH = Path(__file__).resolve().parents[1] / "sql" / "migration_018_currency_rates.sql"
+
+
+def run_migration_via_psql(dsn: str, sql_path: Path, timeout: int = 600) -> tuple[int, str]:
+    """Apply `sql_path` to `dsn` via a real `psql -v ON_ERROR_STOP=1 -f`
+    subprocess -- psql's *default* per-statement autocommit, no
+    `--single-transaction`, no `-1` -- instead of a psycopg2
+    `cur.execute(full_file_text)` call.
+
+    Phase 6B2B2-Fix1: required, not stylistic. A psycopg2 connection sends
+    a whole multi-statement file as ONE simple-query protocol message, and
+    PostgreSQL implicitly wraps that single message in its own transaction
+    unless the message itself contains explicit `BEGIN`/`COMMIT` -- a
+    DIFFERENT code path from `psql -f`, which sends one statement per
+    protocol message and autocommits each individually. That difference is
+    exactly what let the pre-fix migration_017 (its `CREATE TEMP TABLE ...
+    ON COMMIT DROP` staging tables with no enclosing transaction) pass this
+    very rehearsal green while failing for real on staging (2026-09-06
+    incident). Connection info is passed via `PG*` environment variables,
+    never as a CLI argument; returned output has any DSN password
+    substring redacted.
+    """
+    parsed = urlparse(dsn)
+    env = os.environ.copy()
+    if parsed.hostname:
+        env["PGHOST"] = parsed.hostname
+    if parsed.port:
+        env["PGPORT"] = str(parsed.port)
+    if parsed.username:
+        env["PGUSER"] = parsed.username
+    if parsed.password:
+        env["PGPASSWORD"] = parsed.password
+    env["PGDATABASE"] = (parsed.path or "").lstrip("/")
+    proc = subprocess.run(
+        ["psql", "-X", "-v", "ON_ERROR_STOP=1", "-f", str(sql_path)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    output = (proc.stdout or "") + (proc.stderr or "")
+    if parsed.password:
+        output = output.replace(parsed.password, "<REDACTED>")
+    return proc.returncode, output
 
 _WORKBOOK_RATES = {
     "VND": Decimal("1"),
@@ -154,24 +198,24 @@ def run_rehearsal() -> dict:
         results["preflight_clone_has_no_new_schema"] = pre_bm is None and pre_cr is None
         print(f"brand_master present before: {pre_bm is not None}; currency_rates present before: {pre_cr is not None}")
 
-        print("\n=== Step 3: Applying migration_017_brand_master.sql (dependency) ===")
-        migration_017_sql = _MIGRATION_017_PATH.read_text(encoding="utf-8")
+        print("\n=== Step 3: Applying migration_017_brand_master.sql (dependency, via plain `psql -f`) ===")
         t0_017 = time.perf_counter()
-        with conn.cursor() as cur:
-            cur.execute(migration_017_sql)
-        conn.commit()
+        exit_017, out_017 = run_migration_via_psql(dsn, _MIGRATION_017_PATH)
         dur_017 = time.perf_counter() - t0_017
+        if exit_017 != 0:
+            raise RuntimeError(f"migration_017 failed via psql (exit {exit_017}):\n{out_017}")
         results["migration_017_duration_s"] = round(dur_017, 3)
+        results["migration_017_psql_exit_code"] = exit_017
         print(f"migration_017 applied in {dur_017:.3f}s")
 
-        print("\n=== Step 4: Applying migration_018_currency_rates.sql ===")
-        migration_018_sql = _MIGRATION_018_PATH.read_text(encoding="utf-8")
+        print("\n=== Step 4: Applying migration_018_currency_rates.sql (via plain `psql -f`) ===")
         t0_018 = time.perf_counter()
-        with conn.cursor() as cur:
-            cur.execute(migration_018_sql)
-        conn.commit()
+        exit_018, out_018 = run_migration_via_psql(dsn, _MIGRATION_018_PATH)
         dur_018 = time.perf_counter() - t0_018
+        if exit_018 != 0:
+            raise RuntimeError(f"migration_018 failed via psql (exit {exit_018}):\n{out_018}")
         results["migration_018_duration_s"] = round(dur_018, 3)
+        results["migration_018_psql_exit_code"] = exit_018
         print(f"migration_018 applied in {dur_018:.3f}s")
 
         with conn.cursor() as cur:
@@ -180,12 +224,12 @@ def run_rehearsal() -> dict:
             cur.execute("SELECT COUNT(*) FROM currency_rate_history;")
             history_count_first = cur.fetchone()[0]
 
-        print("\n=== Step 5: Idempotency -- re-running migration_018 ===")
+        print("\n=== Step 5: Idempotency -- re-running migration_018 (via plain `psql -f`) ===")
         t0_idem = time.perf_counter()
-        with conn.cursor() as cur:
-            cur.execute(migration_018_sql)
-        conn.commit()
+        exit_idem, out_idem = run_migration_via_psql(dsn, _MIGRATION_018_PATH)
         idem_dur = time.perf_counter() - t0_idem
+        if exit_idem != 0:
+            raise RuntimeError(f"migration_018 idempotent re-run failed via psql (exit {exit_idem}):\n{out_idem}")
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM currency_rates;")
             rates_count_second = cur.fetchone()[0]

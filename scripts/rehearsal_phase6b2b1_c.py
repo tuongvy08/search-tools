@@ -26,6 +26,7 @@ import hashlib
 import json
 import os
 import secrets
+import subprocess
 import time
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
@@ -38,6 +39,52 @@ load_dotenv()
 _TEST_PREFIX = "p6a_release_gate_pgtest_rehearsal_"
 _MIGRATION_PATH = Path(__file__).resolve().parents[1] / "sql" / "migration_017_brand_master.sql"
 _MIGRATION_ID = "017_brand_master"
+
+
+def run_migration_via_psql(dsn: str, sql_path: Path, timeout: int = 600) -> tuple[int, str]:
+    """Apply `sql_path` to `dsn` via a real `psql -v ON_ERROR_STOP=1 -f`
+    subprocess -- psql's *default* per-statement autocommit, no
+    `--single-transaction`, no `-1` -- instead of a psycopg2
+    `cur.execute(full_file_text)` call.
+
+    Phase 6B2B2-Fix1: this is a deliberate, required change, not a style
+    preference. A psycopg2 connection sends a whole multi-statement file as
+    ONE simple-query protocol message, and PostgreSQL implicitly wraps that
+    single message in its own transaction unless the message itself
+    contains explicit `BEGIN`/`COMMIT` -- a DIFFERENT code path from
+    `psql -f`, which sends one statement per protocol message and
+    autocommits each individually. That difference is exactly what let the
+    pre-fix migration_017 (its `CREATE TEMP TABLE ... ON COMMIT DROP`
+    staging tables with no enclosing transaction) pass this very rehearsal
+    script green while failing for real on staging (2026-09-06 incident,
+    `relation "staging_brand_mapping" does not exist`). This function
+    reproduces the real invocation method so this rehearsal can no longer
+    hide that class of bug. Connection info is passed via `PG*` environment
+    variables, never as a CLI argument (argv is visible to `ps`); returned
+    output has any DSN password substring redacted.
+    """
+    parsed = urlparse(dsn)
+    env = os.environ.copy()
+    if parsed.hostname:
+        env["PGHOST"] = parsed.hostname
+    if parsed.port:
+        env["PGPORT"] = str(parsed.port)
+    if parsed.username:
+        env["PGUSER"] = parsed.username
+    if parsed.password:
+        env["PGPASSWORD"] = parsed.password
+    env["PGDATABASE"] = (parsed.path or "").lstrip("/")
+    proc = subprocess.run(
+        ["psql", "-X", "-v", "ON_ERROR_STOP=1", "-f", str(sql_path)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    output = (proc.stdout or "") + (proc.stderr or "")
+    if parsed.password:
+        output = output.replace(parsed.password, "<REDACTED>")
+    return proc.returncode, output
 
 
 def real_database_url() -> str:
@@ -170,8 +217,7 @@ def run_rehearsal() -> dict:
         print(f"Exchange rates: {rates_count_before}")
         print(f"DB size before: {db_size_before / (1024*1024):.2f} MB")
 
-        print("\n=== Step 3: Executing Migration 017 ===")
-        migration_sql = _MIGRATION_PATH.read_text(encoding="utf-8")
+        print("\n=== Step 3: Executing Migration 017 (via plain `psql -v ON_ERROR_STOP=1 -f`, production semantics) ===")
 
         # Measure WAL and timing
         with conn.cursor() as cur:
@@ -179,10 +225,11 @@ def run_rehearsal() -> dict:
             wal_before = cur.fetchone()[0]
 
         t0_mig = time.perf_counter()
-        with conn.cursor() as cur:
-            cur.execute(migration_sql)
-        conn.commit()
+        mig_exit_code, mig_output = run_migration_via_psql(dsn, _MIGRATION_PATH)
         mig_dur = time.perf_counter() - t0_mig
+        if mig_exit_code != 0:
+            raise RuntimeError(f"migration_017 failed via psql (exit {mig_exit_code}):\n{mig_output}")
+        results["migration_017_psql_exit_code"] = mig_exit_code
 
         with conn.cursor() as cur:
             cur.execute("SELECT pg_current_wal_lsn();")
@@ -204,14 +251,15 @@ def run_rehearsal() -> dict:
         print(f"WAL generated: {wal_bytes / (1024*1024):.2f} MB")
         print(f"DB size after: {db_size_after / (1024*1024):.2f} MB")
 
-        print("\n=== Step 4: Testing Idempotency (Second Execution) ===")
+        print("\n=== Step 4: Testing Idempotency (Second Execution, via psql) ===")
         t0_idem = time.perf_counter()
-        with conn.cursor() as cur:
-            cur.execute(migration_sql)
-        conn.commit()
+        idem_exit_code, idem_output = run_migration_via_psql(dsn, _MIGRATION_PATH)
         idem_dur = time.perf_counter() - t0_idem
+        if idem_exit_code != 0:
+            raise RuntimeError(f"migration_017 idempotent re-run failed via psql (exit {idem_exit_code}):\n{idem_output}")
         results["idempotency_execution"] = {
             "duration_s": round(idem_dur, 3),
+            "psql_exit_code": idem_exit_code,
         }
         print(f"Second execution (idempotency) completed in {idem_dur:.3f}s")
 
@@ -584,11 +632,14 @@ def run_rollback_test() -> dict:
             backup_table_sizes = {r[0]: {"bytes": r[1], "size_pretty": r[2]} for r in cur.fetchall()}
         conn.commit()
 
-        # 2. Run Migration 017
-        migration_sql = _MIGRATION_PATH.read_text(encoding="utf-8")
-        with conn.cursor() as cur:
-            cur.execute(migration_sql)
-        conn.commit()
+        # 2. Run Migration 017 (via plain `psql -v ON_ERROR_STOP=1 -f`,
+        # same production semantics as the main rehearsal above -- the
+        # rollback path must be exercised against the migration exactly as
+        # it will actually run on staging/production, not a psycopg2
+        # transaction that could mask an atomicity bug in either direction).
+        mig_exit_code, mig_output = run_migration_via_psql(dsn, _MIGRATION_PATH)
+        if mig_exit_code != 0:
+            raise RuntimeError(f"migration_017 failed via psql during rollback-test setup (exit {mig_exit_code}):\n{mig_output}")
 
         # Confirm migration applied
         with conn.cursor() as cur:

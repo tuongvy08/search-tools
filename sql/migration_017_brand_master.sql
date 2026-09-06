@@ -14,6 +14,29 @@
 -- - Upserts exactly 35 canonical brand rates to exchange_rates (no TRUNCATE).
 -- - Cleans obsolete test brands from brand_compliance_settings.
 -- - Leaves regulatory_rules and import_jobs completely untouched.
+--
+-- Atomicity (Phase 6B2B2-Fix1): this entire file is wrapped in one explicit
+-- BEGIN/COMMIT transaction. Without it, a plain `psql -v ON_ERROR_STOP=1 -f
+-- <this file>` run -- psql's default execution mode, and exactly how this
+-- migration is invoked in the deploy runbook -- autocommits EVERY top-level
+-- statement individually, including each `CREATE TEMP TABLE ... ON COMMIT
+-- DROP` in Section 4: the temp table's own implicit per-statement commit
+-- drops it again immediately, before the very next `INSERT INTO
+-- staging_brand_mapping ...` statement can run, aborting the whole script
+-- with "relation ... does not exist" -- confirmed on staging 2026-09-06.
+-- Explicit BEGIN/COMMIT fixes this two ways at once: (a) the temp tables
+-- now live for the whole transaction, only dropping at the final COMMIT,
+-- exactly as their "ON COMMIT DROP" clause and this file's own comments
+-- always intended; and (b) the Section 4 fail-closed preflight
+-- `RAISE EXCEPTION` (and any other SQL error, via ON_ERROR_STOP=1 exiting
+-- psql and closing the connection) now rolls back everything in this file
+-- -- brand_master/brand_aliases/products.source_brand included -- instead
+-- of leaving a partially-committed schema behind. No CREATE INDEX
+-- CONCURRENTLY, VACUUM, or other transaction-incompatible statement exists
+-- anywhere in this file (audited 2026-09-06), so wrapping the whole thing
+-- is safe.
+
+BEGIN;
 
 -- ============================================================================
 -- 1. DDL: Brand Master & Brand Aliases & products.source_brand
@@ -746,3 +769,5 @@ BEGIN
 END $$;
 
 ALTER TABLE team_brands VALIDATE CONSTRAINT fk_team_brands_brand_master;
+
+COMMIT;

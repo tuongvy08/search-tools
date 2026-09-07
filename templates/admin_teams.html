@@ -6,7 +6,7 @@
   <title>Quản lý Team</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='admin_teams.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_teams.css', v='20260907c01') }}">
 </head>
 <body>
   {% include "_user_nav.html" %}
@@ -275,7 +275,7 @@
     {% else %}<p class="muted">Không có team trong bộ lọc này.</p>{% endfor %}
     </div>
   </section>
-  <script src="{{ url_for('static', filename='admin_team_permissions.js') }}"></script>
+  <script src="{{ url_for('static', filename='admin_team_permissions.js', v='20260907c01') }}"></script>
 
   <script>
     document.querySelectorAll('.archive-confirm-form').forEach(function (form) {

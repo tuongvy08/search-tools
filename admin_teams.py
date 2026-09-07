@@ -9,11 +9,13 @@ docstrings). This module owns:
 - the permission-change preview -> confirm flow: editing a team's brand
   set or IP policy NEVER applies immediately. It first computes a diff
   (brands added/removed, IP policy old -> new, affected members) and
-  stores it server-side (in-memory, like `search.py`'s own
-  `IMPORT_PREVIEWS`) behind a one-time token; only `confirm_permissions`
+  stores it server-side in PostgreSQL behind a one-time token; only `confirm_permissions`
   actually writes anything, and ONLY if the team's `updated_at` stamp still
   matches what the preview captured (otherwise: reject, require a fresh
   preview -- never silently apply a diff computed against stale data).
+
+Function/field grants are read live by `team_permissions` on every request.
+The capability history records the before/after grants in the same transaction.
 
 Team membership brand visibility (`search.py`'s `_visibility_sql`) already
 reads `team_brands` fresh on every request via a live subquery -- so once
@@ -74,6 +76,7 @@ from admin_google_users import acquire_last_admin_lock, revalidate_actor, write_
 from db import get_connection
 from session_security import verify_csrf_token
 import admin_lifecycle
+import team_permissions as permissions
 
 admin_teams_bp = Blueprint("admin_teams", __name__)
 
@@ -175,6 +178,24 @@ def _validate_brands(submitted, allowed_brands) -> list[str]:
     return sorted(set(submitted_list))
 
 
+def _fetch_permissions(cur, team_id):
+    cur.execute("SELECT permission_keys FROM teams WHERE id = %s", (team_id,))
+    row = cur.fetchone()
+    if row is None:
+        raise _ActionError(_ERR_TEAM_NOT_FOUND)
+    return permissions.validate_permissions(row[0])
+
+
+def _submitted_permissions(cur, team_id):
+    # Old forms keep policy; explicit marker permits clearing every checkbox.
+    if request.form.get('permissions_present') != '1':
+        return _fetch_permissions(cur, team_id)
+    try:
+        return permissions.validate_permissions(request.form.getlist('permissions'))
+    except ValueError as exc:
+        raise _ActionError(str(exc)) from exc
+
+
 def _fetch_team_brands(cur, team_id) -> list[str]:
     cur.execute("SELECT brand FROM team_brands WHERE team_id = %s ORDER BY brand", (team_id,))
     return [r[0] for r in cur.fetchall()]
@@ -222,24 +243,25 @@ def _purge_expired_previews(cur) -> None:
     )
 
 
-def _insert_preview(cur, *, team_id, new_brands, new_ip_policy, captured_updated_at, created_by) -> str:
+def _insert_preview(cur, *, team_id, new_brands, new_ip_policy, captured_updated_at, created_by, new_permissions=None) -> str:
     token = uuid4().hex
     cur.execute(
         "INSERT INTO team_permission_previews "
-        "(token, team_id, new_brands, new_ip_policy, captured_updated_at, created_by) "
-        "VALUES (%s, %s, %s, %s, %s, %s)",
-        (token, team_id, new_brands, new_ip_policy, captured_updated_at, created_by),
+        "(token, team_id, new_brands, new_ip_policy, captured_updated_at, created_by, new_permissions) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+        (token, team_id, new_brands, new_ip_policy, captured_updated_at, created_by, new_permissions),
     )
     return token
 
 
-def _row_to_preview_record(team_id, new_brands, new_ip_policy, captured_updated_at, created_by) -> dict:
+def _row_to_preview_record(team_id, new_brands, new_ip_policy, captured_updated_at, created_by, new_permissions=None) -> dict:
     return {
         "team_id": team_id,
         "new_brands": list(new_brands or []),
         "new_ip_policy": new_ip_policy,
         "captured_updated_at": captured_updated_at,
         "created_by": created_by,
+        "new_permissions": new_permissions,
     }
 
 
@@ -251,7 +273,7 @@ def _fetch_preview(cur, token):
     if not token:
         return None
     cur.execute(
-        f"SELECT team_id, new_brands, new_ip_policy, captured_updated_at, created_by "
+        f"SELECT team_id, new_brands, new_ip_policy, captured_updated_at, created_by, new_permissions "
         f"FROM team_permission_previews "
         f"WHERE token = %s AND created_at > NOW() - INTERVAL '{_PREVIEW_TTL_SECONDS} seconds'",
         (token,),
@@ -292,7 +314,7 @@ def _pop_preview(cur, token, admin_id):
         f"DELETE FROM team_permission_previews "
         f"WHERE token = %s AND created_by = %s "
         f"AND created_at > NOW() - INTERVAL '{_PREVIEW_TTL_SECONDS} seconds' "
-        f"RETURNING team_id, new_brands, new_ip_policy, captured_updated_at, created_by",
+        f"RETURNING team_id, new_brands, new_ip_policy, captured_updated_at, created_by, new_permissions",
         (token, admin_id),
     )
     row = cur.fetchone()
@@ -334,7 +356,7 @@ def index():
                            t.lifecycle_status, t.archived_at,
                            COUNT(DISTINCT a.id) AS member_count,
                            COALESCE(array_agg(DISTINCT tb.brand ORDER BY tb.brand)
-                               FILTER (WHERE tb.brand IS NOT NULL), '{}') AS brands
+                               FILTER (WHERE tb.brand IS NOT NULL), '{}') AS brands, t.permission_keys
                     FROM teams t
                     LEFT JOIN app_users a ON a.team_id = t.id
                     LEFT JOIN team_brands tb ON tb.team_id = t.id
@@ -346,7 +368,7 @@ def index():
                 )
                 team_rows = cur.fetchall()
                 for (tid, name, ip_policy, updated_at, status, archived_at,
-                     member_count, brands) in team_rows:
+                     member_count, brands, permission_keys) in team_rows:
                     teams.append({
                         "id": tid,
                         "name": name,
@@ -355,6 +377,7 @@ def index():
                         "updated_at": updated_at,
                         "member_count": member_count,
                         "brands": list(brands or []),
+                        "permission_keys": permissions.validate_permissions(permission_keys),
                         "lifecycle_status": status,
                         "archived_at": archived_at,
                     })
@@ -368,7 +391,7 @@ def index():
 
                 if preview_token:
                     record = _fetch_preview(cur, preview_token)
-                    if record is None:
+                    if record is None or record["created_by"] != session.get("user_id"):
                         err = err or _ERR_PREVIEW_EXPIRED
                     else:
                         team_row = _fetch_team_row(cur, record["team_id"])
@@ -378,7 +401,11 @@ def index():
                             (_, team_name, current_ip_policy, current_updated_at) = team_row
                             current_brands = set(_fetch_team_brands(cur, record["team_id"]))
                             new_brands = set(record["new_brands"])
+                            current_grants = set(_fetch_permissions(cur, record["team_id"]))
+                            new_grants = current_grants if record["new_permissions"] is None else set(record["new_permissions"])
                             preview_result = {
+                                "permissions_added": [permissions.REGISTRY[k] for k in sorted(new_grants - current_grants)],
+                                "permissions_removed": [permissions.REGISTRY[k] for k in sorted(current_grants - new_grants)],
                                 "token": preview_token,
                                 "team_id": record["team_id"],
                                 "team_name": team_name,
@@ -406,6 +433,11 @@ def index():
     return render_template(
         "admin_teams.html",
         teams=teams,
+        permission_registry=permissions.REGISTRY,
+        permission_features=permissions.FEATURES,
+        permission_fields=permissions.FIELDS,
+        permission_dependencies=permissions.DEPENDENCIES,
+        legacy_permissions=permissions.LEGACY_PERMISSIONS,
         distinct_brands=distinct_brands,
         ip_policies=_VALID_IP_POLICIES,
         ip_policy_labels=_IP_POLICY_LABELS,
@@ -564,6 +596,7 @@ def preview_permissions():
                 allowed_brands = _fetch_distinct_brands(cur)
                 brands = _validate_brands(submitted_brands, allowed_brands)
 
+                new_permissions = _submitted_permissions(cur, team_id)
                 _purge_expired_previews(cur)
                 token = _insert_preview(
                     cur,
@@ -572,6 +605,7 @@ def preview_permissions():
                     new_ip_policy=ip_policy,
                     captured_updated_at=current_updated_at,
                     created_by=admin_id,
+                    new_permissions=new_permissions,
                 )
     except _ActionError as e:
         return _redirect_result(err=str(e))
@@ -646,7 +680,11 @@ def confirm_permissions():
                 ip_policy_changed = new_ip_policy != current_ip_policy
                 brands_changed = bool(added or removed)
 
-                if not brands_changed and not ip_policy_changed:
+                old_permissions = _fetch_permissions(cur, team_id)
+                new_permissions = old_permissions if record["new_permissions"] is None else permissions.validate_permissions(record["new_permissions"])
+                permissions_changed = set(old_permissions) != set(new_permissions)
+
+                if not brands_changed and not ip_policy_changed and not permissions_changed:
                     # Nothing to do -- succeed as a no-op, no audit noise.
                     pass
                 else:
@@ -666,6 +704,14 @@ def confirm_permissions():
                     else:
                         cur.execute("UPDATE teams SET updated_at = NOW() WHERE id = %s", (team_id,))
 
+                    if permissions_changed:
+                        cur.execute("UPDATE teams SET permission_keys = %s, updated_at = NOW() WHERE id = %s",
+                                    (new_permissions, team_id))
+                        cur.execute("INSERT INTO team_capability_history "
+                                    "(team_id, actor_user_id, old_permissions, new_permissions) VALUES (%s, %s, %s, %s)",
+                                    (team_id, admin_id, old_permissions, new_permissions))
+                        write_permission_audit(cur, actor_user_id=admin_id, target_team_id=team_id,
+                                               reason_code="TEAM_CAPABILITIES_UPDATED")
                     if brands_changed:
                         write_permission_audit(cur, actor_user_id=admin_id, target_team_id=team_id,
                                                 reason_code="TEAM_BRANDS_UPDATED")

@@ -87,6 +87,7 @@ _ADMIN_ACTION_REASON_CODES = frozenset({
     "TEAM_RENAMED",
     "TEAM_BRANDS_UPDATED",
     "TEAM_IP_POLICY_UPDATED",
+    "TEAM_CAPABILITIES_UPDATED",
     # Phase 6C0: reversible LOCAL-user and team lifecycle actions.
     "LOCAL_USER_ARCHIVED",
     "LOCAL_USER_RESTORED",
@@ -182,6 +183,7 @@ _REASON_LABELS = {
     "TEAM_CREATED": "Quản trị: tạo team mới",
     "TEAM_RENAMED": "Quản trị: đổi tên team",
     "TEAM_BRANDS_UPDATED": "Quản trị: đổi brand được phép của team",
+    "TEAM_CAPABILITIES_UPDATED": "Quản trị: đổi chức năng và cột dữ liệu team",
     "TEAM_IP_POLICY_UPDATED": "Quản trị: đổi chính sách IP của team",
     # Phase 6C0 -- reversible lifecycle actions.
     "LOCAL_USER_ARCHIVED": "Quản trị: lưu trữ tài khoản LOCAL",

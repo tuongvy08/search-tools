@@ -6,65 +6,7 @@
   <title>Quản lý Team</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 1100px; margin: 24px auto; padding: 0 12px; }
-    .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin-bottom: 16px; background: #fff; }
-    .ok { color: #0b7a0b; }
-    .err { color: #b00020; white-space: pre-wrap; margin-bottom: 12px; }
-    table { border-collapse: collapse; width: 100%; margin-top: 10px; }
-    th, td { border: 1px solid #ddd; padding: 8px 10px; text-align: left; vertical-align: top; }
-    th { background: #f4f7fe; color: #2e45b6; }
-    code { background: #f6f6f6; padding: 1px 4px; border-radius: 4px; }
-    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
-    .field { display: flex; flex-direction: column; gap: 4px; }
-    input[type="text"], input[type="password"], select {
-      padding: 8px 10px; border: 1px solid #ddd; border-radius: 8px; background: #fff; font-family: inherit;
-      min-width: 200px;
-    }
-    button { padding: 10px 14px; border-radius: 8px; border: 1px solid #ddd; background: #fff; cursor: pointer; font-weight: 600; }
-    button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
-    button.danger { background: #dc2626; color: #fff; border-color: #dc2626; }
-    .muted { color: #555; font-size: 0.95rem; }
-    .small { font-size: 0.9rem; color: #666; }
-    .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; background: #eef2ff; color: #3730a3; font-size: 0.8rem; }
-    .brand-picker { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; margin: 8px 0; background: #fafafa; }
-    .brand-picker-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
-    .brand-filter { flex: 1 1 220px; box-sizing: border-box; min-width: 0; }
-    .brand-picker-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-    .brand-action {
-      padding: 6px 10px; border-radius: 8px; border: 1px solid #ddd; background: #fff;
-      cursor: pointer; font-size: 0.82rem; font-weight: 600; white-space: nowrap;
-    }
-    .brand-action:hover { background: #f3f4f6; }
-    .brand-action.danger { color: #b00020; border-color: #f3c2c2; }
-    .brand-action.danger:hover { background: #fef2f2; }
-    .brand-picker-summary {
-      display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline;
-      margin-bottom: 8px; font-size: 0.85rem; min-height: 1.2em;
-    }
-    .brand-selected-count { font-weight: 600; color: #2e45b6; white-space: nowrap; }
-    .brand-picker-status { color: #555; }
-    .brand-checkbox-list { max-height: 220px; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 4px 14px; }
-    .brand-check-row { display: flex; align-items: center; gap: 6px; font-size: 0.9rem; white-space: nowrap; }
-    details > summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
-    .diff-added { color: #0b7a0b; }
-    .diff-removed { color: #b00020; text-decoration: line-through; }
-    .preview-card { border: 2px solid #2563eb; }
-    .filters { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0; }
-    .filters a { padding:7px 12px; border:1px solid #ddd; border-radius:999px; text-decoration:none; color:#1f2937; }
-    .filters a.active { background:#2563eb; color:#fff; border-color:#2563eb; }
-    .archive-panel { border-left: 4px solid #dc2626; padding-left: 10px; margin-top: 12px; }
-    .stale-banner { background: #fef3c7; border: 1px solid #f59e0b; padding: 10px; border-radius: 8px; margin-bottom: 10px; color: #92400e; }
-    @media (max-width: 600px) {
-      .row { flex-direction: column; align-items: stretch; }
-      input[type="text"], select { min-width: 0; width: 100%; }
-      table, thead, tbody, th, td, tr { display: block; }
-      thead { display: none; }
-      tr { border: 1px solid #ddd; border-radius: 8px; margin-bottom: 10px; padding: 6px; }
-      td { border: none; padding: 4px 6px; }
-      td::before { content: attr(data-label); display: block; font-weight: 600; color: #2e45b6; font-size: 0.75rem; }
-    }
-  </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_teams.css') }}">
 </head>
 <body>
   {% include "_user_nav.html" %}
@@ -108,19 +50,47 @@
   </div>
   {% endmacro %}
 
-  <h1 style="margin-top:0;">Quản lý Team</h1>
-  <p class="muted">
-    Team là nơi quản lý brand được phép thấy và chính sách IP. Gán user vào team ở
-    <a href="/admin/users">trang Users</a>. Team không có brand nào thì thành viên của team đó
-    không thấy sản phẩm nào.
-  </p>
+  <div class="page-heading"><div><p class="eyebrow">QUẢN TRỊ TRUY CẬP</p>
+    <h1>Team & quyền truy cập</h1>
+    <p class="muted">Cấu hình chung cho mọi thành viên trong team.</p></div>
+    <a class="secondary-link" href="{{ url_for('admin_users') }}"><i class="fas fa-user-cog" aria-hidden="true"></i> Quản lý thành viên</a>
+  </div>
+
+  {% macro permission_picker(t) %}
+    <input type="hidden" name="permissions_present" value="1">
+    <div class="permission-picker">
+      <fieldset><legend><i class="fas fa-th-large" aria-hidden="true"></i> Chức năng</legend>
+        <div class="permission-grid">
+        {% for key, label in permission_features.items() %}
+          <label class="permission-option">
+            <input type="checkbox" name="permissions" value="{{ key }}" {% if key in t.permission_keys %}checked{% endif %}
+                   data-dependencies='{{ permission_dependencies.get(key, [])|tojson }}'>
+            <span>{{ label }}{% if permission_dependencies.get(key) %}
+              <small data-dependency-status></small>{% endif %}</span>
+          </label>
+        {% endfor %}
+        </div>
+      </fieldset>
+      <fieldset><legend><i class="fas fa-columns" aria-hidden="true"></i> Cột được xem</legend>
+        <div class="permission-grid">
+        {% for key, field in permission_fields.items() %}
+          <label class="permission-option">
+            <input type="checkbox" name="permissions" value="{{ key }}" {% if key in t.permission_keys %}checked{% endif %}>
+            <span>{{ field[1] }}</span>
+          </label>
+        {% endfor %}
+        </div>
+      </fieldset>
+      <p class="small permission-help">Copy / Export chỉ chứa cột được xem. Quick Quote cần Unit Price.</p>
+    </div>
+  {% endmacro %}
 
   {% if message %}<p class="ok">{{ message }}</p>{% endif %}
   {% if error %}<p class="err">{{ error }}</p>{% endif %}
 
   {% if preview_result %}
   <div class="card preview-card">
-    <h2 style="margin-top:0;">Xem trước thay đổi quyền -- team "{{ preview_result.team_name }}"</h2>
+    <h2 style="margin-top:0;">Xem trước thay đổi quyền — team "{{ preview_result.team_name }}"</h2>
 
     {% if preview_result.stale %}
       <div class="stale-banner">
@@ -129,6 +99,10 @@
       </div>
     {% endif %}
 
+    <div class="permission-diff">
+      <div><h3>Quyền sẽ bật</h3>{% for label in preview_result.permissions_added %}<span class="diff-added">+ {{ label }}</span>{% else %}<span class="muted">Không có</span>{% endfor %}</div>
+      <div><h3>Quyền sẽ tắt</h3>{% for label in preview_result.permissions_removed %}<span class="diff-removed">− {{ label }}</span>{% else %}<span class="muted">Không có</span>{% endfor %}</div>
+    </div>
     <table>
       <tbody>
         <tr>
@@ -212,8 +186,7 @@
   </div>
   {% endif %}
 
-  <div class="card">
-    <h2 style="margin-top:0;">Tạo team mới</h2>
+  <details class="card create-team"><summary><i class="fas fa-plus" aria-hidden="true"></i> Tạo team mới</summary>
     <form method="post" action="{{ url_for('admin_teams.create_team') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
       <div class="row" style="margin-bottom:8px;">
@@ -236,70 +209,48 @@
       </div>
       <button class="primary" type="submit" style="margin-top:10px;">Tạo team</button>
     </form>
-  </div>
+  </details>
 
-  <div class="card">
-    <h2 style="margin-top:0;">Danh sách team</h2>
-    <p class="muted">Lưu trữ chỉ loại team khỏi vận hành; lịch sử và cấu hình vẫn được giữ.</p>
+  <section class="team-directory">
+    <h2>Danh sách team</h2>
+
     <nav class="filters" aria-label="Lọc vòng đời team">
       <a class="{{ 'active' if lifecycle == 'active' else '' }}" href="{{ url_for('admin_teams.index', lifecycle='active') }}">Đang hoạt động</a>
       <a class="{{ 'active' if lifecycle == 'archived' else '' }}" href="{{ url_for('admin_teams.index', lifecycle='archived') }}">Đã lưu trữ</a>
     </nav>
-    <table>
-      <thead>
-        <tr>
-          <th>Tên</th>
-          <th>Số thành viên</th>
-          <th>Brand được phép</th>
-          <th>Chính sách IP</th>
-          <th>Trạng thái</th>
-          <th>Hành động</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for t in teams %}
-        <tr>
-          <td data-label="Tên"><b>{{ t.name }}</b></td>
-          <td data-label="Số thành viên">{{ t.member_count }}</td>
-          <td data-label="Brand được phép">
-            {% if t.brands %}
-              {{ t.brands|length }} brand
-              <div class="small muted">{{ t.brands[:8]|join(', ') }}{% if t.brands|length > 8 %}, ...{% endif %}</div>
-            {% else %}
-              <span class="err small">0 brand -- thành viên không thấy sản phẩm nào</span>
-            {% endif %}
-          </td>
-          <td data-label="Chính sách IP">{{ t.ip_policy_label }}</td>
-          <td data-label="Trạng thái">{{ 'Đang hoạt động' if t.lifecycle_status == 'ACTIVE' else 'Đã lưu trữ' }}</td>
-          <td data-label="Hành động" style="min-width: 260px;">
-            {% if t.lifecycle_status == 'ACTIVE' %}
-            <form method="post" action="{{ url_for('admin_teams.rename_team') }}" style="display:flex; gap:6px; margin-bottom:8px;">
+    <div class="team-list">
+    {% for t in teams %}
+      <article class="team-entry">
+        <div class="team-heading"><div><h3>{{ t.name }}</h3>
+          <p class="small">{{ t.member_count }} thành viên · {{ t.brands|length }} brand · {{ t.permission_keys|length }} quyền</p>
+        </div><span class="pill">{{ 'Đang hoạt động' if t.lifecycle_status == 'ACTIVE' else 'Đã lưu trữ' }}</span></div>
+        <p class="small team-brands">{{ t.brands|join(', ') if t.brands else '0 brand — thành viên không thấy sản phẩm nào' }}</p>
+        <p class="small">{{ t.ip_policy_label }}</p>
+        {% if t.lifecycle_status == 'ACTIVE' %}
+          <details class="team-editor"><summary><i class="fas fa-sliders-h" aria-hidden="true"></i> Chỉnh quyền truy cập</summary>
+            <form method="post" action="{{ url_for('admin_teams.preview_permissions') }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" name="team_id" value="{{ t.id }}">
-              <input type="text" name="name" value="{{ t.name }}" style="min-width:140px;">
+              {{ permission_picker(t) }}
+              <fieldset><legend><i class="fas fa-tags" aria-hidden="true"></i> Brand được phép</legend>
+                {{ brand_picker('edit-' ~ t.id, t.brands) }}
+              </fieldset>
+              <fieldset><legend><i class="fas fa-network-wired" aria-hidden="true"></i> Chính sách IP</legend>
+                <select name="ip_policy" aria-label="Chính sách IP">
+                  {% for p in ip_policies %}<option value="{{ p }}" {{ 'selected' if p == t.ip_policy else '' }}>{{ ip_policy_labels[p] }}</option>{% endfor %}
+                </select>
+              </fieldset>
+              <div class="editor-footer"><span class="small">Có hiệu lực sau khi xem trước và xác nhận.</span>
+                <button class="primary" type="submit">Xem trước thay đổi <i class="fas fa-arrow-right" aria-hidden="true"></i></button></div>
+            </form>
+          </details>
+          <details class="team-management"><summary>Tên & vòng đời team</summary>
+            <form method="post" action="{{ url_for('admin_teams.rename_team') }}" class="rename-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="team_id" value="{{ t.id }}">
+              <input type="text" name="name" value="{{ t.name }}" aria-label="Tên team mới">
               <button type="submit">Đổi tên</button>
             </form>
-
-            <details>
-              <summary>Chỉnh brand / chính sách IP</summary>
-              <form method="post" action="{{ url_for('admin_teams.preview_permissions') }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <input type="hidden" name="team_id" value="{{ t.id }}">
-
-                <div class="field" style="margin:8px 0;">
-                  <label>Chính sách IP</label>
-                  <select name="ip_policy">
-                    {% for p in ip_policies %}
-                      <option value="{{ p }}" {{ 'selected' if p == t.ip_policy else '' }}>{{ ip_policy_labels[p] }}</option>
-                    {% endfor %}
-                  </select>
-                </div>
-
-                {{ brand_picker('edit-' ~ t.id, t.brands) }}
-
-                <button class="primary" type="submit" style="margin-top:8px;">Xem trước thay đổi</button>
-              </form>
-            </details>
             <div class="archive-panel">
               <form method="post" action="{{ url_for('admin_lifecycle.preview_team_archive') }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -316,22 +267,15 @@
                 <button type="submit" style="margin-top:8px;">Xem trước lưu trữ ({{ t.member_count }} thành viên)</button>
               </form>
             </div>
-            {% else %}
-            <p class="small muted">Khôi phục chỉ mở lại team; thành viên đã chuyển không tự quay lại.</p>
-            <form method="post" action="{{ url_for('admin_lifecycle.restore_team') }}">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <input type="hidden" name="team_id" value="{{ t.id }}">
-              <button class="primary" type="submit">Khôi phục</button>
-            </form>
-            {% endif %}
-          </td>
-        </tr>
+          </details>
         {% else %}
-        <tr><td colspan="6" class="muted">Không có team trong bộ lọc này.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+
+        {% endif %}
+      </article>
+    {% else %}<p class="muted">Không có team trong bộ lọc này.</p>{% endfor %}
+    </div>
+  </section>
+  <script src="{{ url_for('static', filename='admin_team_permissions.js') }}"></script>
 
   <script>
     document.querySelectorAll('.archive-confirm-form').forEach(function (form) {

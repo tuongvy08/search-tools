@@ -9,27 +9,42 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
 </head>
-<body>
+<body class="search-page">
     {% include "_user_nav.html" %}
     <h1>Product Search</h1>
     <div class="search-container">
         <!-- Thêm hai nút Find CAS và Find Code -->
+        {% if can("CHECK_LICENSE") %}
         <button class="nav-button" id="btnCheckLicense" type="button">Check license</button>
+        {% endif %}
+        {% if can("FIND_CODE") %}
         <button class="nav-button" id="btnFindCode" type="button">Find Code</button>
+        {% endif %}
+        {% if can("ADVANCED_SEARCH") %}
         <button class="nav-button" id="btnAdvancedSearch" type="button">Advanced Search</button>
+        {% endif %}
+        {% if can("QUICK_QUOTE") %}
         <a class="nav-button nav-button-link" href="{{ url_for('quick_quote') }}">Quick Quote</a>
+        {% endif %}
+        {% if can("COPY") %}
         <button class="nav-button btn-export" id="btnCopySelected" type="button"
                 title="Sao chép các dòng đã chọn (dán vào Excel/Google Sheet bằng Ctrl/Cmd+V)"
                 aria-label="Copy Selected">
             <i class="fas fa-copy"></i> Copy Selected
         </button>
 
+        {% endif %}
+        {% if can("EXPORT") %}<button class="nav-button" id="btnExportSelected" type="button"><i class="fas fa-download" aria-hidden="true"></i> Export</button>{% endif %}
+
+        {% if can("SEARCH") %}
         <div class="input-box">
             <i class="fas fa-search"></i>
             <input type="text" id="searchQuery" placeholder="Search for products...">
             <button class="search-button">Search</button>
         </div>
+        {% endif %}
     </div>
+    {% if not can("SEARCH") and not can("FIND_CODE") and not can("ADVANCED_SEARCH") and not can("CHECK_LICENSE") %}<p class="permission-empty">Team chưa được bật chức năng tra cứu.</p>{% endif %}
 
     <!-- Panel nhập danh sách CAS / code để chạy nhanh (không cần sang app khác) -->
     <div id="multiModePanel" class="multi-panel" style="display:none;">
@@ -100,15 +115,15 @@
                 <th class="col-select" title="Chọn tất cả dòng hiển thị">
                     <input type="checkbox" id="selectAllRows" aria-label="Chọn tất cả">
                 </th>
-                <th>Name</th>
-                <th>Code</th>
-                <th>Cas</th>
-                <th>Brand</th>
-                <th>Size</th>
-                <th>Unit_Price</th>
-                <th>Note</th>
-                <th>Compliance</th>
-                <th>Compliance Note</th>
+                {% if can("VIEW_NAME") %}<th>Name</th>{% endif %}
+                {% if can("VIEW_CODE") %}<th>Code</th>{% endif %}
+                {% if can("VIEW_CAS") %}<th>Cas</th>{% endif %}
+                {% if can("VIEW_BRAND") %}<th>Brand</th>{% endif %}
+                {% if can("VIEW_SIZE") %}<th>Size</th>{% endif %}
+                {% if can("VIEW_PRICE") %}<th>Unit_Price</th>{% endif %}
+                {% if can("VIEW_NOTE") %}<th>Note</th>{% endif %}
+                {% if can("VIEW_COMPLIANCE") %}<th>Compliance</th>{% endif %}
+                {% if can("VIEW_COMPLIANCE_NOTE") %}<th>Compliance Note</th>{% endif %}
             </tr>
         </thead>
         <tbody>

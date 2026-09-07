@@ -1,4 +1,6 @@
-/* global $ */
+/* global TeamPermissions */
+const qqCan = (key) => typeof TeamPermissions === 'undefined' || TeamPermissions.can(key);
+const qqField = (key) => typeof TeamPermissions === 'undefined' || TeamPermissions.field(key);
 
 const QQ_MAX_ROWS = 2000;
 const QQ_AJAX_TIMEOUT_MS = 180000;
@@ -19,6 +21,7 @@ const QQ_LIFECYCLE_LABELS = {
 };
 
 const QQ_REASON_CODE_LABELS = {
+    NOT_ELIGIBLE: 'Sản phẩm không đủ điều kiện',
     PENDING_MATCH: 'Chờ Match',
     MISSING_IDENTIFIER: 'Thiếu Code/CAS',
     NO_MATCH: 'Không tìm thấy sản phẩm',
@@ -40,6 +43,7 @@ const QQ_REASON_CODE_LABELS = {
 };
 
 const QQ_REASON_LABELS = {
+    NOT_ELIGIBLE: 'Sản phẩm không đủ điều kiện',
     MISSING_IDENTIFIER: 'Thiếu Code/CAS',
     NO_VALID_PRICE: 'Không có giá hợp lệ',
     MANUAL_SELECTION_REQUIRED: 'Cần chọn sản phẩm',
@@ -992,7 +996,7 @@ function qqBuildCopyPayload(results) {
         const cands = qqEffectiveSelectedCandidates(result, index);
         cands.forEach((c) => {
             if (!qqIsSelectableCandidate(c)) return;
-            const cells = QQ_COPY_COLUMNS.map((key) => {
+            const cells = QQ_COPY_COLUMNS.filter(qqField).map((key) => {
                 if (key === 'Compliance') return qqExcelSafeCell(c.Compliance || c.compliance || '');
                 if (key === 'Compliance_Note') return qqExcelSafeCell(c.Compliance_Note || c.compliance_note || '');
                 if (key === 'Note') return qqExcelSafeCell(c.Note || c.note || '');
@@ -1192,7 +1196,7 @@ function qqUpdateMatchButton() {
 function qqUpdateCopyButton() {
     const btn = document.getElementById('qqCopyBtn');
     const btnBottom = document.getElementById('qqCopyBtnBottom');
-    const canCopy = qqHasCopyableRows(qqResults);
+    const canCopy = qqCan("COPY") && qqHasCopyableRows(qqResults);
     const sel = qqCountSelected();
     qqSetSoftDisabled(btn, !canCopy);
     qqSetSoftDisabled(btnBottom, !canCopy);
@@ -1206,7 +1210,7 @@ function qqUpdateCopyButton() {
 function qqUpdateExportButton() {
     /* Export never requires a selection: it exports selected/unresolved/
      * blocked/review requests alike, so only Match-complete + template gate it. */
-    const canExport = qqResults.length > 0 && qqHasActiveTemplate() && !qqExportInProgress;
+    const canExport = qqCan("EXPORT") && qqResults.length > 0 && qqHasActiveTemplate() && !qqExportInProgress;
     const btn = document.getElementById('qqExportBtn');
     const btnBottom = document.getElementById('qqExportBtnBottom');
     qqSetSoftDisabled(btn, !canExport);
@@ -1512,6 +1516,11 @@ function qqCreateRequestRow(data = {}) {
         input.type = 'text';
         input.className = `qq-grid-input ${cls}`;
         input.value = data[key] || '';
+        if (key === 'cas' && !qqCan('SEARCH_BY_CAS')) {
+            input.disabled = true;
+            input.value = '';
+            input.placeholder = 'Không có quyền tìm CAS';
+        }
         input.placeholder = placeholder;
         input.addEventListener('input', () => {
             qqUpdateScopeForRow(tr);
@@ -1531,7 +1540,7 @@ function qqCreateRequestRow(data = {}) {
         [QQ_SCOPE_DEFAULT, 'Theo thiết lập chung'],
         [QQ_SCOPE_EXACT, 'Chỉ đúng Code'],
         [QQ_SCOPE_EQUIV, 'Tìm tương đương'],
-    ].forEach(([value, label]) => {
+    ].filter(([value]) => value !== QQ_SCOPE_EQUIV || qqCan('SEARCH_BY_CAS')).forEach(([value, label]) => {
         const opt = document.createElement('option');
         opt.value = value;
         opt.textContent = label;
@@ -2835,13 +2844,15 @@ function qqRenderResultTable(results) {
     table.className = 'qq-result-table';
     table.id = 'qqResultTableEl';
 
-    /* thead: 13 columns */
+    const visibleColumnCount = 4 + QQ_COPY_COLUMNS.filter(qqField).length;
     const thead = document.createElement('thead');
     const headRow = document.createElement('tr');
     [
-        '', 'Yêu cầu', 'Trạng thái', 'Sản phẩm', 'Code', 'CAS', 'Brand',
-        'Size', 'Giá nhập', 'Note', 'Compliance', 'Ghi chú CL', 'Loại khớp',
-    ].forEach((label) => {
+        ['', null], ['Yêu cầu', null], ['Trạng thái', null], ['Sản phẩm', 'Name'],
+        ['Code', 'Code'], ['CAS', 'Cas'], ['Brand', 'Brand'], ['Size', 'Size'],
+        ['Giá nhập', 'Unit_Price'], ['Note', 'Note'], ['Compliance', 'Compliance'],
+        ['Ghi chú CL', 'Compliance_Note'], ['Loại khớp', null],
+    ].filter(([, field]) => !field || qqField(field)).forEach(([label]) => {
         const th = document.createElement('th');
         th.textContent = label;
         headRow.appendChild(th);
@@ -2868,7 +2879,7 @@ function qqRenderResultTable(results) {
             const sepTr = document.createElement('tr');
             sepTr.className = 'qq-result-sep';
             const sepTd = document.createElement('td');
-            sepTd.colSpan = 13;
+            sepTd.colSpan = visibleColumnCount;
             sepTr.appendChild(sepTd);
             tbody.appendChild(sepTr);
         }
@@ -2892,13 +2903,13 @@ function qqRenderResultTable(results) {
             tr.appendChild(reqTd);
 
             const statusTd = document.createElement('td');
-            statusTd.colSpan = 11;
+            statusTd.colSpan = visibleColumnCount - 2;
             statusTd.className = 'qq-cell-lifecycle';
             qqBuildStatusCellContent(statusTd, lifecycleInfo, result, resultIndex);
             tr.appendChild(statusTd);
 
             tbody.appendChild(tr);
-            qqAttachFallbackDetailRow(tbody, statusTd, result, 13, requestId);
+            qqAttachFallbackDetailRow(tbody, statusTd, result, visibleColumnCount, requestId);
             return;
         }
 
@@ -2991,13 +3002,13 @@ function qqRenderResultTable(results) {
             }
 
             /* product cells */
-            qqAppendCell(tr, candidate.Name || candidate.name || '', 'qq-cell-product');
-            qqAppendCell(tr, candidate.Code || candidate.code || '', 'qq-cell-code');
-            qqAppendCell(tr, candidate.Cas || candidate.cas || '', 'qq-cell-cas');
-            qqAppendCell(tr, candidate.Brand || candidate.brand || '', 'qq-cell-brand');
-            qqAppendCell(tr, candidate.Size || candidate.size || '', 'qq-cell-size');
-            qqAppendCell(tr, candidate.Unit_Price || '', 'qq-cell-price');
-            qqAppendCell(tr, candidate.Note || candidate.note || '', 'qq-cell-note');
+            if (qqField("Name")) qqAppendCell(tr, candidate.Name || candidate.name || '', 'qq-cell-product');
+            if (qqField("Code")) qqAppendCell(tr, candidate.Code || candidate.code || '', 'qq-cell-code');
+            if (qqField("Cas")) qqAppendCell(tr, candidate.Cas || candidate.cas || '', 'qq-cell-cas');
+            if (qqField("Brand")) qqAppendCell(tr, candidate.Brand || candidate.brand || '', 'qq-cell-brand');
+            if (qqField("Size")) qqAppendCell(tr, candidate.Size || candidate.size || '', 'qq-cell-size');
+            if (qqField("Unit_Price")) qqAppendCell(tr, candidate.Unit_Price || '', 'qq-cell-price');
+            if (qqField("Note")) qqAppendCell(tr, candidate.Note || candidate.note || '', 'qq-cell-note');
 
             /* compliance with colour */
             const compLabel = candidate.Compliance || candidate.compliance || '';
@@ -3005,9 +3016,9 @@ function qqRenderResultTable(results) {
             compTd.textContent = compLabel;
             const compCss = candidate.compliance_css || qqComplianceClass(compLabel);
             if (compCss) compTd.className = compCss;
-            tr.appendChild(compTd);
+            if (qqField("Compliance")) tr.appendChild(compTd);
 
-            qqAppendCell(tr, candidate.Compliance_Note || candidate.compliance_note || '', 'qq-cell-comp-note');
+            if (qqField("Compliance_Note")) qqAppendCell(tr, candidate.Compliance_Note || candidate.compliance_note || '', 'qq-cell-comp-note');
 
             /* match mode badge */
             const modeTd = document.createElement('td');
@@ -3032,7 +3043,7 @@ function qqRenderResultTable(results) {
             tbody.appendChild(tr);
         });
 
-        qqAttachFallbackDetailRow(tbody, groupStatusTd, result, 13, requestId);
+        qqAttachFallbackDetailRow(tbody, groupStatusTd, result, visibleColumnCount, requestId);
     });
 }
 
@@ -3072,7 +3083,7 @@ function qqExplainRowPolicyBlocked(tr) {
     );
 }
 
-function qqRunMatch() {
+async function qqRunMatch() {
     if (qqMatchInProgress) return;
     const rows = qqReadRequestRows();
     if (!qqHasMatchableRows(rows)) {
@@ -3107,39 +3118,44 @@ function qqRunMatch() {
     qqMatchInProgress = true;
     qqUpdateMatchButton();
 
-    $.ajax({
-        url: '/api/quote-assistant/match',
-        method: 'POST',
-        contentType: 'application/json',
-        data: JSON.stringify(payload),
-        timeout: QQ_AJAX_TIMEOUT_MS,
-        success(data) {
-            qqResults = (data && data.results) ? data.results : [];
-            qqRenderPreview();
-            const counts = qqSummarizeResults(qqResults);
-            let statusMsg = `Hoàn tất ${qqResults.length} dòng — đã chọn ${counts.matched}, cần xem ${counts.manual_review}, chưa resolve ${counts.unresolved}.`;
-            if (qqStrategy === 'MANUAL' && counts.matched === 0 && counts.manual_review > 0) {
-                statusMsg += ' Chọn sản phẩm ở cột checkbox để copy/xuất Excel.';
-            }
-            qqSetStatus(statusMsg, 'success');
-        },
-        error(xhr) {
-            qqResults = [];
-            qqLegacyResultIds = new Map();
-            qqRenderPreview();
-            qqSetStatus(qqFormatAjaxError(xhr, 'Match thất bại.'), 'error');
-        },
-        complete() {
-            qqMatchInProgress = false;
-            qqUpdateMatchButton();
-        },
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), QQ_AJAX_TIMEOUT_MS);
+    try {
+        const response = await fetch('/api/quote-assistant/match', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload), signal: controller.signal,
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Match thất bại.');
+        qqResults = data.results || [];
+        qqRenderPreview();
+        const counts = qqSummarizeResults(qqResults);
+        let statusMsg = `Hoàn tất ${qqResults.length} dòng — đã chọn ${counts.matched}, cần xem ${counts.manual_review}, chưa resolve ${counts.unresolved}.`;
+        if (qqStrategy === 'MANUAL' && counts.matched === 0 && counts.manual_review > 0) {
+            statusMsg += ' Chọn sản phẩm ở cột checkbox để copy/xuất Excel.';
+        }
+        qqSetStatus(statusMsg, 'success');
+    } catch (error) {
+        qqResults = [];
+        qqLegacyResultIds = new Map();
+        qqRenderPreview();
+        qqSetStatus(error.name === 'AbortError' ? 'Match hết thời gian chờ. Vui lòng thử lại.' : error.message, 'error');
+    } finally {
+        clearTimeout(timeout);
+        qqMatchInProgress = false;
+        qqUpdateMatchButton();
+    }
 }
 
 /* ═══════════════ copy ═══════════════ */
 
-function qqCopyResults() {
-    const payload = qqBuildCopyPayload(qqResults);
+async function qqCopyResults() {
+    if (!qqCan('COPY')) return;
+    let payload;
+    try {
+        payload = await TeamPermissions.transfer('copy', 'QUICK_QUOTE', qqBuildExportSelections(qqResults));
+    } catch (error) { qqInvalidateResults(); qqSetStatus(error.message, 'error'); return; }
     if (!payload) {
         qqExplainCopyBlocked();
         return;
@@ -3215,6 +3231,7 @@ function qqExportErrorMessage(status, bodyMessage) {
 
 async function qqSubmitExport() {
     if (qqExportInProgress) return;
+    if (!qqCan("EXPORT")) return;
 
     const exportItems = qqBuildExportItems(qqResults);
     /* Export includes every request after Match (selected/unresolved/blocked/

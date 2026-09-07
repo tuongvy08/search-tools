@@ -2268,3 +2268,20 @@ tr.is-missing-identifier .qq-grid-input {
     font-size: 0.76rem;
   }
 }
+
+/* Team capability toolbar: wraps cleanly as features appear/disappear. */
+.search-page .search-container { flex-wrap:wrap; gap:10px; }
+.search-page .input-box { flex:1 1 340px; min-width:240px; }
+.search-page .input-box input { box-sizing:border-box; padding-right:110px; }
+.search-page .multi-panel textarea { box-sizing:border-box; }
+.search-page .filter-container { flex-wrap:wrap; }
+.search-page .results-table-wrap { max-width:100%; }
+@media (max-width:600px) {
+  .search-page { margin:0; padding:12px 16px; }
+  .search-page h1 { font-size:26px; }
+  .search-page .search-container { justify-content:flex-start; }
+  .search-page .nav-button { padding:10px 14px; font-size:13px; border-radius:9px; }
+  .search-page .input-box { flex-basis:100%; order:2; max-width:100%; margin-top:4px; }
+  .search-page .input-box input { padding-left:40px; padding-right:96px; font-size:14px; }
+  .search-page .input-box button { font-size:13px; right:8px; padding:10px 14px; }
+}

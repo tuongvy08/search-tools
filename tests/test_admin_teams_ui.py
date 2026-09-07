@@ -102,11 +102,9 @@ class BrandPickerStaticTests(unittest.TestCase):
         self.assertNotIn("XMLHttpRequest", script)
         self.assertIn("textContent", script)
 
-    def test_picker_container_radius_is_8px_and_not_a_second_card(self):
-        self.assertIn(
-            ".brand-picker { border: 1px solid #e5e7eb; border-radius: 8px;",
-            self.html,
-        )
+    def test_picker_uses_flat_design_without_nested_cards(self):
+        css = (ROOT / "static" / "admin_teams.css").read_text()
+        self.assertIn('.permission-grid', css)
         self.assertNotIn('class="brand-picker card"', self.html)
         self.assertNotIn('class="card brand-picker"', self.html)
 

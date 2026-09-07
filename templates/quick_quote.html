@@ -33,7 +33,7 @@
             </div>
 
             <label class="qq-field qq-equiv-toggle-field">
-                <input type="checkbox" id="qqEquivDefault">
+                <input type="checkbox" id="qqEquivDefault" {% if not can("SEARCH_BY_CAS") %}disabled title="Team không có quyền tìm bằng CAS"{% endif %}>
                 <span class="qq-equiv-label">Tìm sản phẩm tương đương cho các dòng có Code</span>
             </label>
 
@@ -242,12 +242,12 @@
 
             <div class="qq-actions qq-cond-actions-row">
                 <button type="button" class="nav-button is-soft-disabled" id="qqMatchBtn" aria-disabled="true">Match</button>
-                <button type="button" class="btn-secondary nav-button btn-export is-soft-disabled" id="qqCopyBtn" aria-disabled="true">
+                {% if can("COPY") %}<button type="button" class="btn-secondary nav-button btn-export is-soft-disabled" id="qqCopyBtn" aria-disabled="true">
                     <i class="fas fa-copy"></i> Copy kết quả
-                </button>
-                <button type="button" class="btn-secondary nav-button btn-excel-export is-soft-disabled" id="qqExportBtn" aria-disabled="true">
+                </button>{% endif %}
+                {% if can("EXPORT") %}<button type="button" class="btn-secondary nav-button btn-excel-export is-soft-disabled" id="qqExportBtn" aria-disabled="true">
                     <i class="fas fa-file-excel"></i> Xuất Excel
-                </button>
+                </button>{% endif %}
                 <span id="qqTemplateStatus" class="qq-template-status" aria-live="polite">Đang kiểm tra mẫu báo giá…</span>
             </div>
         </section>
@@ -260,12 +260,12 @@
                 <h2 class="qq-card-title">Kết quả</h2>
                 <div class="qq-result-actions">
                     <span class="qq-selected-count"></span>
-                    <button type="button" class="btn-secondary nav-button btn-export is-soft-disabled" id="qqCopyBtnBottom" aria-disabled="true">
+                    {% if can("COPY") %}<button type="button" class="btn-secondary nav-button btn-export is-soft-disabled" id="qqCopyBtnBottom" aria-disabled="true">
                         <i class="fas fa-copy"></i> Copy kết quả
-                    </button>
-                    <button type="button" class="btn-secondary nav-button btn-excel-export is-soft-disabled" id="qqExportBtnBottom" aria-disabled="true">
+                    </button>{% endif %}
+                    {% if can("EXPORT") %}<button type="button" class="btn-secondary nav-button btn-excel-export is-soft-disabled" id="qqExportBtnBottom" aria-disabled="true">
                         <i class="fas fa-file-excel"></i> Xuất Excel
-                    </button>
+                    </button>{% endif %}
                     <span class="qq-template-status" aria-live="polite">Đang kiểm tra mẫu báo giá…</span>
                 </div>
             </div>

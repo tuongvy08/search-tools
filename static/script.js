@@ -125,6 +125,8 @@ function updateSelectionUI() {
     if (btnCopy) {
         btnCopy.disabled = count === 0;
     }
+    const btnExport = document.getElementById('btnExportSelected');
+    if (btnExport) btnExport.disabled = count === 0;
 
     const bar = document.getElementById('selectionBar');
     const countEl = document.getElementById('selectionCount');
@@ -885,13 +887,24 @@ $(document).ready(function() {
 
 
 document.getElementById('btnExportSelected')?.addEventListener('click', async () => {
-    const rows = displayedProducts.filter((p) => selectedProductKeys.has(productRowKey(p)));
+    const byKey = new Map(searchResults.map((p) => [productRowKey(p), p]));
+    const rows = Array.from(selectedProductKeys).map((key) => byKey.get(key)).filter(Boolean);
     if (!rows.length) { setOperationStatus('Chọn ít nhất một dòng để xuất.', 'error'); return; }
+    if (rows.some((row) => !Number.isInteger(Number(row.product_id)) || Number(row.product_id) <= 0)) {
+        setOperationStatus('Một hoặc nhiều dòng đã chọn không còn là sản phẩm hợp lệ.', 'error'); return;
+    }
+    const button = document.getElementById('btnExportSelected');
+    button.disabled = true;
+    setOperationStatus('Đang tạo báo giá…', 'loading');
     try {
-        const blob = await TeamPermissions.transfer('export', resultSource, rows);
+        const context = window.QuoteExportContext ? window.QuoteExportContext.params() : {};
+        const result = await TeamPermissions.quoteExport(rows.map((row) => ({ product_id: Number(row.product_id) })), context);
         const link = document.createElement('a');
-        const url = URL.createObjectURL(blob);
-        link.href = url; link.download = 'search-results.tsv'; link.click();
+        const url = URL.createObjectURL(result.blob);
+        const match = result.disposition.match(/filename="?([^";]+)"?/i);
+        link.href = url; link.download = match ? match[1] : 'bao-gia_draft.xlsx'; link.click();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (error) { clearRowSelection(); setOperationStatus(error.message, 'error'); }
+        setOperationStatus(`Đã xuất báo giá cho <strong>${rows.length}</strong> sản phẩm.`, 'success');
+    } catch (error) { setOperationStatus(error.message, 'error'); }
+    finally { updateSelectionUI(); }
 });

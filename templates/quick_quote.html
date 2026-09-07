@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Quick Quote</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260907c01') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260907c1') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
 </head>
@@ -19,6 +19,13 @@
     </header>
 
     <main class="qq-layout">
+        {% if session.get('is_admin') %}
+        <div id="quoteExportContext" class="quote-export-context">
+            <label>Team <select data-quote-team><option value="">Toàn hệ thống</option></select></label>
+            <label>Template <select data-quote-template><option value="">Tự động team / global</option></select></label>
+            <span data-quote-context-status>Đang tải context…</span>
+        </div>
+        {% endif %}
 
         <!-- ===== 1. DANH SÁCH YÊU CẦU ===== -->
         <section class="qq-card" aria-labelledby="qq-request-title">
@@ -341,6 +348,7 @@
         </form>
     </dialog>
 
-    <script src="{{ url_for('static', filename='quick_quote.js', v='20260907c01') }}"></script>
+    <script src="{{ url_for('static', filename='quote_export_context.js', v='20260907a') }}"></script>
+    <script src="{{ url_for('static', filename='quick_quote.js', v='20260907c1') }}"></script>
 </body>
 </html>

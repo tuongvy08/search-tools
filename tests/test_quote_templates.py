@@ -74,6 +74,7 @@ class FakeTemplateCursor:
                     t["uploaded_by"],
                     t["created_at"],
                     t["activated_at"],
+                    t.get("mapping_v2_json") or t["mapping_json"],
                 )
                 for t in sorted(self.conn.templates, key=lambda item: item["id"], reverse=True)
             ]
@@ -85,7 +86,7 @@ class FakeTemplateCursor:
         if q.startswith("INSERT INTO quote_templates"):
             next_id = self.conn.next_id
             self.conn.next_id += 1
-            filename, _content, digest, size, profile, mapping_json, active, uploaded_by, _active_again = params
+            filename, _content, digest, size, profile, mapping_json, mapping_v2_json, active, uploaded_by, _active_again = params
             template = {
                 "id": next_id,
                 "filename": filename,
@@ -93,6 +94,7 @@ class FakeTemplateCursor:
                 "content_size": size,
                 "profile_version": profile,
                 "mapping_json": json.loads(mapping_json),
+                "mapping_v2_json": json.loads(mapping_v2_json),
                 "is_active": bool(active),
                 "uploaded_by": uploaded_by,
                 "created_at": "2026-08-27T10:00:00+00:00",
@@ -109,6 +111,7 @@ class FakeTemplateCursor:
                 template["uploaded_by"],
                 template["created_at"],
                 template["activated_at"],
+                template["mapping_v2_json"],
             )
             return
         if q.startswith("SELECT id FROM quote_templates"):
@@ -448,6 +451,7 @@ class QuoteTemplateAssistantApiTests(unittest.TestCase):
             sess["auth_version"] = 1
             sess["is_admin"] = False
             sess["team_id"] = 123
+            sess["csrf_token"] = "csrf-test"
 
     def test_active_metadata_does_not_expose_binary_mapping_or_uploaded_by(self):
         conn = FakeTemplateConnection([_template_row()])
@@ -464,7 +468,7 @@ class QuoteTemplateAssistantApiTests(unittest.TestCase):
         with patch.object(search, "get_connection", return_value=conn):
             response = self.client.get("/api/quote-assistant/workbook/template")
         self.assertEqual(response.status_code, 409)
-        self.assertIn("Chưa có mẫu báo giá active", response.get_json()["error"])
+        self.assertIn("không có mẫu global active", response.get_json()["error"])
 
     def test_export_without_workbook_uses_active_template(self):
         with patch.object(
@@ -489,6 +493,7 @@ class QuoteTemplateAssistantApiTests(unittest.TestCase):
             response = self.client.post(
                 "/api/quote-assistant/workbook/export",
                 data={"selections": json.dumps([{"product_id": 42}])},
+                headers={"X-CSRF-Token": "csrf-test"},
                 content_type="multipart/form-data",
             )
         self.assertEqual(response.status_code, 200)
@@ -503,11 +508,12 @@ class QuoteTemplateAssistantApiTests(unittest.TestCase):
                 response = self.client.post(
                     "/api/quote-assistant/workbook/export",
                     data={"selections": json.dumps([{"product_id": 42}])},
+                    headers={"X-CSRF-Token": "csrf-test"},
                     content_type="multipart/form-data",
                 )
         self.assertEqual(response.status_code, 409)
 
-    def test_legacy_export_with_workbook_does_not_load_active_template(self):
+    def test_client_workbook_is_rejected_and_does_not_load_active_template(self):
         with patch.object(search, "_get_active_quote_template", side_effect=AssertionError("should not load active")):
             with patch.object(search, "_quote_export_products", return_value=[product(1)]), patch.object(
                 search, "export_quick_quote_workbook", return_value=b"exported"
@@ -518,10 +524,11 @@ class QuoteTemplateAssistantApiTests(unittest.TestCase):
                         "workbook": (io.BytesIO(make_workbook()), "legacy.xlsx"),
                         "selections": json.dumps([{"product_id": 42}]),
                     },
+                    headers={"X-CSRF-Token": "csrf-test"},
                     content_type="multipart/form-data",
                 )
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("legacy_draft.xlsx", response.headers["Content-Disposition"])
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Không nhận workbook từ client", response.get_json()["error"])
 
     def test_template_metadata_when_table_missing_returns_503(self):
         with patch.object(
@@ -542,6 +549,7 @@ class QuoteTemplateAssistantApiTests(unittest.TestCase):
             response = self.client.post(
                 "/api/quote-assistant/workbook/export",
                 data={"selections": json.dumps([{"product_id": 42}])},
+                headers={"X-CSRF-Token": "csrf-test"},
                 content_type="multipart/form-data",
             )
         self.assertEqual(response.status_code, 503)

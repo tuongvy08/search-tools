@@ -4,6 +4,9 @@
   const API_UPLOAD = '/api/admin/quote-templates';
   const API_ACTIVATE_PREFIX = '/api/admin/quote-templates/';
   const API_DOWNLOAD_PREFIX = '/api/admin/quote-templates/';
+  const API_INSPECT = '/api/admin/quote-templates/inspect';
+  const API_CONTEXTS = '/api/admin/quote-template-contexts';
+  const API_ASSIGN = '/api/admin/quote-template-assignments';
 
   const els = {
     pageAlert: document.getElementById('qtPageAlert'),
@@ -22,6 +25,15 @@
     activate: document.getElementById('qtActivate'),
     uploadBtn: document.getElementById('qtUploadBtn'),
     uploadStatus: document.getElementById('qtUploadStatus'),
+    inspectBtn: document.getElementById('qtInspectBtn'),
+    sheet: document.getElementById('qtSheet'),
+    headerRow: document.getElementById('qtHeaderRow'),
+    dataStartRow: document.getElementById('qtDataStartRow'),
+    totalLabel: document.getElementById('qtTotalLabel'),
+    mappingBody: document.getElementById('qtMappingBody'),
+    mappingState: document.getElementById('qtMappingState'),
+    mappingBadge: document.getElementById('qtMappingBadge'),
+    assignments: document.getElementById('qtAssignments'),
     historyBody: document.getElementById('qtHistoryBody'),
     activateDialog: document.getElementById('qtActivateDialog'),
     activateDialogText: document.getElementById('qtActivateDialogText'),
@@ -33,6 +45,8 @@
   let uploadInProgress = false;
   let activateInProgress = false;
   let pendingActivateId = null;
+  let preview = null;
+  let teams = [];
 
   function setText(el, value) {
     if (el) el.textContent = value == null || value === '' ? '-' : String(value);
@@ -209,7 +223,6 @@
   }
 
   async function loadTemplates() {
-    setAlert('', '');
     try {
       const response = await fetch(API_LIST, { credentials: 'same-origin' });
       const data = await parseJsonResponse(response);
@@ -240,6 +253,10 @@
   }
 
   function updateSelectedFileStatus() {
+    preview = null;
+    if (els.uploadBtn) els.uploadBtn.disabled = true;
+    if (els.mappingBody) clearNode(els.mappingBody);
+    setText(els.mappingBadge, 'Chưa xem trước');
     const file = selectedFile();
     if (!file) {
       setUploadStatus('Chưa chọn file.', '');
@@ -253,6 +270,92 @@
     setUploadStatus(`Đã chọn: ${file.name} (${formatBytes(file.size)}).`, 'ok');
   }
 
+  function normalized(value) {
+    return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  }
+
+  const FIELD_HINTS = {
+    sequence: ['stt', 'so thu tu'], Name: ['ten hang', 'name'], Code: ['code', 'ma hang'],
+    Cas: ['cas'], Brand: ['hang', 'brand'], Size: ['don vi tinh', 'on vi tinh', 'quy cach', 'size'],
+    Note: ['ghi chu hang hoa', 'note'], Compliance_Combined: ['ghi chu khac', 'compliance'],
+    Unit_Price_Value: ['gia nhap chua vat', 'don gia', 'unit price'],
+  };
+
+  function suggestedColumn(field, headers, used) {
+    const hints = FIELD_HINTS[field] || [];
+    let hit = headers.find((item) => !used.has(item.column) && hints.some((hint) => normalized(item.header).includes(hint)));
+    if (!hit && field === 'sequence') hit = headers.find((item) => item.column === 'A' && !used.has(item.column));
+    if (hit) used.add(hit.column);
+    return hit ? hit.column : '';
+  }
+
+  function mappingValue() {
+    if (!preview) return null;
+    const mapping = {};
+    els.mappingBody.querySelectorAll('select[data-field]').forEach((select) => {
+      if (select.value) mapping[select.dataset.field] = select.value;
+    });
+    return { profile_version: 'BG_V1', mapping_version: 1, sheet: els.sheet.value,
+      header_row: Number(els.headerRow.value), product_start_row: Number(els.dataStartRow.value),
+      total_label: els.totalLabel.value.trim(), mapping };
+  }
+
+  function validateMappingUI() {
+    const value = mappingValue();
+    if (!value) return false;
+    const selected = Object.values(value.mapping);
+    const required = preview.fields.filter((field) => field.required && !value.mapping[field.key]);
+    const duplicate = new Set(selected).size !== selected.length;
+    const valid = !required.length && !duplicate && value.product_start_row > value.header_row && Boolean(value.total_label);
+    els.mappingState.className = `mapping-state${valid ? '' : ' err'}`;
+    setText(els.mappingState, valid ? 'Mapping hợp lệ để lưu; backend sẽ kiểm tra footer/formula atomically.' :
+      required.length ? `Thiếu field bắt buộc: ${required.map((item) => item.label).join(', ')}.` :
+      duplicate ? 'Một cột đang được map nhiều lần.' : 'Kiểm tra lại vùng dữ liệu và nhãn tổng.');
+    setText(els.mappingBadge, valid ? 'Sẵn sàng' : 'Cần chỉnh');
+    els.mappingBadge.className = `badge ${valid ? 'active' : 'warn'}`;
+    if (els.uploadBtn) els.uploadBtn.disabled = !valid;
+    return valid;
+  }
+
+  function renderMapping(data) {
+    preview = data;
+    clearNode(els.mappingBody);
+    clearNode(els.sheet);
+    data.sheets.forEach((name) => {
+      const option = document.createElement('option'); option.value = name; option.textContent = name;
+      option.selected = name === data.sheet; els.sheet.appendChild(option);
+    });
+    els.headerRow.value = data.header_row;
+    els.dataStartRow.value = data.product_start_row;
+    const used = new Set();
+    data.fields.forEach((field) => {
+      const row = document.createElement('tr');
+      const label = document.createElement('td'); label.textContent = field.label;
+      if (field.required) { const mark = document.createElement('span'); mark.className = 'required-mark'; mark.textContent = ' *'; label.appendChild(mark); }
+      const cell = document.createElement('td'); const select = document.createElement('select');
+      select.dataset.field = field.key;
+      const empty = document.createElement('option'); empty.value = ''; empty.textContent = field.required ? 'Chọn cột…' : 'Không map'; select.appendChild(empty);
+      const suggested = suggestedColumn(field.key, data.headers, used);
+      data.headers.forEach((header) => { const option = document.createElement('option'); option.value = header.column;
+        option.textContent = `${header.column} — ${header.header}`; option.selected = header.column === suggested; select.appendChild(option); });
+      select.addEventListener('change', validateMappingUI); cell.appendChild(select); row.append(label, cell); els.mappingBody.appendChild(row);
+    });
+    validateMappingUI();
+  }
+
+  async function inspectTemplate() {
+    const file = selectedFile(); const error = validateSelectedFile(file);
+    if (error) { setUploadStatus(error, 'err'); return; }
+    els.inspectBtn.disabled = true; setUploadStatus('Đang đọc sheet và header…', 'loading');
+    try {
+      const body = new FormData(); body.append('workbook', file); body.append('csrf_token', els.csrfToken.value);
+      body.append('sheet', els.sheet.value || 'BG'); body.append('header_row', els.headerRow.value || '16');
+      const response = await fetch(API_INSPECT, { method: 'POST', body, credentials: 'same-origin' });
+      const data = await parseJsonResponse(response); renderMapping(data.preview); setUploadStatus('Đã đọc workbook. Kiểm tra mapping trước khi lưu.', 'ok');
+    } catch (err) { preview = null; setUploadStatus(err.message || 'Không xem trước được workbook.', 'err'); }
+    finally { els.inspectBtn.disabled = false; }
+  }
+
   async function uploadTemplate(event) {
     event.preventDefault();
     if (uploadInProgress) return;
@@ -262,6 +365,7 @@
       setUploadStatus(error, 'err');
       return;
     }
+    if (!validateMappingUI()) { setUploadStatus('Cần xem trước và hoàn tất mapping trước khi lưu.', 'err'); return; }
 
     uploadInProgress = true;
     if (els.uploadBtn) els.uploadBtn.disabled = true;
@@ -274,6 +378,7 @@
       const body = new FormData();
       body.append('workbook', file);
       body.append('activate', els.activate && els.activate.checked ? 'true' : 'false');
+      body.append('mapping', JSON.stringify(mappingValue()));
       body.append('csrf_token', els.csrfToken ? els.csrfToken.value : '');
       const response = await fetch(API_UPLOAD, {
         method: 'POST',
@@ -283,17 +388,48 @@
       await parseJsonResponse(response);
       if (els.workbook) els.workbook.value = '';
       if (els.activate) els.activate.checked = true;
+      preview = null;
+      clearNode(els.mappingBody);
+      setText(els.mappingBadge, 'Chưa xem trước');
       setUploadStatus('Upload thành công. Đã làm mới lịch sử phiên bản.', 'ok');
       setAlert('Đã upload mẫu báo giá.', 'ok');
       await loadTemplates();
+      await loadContexts();
     } catch (err) {
       setUploadStatus(err.message || 'Upload thất bại.', 'err');
     } finally {
       uploadInProgress = false;
-      if (els.uploadBtn) els.uploadBtn.disabled = false;
+      if (els.uploadBtn) els.uploadBtn.disabled = !preview;
       if (els.workbook) els.workbook.disabled = false;
       if (els.activate) els.activate.disabled = false;
     }
+  }
+
+  function renderAssignments() {
+    clearNode(els.assignments);
+    teams.filter((team) => team.status === 'ACTIVE').forEach((team) => {
+      const row = document.createElement('div'); row.className = 'assignment-row';
+      const name = document.createElement('strong'); name.textContent = team.name;
+      const select = document.createElement('select'); select.appendChild(new Option('Fallback global active', ''));
+      templates.forEach((item) => select.appendChild(new Option(`#${item.id} · ${item.filename}${item.is_active ? ' · global' : ''}`, item.id)));
+      select.value = team.template_id == null ? '' : String(team.template_id);
+      const save = document.createElement('button'); save.type = 'button'; save.className = 'btn'; save.textContent = 'Lưu gán';
+      save.addEventListener('click', async () => {
+        save.disabled = true;
+        try { const response = await fetch(API_ASSIGN, { method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': els.csrfToken.value },
+          body: JSON.stringify({ team_id: team.id, template_id: select.value || null }) });
+          await parseJsonResponse(response); setAlert(`Đã cập nhật template cho team ${team.name}.`, 'ok'); await loadContexts();
+        } catch (err) { setAlert(err.message, 'err'); } finally { save.disabled = false; }
+      });
+      row.append(name, select, save); els.assignments.appendChild(row);
+    });
+  }
+
+  async function loadContexts() {
+    try { const response = await fetch(API_CONTEXTS, { credentials: 'same-origin' }); const data = await parseJsonResponse(response);
+      teams = data.teams || []; templates = data.templates || templates; renderAll(); renderAssignments();
+    } catch (err) { setText(els.assignments, err.message || 'Không tải được assignment.'); }
   }
 
   function openActivateDialog(item) {
@@ -335,6 +471,7 @@
   }
 
   if (els.workbook) els.workbook.addEventListener('change', updateSelectedFileStatus);
+  if (els.inspectBtn) els.inspectBtn.addEventListener('click', inspectTemplate);
   if (els.uploadForm) els.uploadForm.addEventListener('submit', uploadTemplate);
   if (els.activateCancel) els.activateCancel.addEventListener('click', closeActivateDialog);
   if (els.activateConfirm) els.activateConfirm.addEventListener('click', activateTemplate);
@@ -344,5 +481,7 @@
     });
   }
 
-  loadTemplates();
+  if (els.sheet) els.sheet.addEventListener('change', () => { preview = null; if (els.uploadBtn) els.uploadBtn.disabled = true; });
+  if (els.headerRow) els.headerRow.addEventListener('change', () => { preview = null; if (els.uploadBtn) els.uploadBtn.disabled = true; });
+  loadTemplates().then(loadContexts);
 })();

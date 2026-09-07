@@ -102,6 +102,10 @@ with open(MIGRATION_015_PATH, "r", encoding="utf-8") as _f:
     _MIGRATION_015_SQL = _f.read()
 with open(MIGRATION_020_PATH, "r", encoding="utf-8") as _f:
     _MIGRATION_020_SQL = _f.read()
+with open(os.path.join(os.path.dirname(__file__), "..", "sql", "migration_021_team_capabilities.sql"), encoding="utf-8") as _f:
+    _capability_sql = _f.read()
+with open(os.path.join(os.path.dirname(__file__), "..", "sql", "migration_016_team_permission_previews.sql"), encoding="utf-8") as _f:
+    _MIGRATION_020_SQL += "\n" + _f.read() + "\n" + _capability_sql
 
 # Phase 6A-Fix1: `middleware_access._restrict_office_ip` runs as a REAL
 # `before_request` hook on `search.app` for every request this file makes

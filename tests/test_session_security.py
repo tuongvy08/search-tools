@@ -51,6 +51,9 @@ class _FakeCursor:
         elif "SELECT 1 FROM teams WHERE id = %s AND lifecycle_status = 'ACTIVE'" in s:
             (team_id,) = params
             self._result = [(1,)] if team_id in self.db.active_teams else []
+        elif "SELECT permission_keys FROM teams" in s:
+            from team_permissions import LEGACY_PERMISSIONS
+            self._result = [(list(LEGACY_PERMISSIONS),)] if params[0] in self.db.active_teams else []
         elif "INSERT INTO login_audit_events" in s:
             self.db.audits.append(params)
             self._result = []
@@ -139,7 +142,7 @@ class SessionRevocationTests(_ClientTestCase):
 
     def test_matching_active_account_and_version_passes_through(self):
         db = _FakeUserDB({9: ("ACTIVE", 3)})
-        self._set_session(authenticated=True, user_id=9, auth_version=3, username="ok", role="user")
+        self._set_session(authenticated=True, user_id=9, auth_version=3, username="ok", role="user", is_admin=False, team_id=1)
         with mock.patch.object(session_security, "get_connection", _fake_get_connection(db)):
             resp = self.client.get("/")
         self.assertEqual(resp.status_code, 200)

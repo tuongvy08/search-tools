@@ -28,6 +28,7 @@ by this helper.
 from unittest import mock
 
 import session_security
+import team_permissions
 
 DEFAULT_AUTH_VERSION = 1
 
@@ -75,6 +76,8 @@ class _FakeAuthCursor:
         elif "SELECT 1 FROM teams WHERE id = %s AND lifecycle_status = 'ACTIVE'" in s:
             (team_id,) = params
             self._result = [(1,)] if team_id is not None else []
+        elif "SELECT permission_keys FROM teams" in s:
+            self._result = [(list(team_permissions.LEGACY_PERMISSIONS),)]
         elif "INSERT INTO login_audit_events" in s:
             self.db.audits.append(params)
             self._result = []

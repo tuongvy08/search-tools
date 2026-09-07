@@ -56,9 +56,12 @@ class _PassthroughSessionCursor:
         return False
 
     def execute(self, sql, params=()):
-        pass
+        self.sql = sql
 
     def fetchone(self):
+        if 'SELECT permission_keys FROM teams' in self.sql:
+            from team_permissions import LEGACY_PERMISSIONS
+            return (list(LEGACY_PERMISSIONS),)
         return ("ACTIVE", 1)
 
 

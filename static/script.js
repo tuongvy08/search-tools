@@ -1,6 +1,9 @@
 let searchResults = [];
+let resultSource = "SEARCH";
 let displayedProducts = [];
 const selectedProductKeys = new Set();
+const productSelectionKeys = new WeakMap();
+let nextProductSelectionKey = 0;
 
 const EXPORT_COLUMNS = [
     { key: 'Name', label: 'Name' },
@@ -12,7 +15,7 @@ const EXPORT_COLUMNS = [
     { key: 'Note', label: 'Note', resolve: productNote },
     { key: 'Compliance', label: 'Compliance', resolve: productCompliance },
     { key: 'Compliance_Note', label: 'Compliance_Note', resolve: productComplianceNote },
-];
+].filter((col) => TeamPermissions.field(col.key));
 
 const COMPLIANCE_CLASS = {
     'CẤM NHẬP': 'warning-cam-nhap',
@@ -84,13 +87,9 @@ function setBatchRunning(running) {
 }
 
 function productRowKey(product) {
-    return [
-        product.Code || '',
-        product.Brand || '',
-        product.Cas || '',
-        product.Size || '',
-        product.Name || '',
-    ].join('\x1f');
+    // Identity must survive filtering even when every identifying field is hidden.
+    if (!productSelectionKeys.has(product)) productSelectionKeys.set(product, String(++nextProductSelectionKey));
+    return productSelectionKeys.get(product);
 }
 
 function clearRowSelection() {
@@ -153,7 +152,8 @@ function updateSelectionUI() {
     selectAll.indeterminate = checkedVisible > 0 && checkedVisible < visibleChecks.length;
 }
 
-function copySelectedRows() {
+async function copySelectedRows() {
+    if (!TeamPermissions.can("COPY")) return;
     if (!selectedProductKeys.size) {
         setOperationStatus('Chọn ít nhất một dòng sản phẩm (checkbox đầu dòng) rồi bấm <strong>Copy Selected</strong>.', 'error');
         return;
@@ -165,16 +165,9 @@ function copySelectedRows() {
         return;
     }
 
-    const lines = products.map((product) => {
-        const cells = EXPORT_COLUMNS.map((col) => {
-            const raw = col.resolve
-                ? col.resolve(product)
-                : (col.format ? col.format(product) : (product[col.key] || ''));
-            return _excelSafeCell(raw);
-        });
-        return cells.join('\t');
-    });
-    const payload = lines.join('\n');
+    let payload;
+    try { payload = await TeamPermissions.transfer('copy', resultSource, products); }
+    catch (error) { clearRowSelection(); setOperationStatus(error.message, 'error'); return; }
 
     const done = () => {
         setOperationStatus(
@@ -232,6 +225,7 @@ function searchProducts() {
         dataType: 'json',
         timeout: AJAX_LONG_TIMEOUT_MS,
         success: function(data) {
+            resultSource = "SEARCH";
             searchResults = data.results || [];
             clearRowSelection();
             updateBrandFilterOptions();
@@ -412,15 +406,10 @@ function displayResults(products) {
         });
         selectCell.appendChild(checkbox);
 
-        setTextCell(row, product.Name || '');
-        setTextCell(row, product.Code || '');
-        setTextCell(row, product.Cas || '');
-        setTextCell(row, product.Brand || '');
-        setTextCell(row, product.Size || '');
-        setTextCell(row, product.Unit_Price || '');
-        setTextCell(row, productNote(product), 'cell-note');
-        setComplianceBadgeCell(row, product);
-        setTextCell(row, productComplianceNote(product), 'cell-compliance-note');
+        EXPORT_COLUMNS.forEach((col) => {
+            if (col.key === 'Compliance') setComplianceBadgeCell(row, product);
+            else setTextCell(row, col.resolve ? col.resolve(product) : product[col.key] || '');
+        });
 
         const cssClass = productComplianceCss(product);
         if (cssClass) {
@@ -652,6 +641,7 @@ function runAdvancedSearch() {
                 return;
             }
             const products = (data && data.results) ? data.results : [];
+            resultSource = "ADVANCED_SEARCH";
             searchResults = products;
             clearRowSelection();
             updateBrandFilterOptions();
@@ -805,9 +795,9 @@ $(document).ready(function() {
                         if (status) warnCount += 1;
                         rowsHtml += `
                           <tr>
-                            <td>${item.Cas || ''}</td>
-                            <td>${status}</td>
-                            <td>${note}</td>
+                            ${TeamPermissions.field('Cas') ? `<td>${$('<div/>').text(item.Cas || '').html()}</td>` : ''}
+                            <td>${$('<div/>').text(status).html()}</td>
+                            ${TeamPermissions.field('Compliance_Note') ? `<td>${$('<div/>').text(note).html()}</td>` : ''}
                           </tr>
                         `;
                     });
@@ -817,9 +807,9 @@ $(document).ready(function() {
                       <table class="license-table">
                         <thead>
                           <tr>
-                            <th>CAS</th>
+                            ${TeamPermissions.field('Cas') ? '<th>CAS</th>' : ''}
                             <th>Compliance_Status</th>
-                            <th>Compliance_Note</th>
+                            ${TeamPermissions.field('Compliance_Note') ? '<th>Compliance_Note</th>' : ''}
                           </tr>
                         </thead>
                         <tbody>
@@ -861,6 +851,7 @@ $(document).ready(function() {
                         setBatchRunning(false);
                         return;
                     }
+                    resultSource = "FIND_CODE";
                     searchResults = products;
                     clearRowSelection();
                     updateBrandFilterOptions();
@@ -890,4 +881,17 @@ $(document).ready(function() {
             }
         }
     });
+});
+
+
+document.getElementById('btnExportSelected')?.addEventListener('click', async () => {
+    const rows = displayedProducts.filter((p) => selectedProductKeys.has(productRowKey(p)));
+    if (!rows.length) { setOperationStatus('Chọn ít nhất một dòng để xuất.', 'error'); return; }
+    try {
+        const blob = await TeamPermissions.transfer('export', resultSource, rows);
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        link.href = url; link.download = 'search-results.tsv'; link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) { clearRowSelection(); setOperationStatus(error.message, 'error'); }
 });

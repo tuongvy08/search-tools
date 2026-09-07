@@ -28,6 +28,7 @@ import admin_login_history
 import admin_teams
 import auth_google
 import session_security
+import team_permissions
 from compliance_resolver import compliance_css_type, resolve_compliance_precedence
 from db import get_connection
 from brand_gateway import (
@@ -98,6 +99,7 @@ auth_google.init_app(app)
 # confirmed the session's account is still ACTIVE and auth_version still
 # matches (or rejected/cleared it). See middleware_access.py's docstring.
 session_security.init_app(app)
+team_permissions.init_app(app)
 
 base_path = os.environ.get("ACCESS_CONTROL_BASE_PATH", "/home/deploy/myapps")
 register_ip_access_control(app, base_path=base_path)
@@ -2717,6 +2719,8 @@ def quick_quote():
                 vis_params,
             )
             brand_options = [row[0] for row in cur.fetchall() if row and row[0]]
+            if not team_permissions.can("VIEW_BRAND"):
+                brand_options = []
     except Exception:
         brand_load_error = True
         brand_options = []
@@ -4520,6 +4524,7 @@ def admin_brand_compliance():
 @app.route("/search", methods=["GET"])
 def search_products():
     search_query = request.args.get("query") or ""
+    cas_search_sql = "OR p.cas ILIKE %s" if team_permissions.can("SEARCH_BY_CAS") else ""
     vis, vis_params = _visibility_sql("p")
     conn = get_connection()
     try:
@@ -4558,7 +4563,7 @@ def search_products():
                     ORDER BY r.priority ASC, r.id ASC
                     LIMIT 1
                 ) rr ON TRUE
-                WHERE (p.name ILIKE %s OR p.code ILIKE %s OR p.cas ILIKE %s)
+                WHERE (p.name ILIKE %s OR p.code ILIKE %s {cas_search_sql})
                 {vis}
                 ORDER BY
                     UPPER(TRIM(COALESCE(p.brand, ''))) ASC,
@@ -4568,7 +4573,7 @@ def search_products():
                     p.id ASC
             """
             pattern = f"%{search_query}%"
-            cursor.execute(query, (pattern, pattern, pattern) + vis_params)
+            cursor.execute(query, (pattern, pattern) + ((pattern,) if cas_search_sql else ()) + vis_params)
             products = cursor.fetchall()
 
         rate_map = _load_pricing_resolver(conn)
@@ -5196,6 +5201,9 @@ def quote_assistant_match():
 
     try:
         parsed_rows, filters, strategy = _quote_parse_payload(payload)
+        if not team_permissions.can("SEARCH_BY_CAS") and any(
+                row["cas_u"] or row["equivalent_search"] for row in parsed_rows):
+            return _quote_json_error("Team không có quyền tìm bằng CAS.", status=403)
     except OverflowError as e:
         return _quote_json_error(str(e), status=413)
     except ValueError as e:
@@ -5391,6 +5399,9 @@ def quote_assistant_preflight():
 
     try:
         parsed_rows, _, _ = _quote_parse_payload(payload)
+        if not team_permissions.can("SEARCH_BY_CAS") and any(
+                row["cas_u"] or row["equivalent_search"] for row in parsed_rows):
+            return _quote_json_error("Team không có quyền tìm bằng CAS.", status=403)
     except OverflowError as e:
         return _quote_json_error(str(e), status=413)
     except ValueError as e:
@@ -5691,7 +5702,9 @@ def _quote_export_products(conn, selections: list[dict]) -> list[dict]:
         if not candidate:
             raise ValueError(f"Selection {selection['ord']} không visible hoặc product_id không tồn tại.")
         if candidate.get("ineligible_reason") == "COMPLIANCE_BLOCKED":
-            raise ValueError(f"Selection {selection['ord']} bị chặn compliance: {candidate.get('Compliance')}.")
+            if team_permissions.can('VIEW_COMPLIANCE'):
+                raise ValueError(f"Selection {selection['ord']} bị chặn compliance: {candidate.get('Compliance')}.")
+            raise ValueError(f"Selection {selection['ord']} không đủ điều kiện xuất báo giá.")
         if candidate.get("currency_rate_status"):
             raise QuotePricingUnavailableError(
                 selection["ord"], candidate["currency_rate_status"]
@@ -5876,7 +5889,20 @@ def quote_assistant_workbook_export():
             products = _quote_export_items_to_products(conn, items)
         else:
             products = _quote_export_products(conn, selections)
-        exported = export_quick_quote_workbook(raw, products)
+        visible_products = team_permissions.redact(products)
+        if all(team_permissions.can(key) for key in team_permissions.FIELDS):
+            exported = export_quick_quote_workbook(raw, visible_products)
+        else:
+            wb = Workbook()
+            sheet = wb.active
+            sheet.title = "Báo giá"
+            columns = [field for key, field in team_permissions.FIELDS.items() if team_permissions.can(key)]
+            sheet.append([label for _, label in columns])
+            for product in visible_products:
+                sheet.append([_safe_transfer_cell(product.get(key, "")) for key, _ in columns])
+            output = BytesIO()
+            wb.save(output)
+            exported = output.getvalue()
     except QuoteTemplateError as e:
         return _quote_json_error(str(e), status=409)
     except QuotePricingUnavailableError as e:
@@ -5895,6 +5921,66 @@ def quote_assistant_workbook_export():
     finally:
         conn.close()
     return _xlsx_bytes_response(exported, _quote_export_download_name(filename or "workbook.xlsx"))
+
+
+def _safe_transfer_cell(value):
+    text = str(value if value is not None else "").replace("\t", " ").replace("\r", " ").replace("\n", " ").strip()
+    return "'" + text if text[:1] in ("=", "+", "-", "@") else text
+
+
+def _results_transfer():
+    if not session_security.verify_csrf_token(request.headers.get("X-CSRF-Token", "")):
+        return None, (jsonify(error="Yêu cầu không hợp lệ."), 400)
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return None, (jsonify(error="Dữ liệu không hợp lệ."), 400)
+    source = payload.get('source')
+    if source not in {'SEARCH', 'FIND_CODE', 'ADVANCED_SEARCH', 'QUICK_QUOTE'} or not team_permissions.can(source):
+        return None, (jsonify(error="Team không có quyền với nguồn kết quả này."), 403)
+    rows = payload.get('rows')
+    if not isinstance(rows, list) or not rows or len(rows) > 2000 or any(not isinstance(r, dict) for r in rows):
+        return None, (jsonify(error="Chọn từ 1 đến 2000 dòng."), 400)
+    # Search copy exports only data already provided by the client. Accept no
+    # unknown columns; current live policy strips stale/forged hidden values.
+    # Quote copy re-fetches products by id to revalidate eligibility/brand scope.
+    if source == 'QUICK_QUOTE':
+        try:
+            selections = _quote_export_parse_selections(json.dumps(rows))
+            conn = get_connection()
+            try:
+                rows = _quote_export_products(conn, selections)
+            finally:
+                conn.close()
+        except (ValueError, QuotePricingUnavailableError):
+            return None, (jsonify(error="Sản phẩm không còn đủ điều kiện sao chép."), 400)
+    rows = team_permissions.redact(rows)
+    columns = [field for key, field in team_permissions.FIELDS.items() if team_permissions.can(key)]
+    def cell(row, key):
+        aliases = {'Compliance': ('Compliance', 'Compliance_Status', 'compliance'),
+                   'Compliance_Note': ('Compliance_Note', 'compliance_note'), 'Note': ('Note', 'note')}
+        value = next((row[k] for k in aliases.get(key, (key,)) if k in row), '')
+        return _safe_transfer_cell(value)
+    lines = ['\t'.join(cell(row, key) for key, _ in columns) for row in rows]
+    return ('\n'.join(lines), columns), None
+
+
+@app.route('/api/results/copy', methods=['POST'])
+def results_copy():
+    result, error = _results_transfer()
+    if error is not None:
+        return error
+    return jsonify(text=result[0])
+
+
+@app.route('/api/results/export', methods=['POST'])
+def results_export():
+    result, error = _results_transfer()
+    if error is not None:
+        return error
+    content, columns = result
+    header = '\t'.join(label for _, label in columns)
+    return app.response_class('\ufeff' + header + '\n' + content, mimetype='text/tab-separated-values',
+                              headers={'Content-Disposition': 'attachment; filename="search-results.tsv"'})
 
 
 if __name__ == "__main__":

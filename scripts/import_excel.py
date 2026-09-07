@@ -13,10 +13,9 @@ ghi bất kỳ thay đổi nào xuống DB:
   - Unknown brand được báo trong --dry-run và được tự tạo trong brand_master
     khi apply, chưa gán currency và không tự cấp quyền team.
   - `--replace-brands-from-file` không còn xóa theo brand text thô của file
-    (đã lỗi thời từ khi products.brand là canonical) -- dùng cùng logic an
-    toàn phạm vi (`inspect_replace_by_brand_scopes` /
-    `resolve_replace_by_brand_target_ids`) mà `/admin/imports/apply` dùng,
-    từ chối xóa toàn bộ canonical brand khi thiếu source_brand scope.
+    (đã lỗi thời từ khi products.brand là canonical). Mỗi Brand trong file
+    được resolve qua Brand Gateway; sau đó xóa TOÀN BỘ products của từng
+    canonical brand đó, không phân biệt source_brand lịch sử.
   - Dùng cùng advisory lock (`acquire_products_import_lock`) mà mọi đường
     ghi products khác trong app phải xin trước khi mutate.
   - Không in credential/DSN ra log/stdout/stderr.
@@ -25,10 +24,9 @@ Chế độ:
   (mặc định)     Xóa TOÀN BỘ products rồi import (giống import full cũ).
   --append       Chỉ thêm dòng, không xóa.
   --replace-brands-from-file
-                 Xóa trong DB các dòng thuộc đúng phạm vi canonical brand +
-                 source_brand xuất hiện trong file, rồi chèn lại toàn bộ
-                 dòng trong file. Bị từ chối nếu một canonical brand có
-                 nhiều source_brand trong DB nhưng file không chỉ rõ phạm vi.
+                 Resolve Brand trong file về canonical brand, xóa TOÀN BỘ
+                 products của các canonical brand đó (mọi source_brand), rồi
+                 chèn lại toàn bộ dòng trong file.
   --dry-run      Chỉ resolve qua Brand Gateway + đếm số dòng sẽ ghi/xóa,
                  KHÔNG ghi gì vào DB (rollback toàn bộ transaction).
 
@@ -51,7 +49,6 @@ from db import get_connection  # noqa: E402
 from excel_io import load_product_rows_from_xlsx  # noqa: E402
 from brand_gateway import (  # noqa: E402
     acquire_products_import_lock,
-    inspect_replace_by_brand_scopes,
     load_brand_gateway,
     preview_import_rows_brands,
     register_and_resolve_import_rows,
@@ -80,7 +77,50 @@ def _rows_as_insert_tuples(rows: list[dict]) -> list[tuple]:
     ]
 
 
-def main() -> None:
+def _canonical_brand_insert_counts(rows: list[dict]) -> dict[str, int]:
+    """Count incoming rows by their already-resolved canonical brand."""
+    counts: dict[str, int] = {}
+    for row in rows:
+        canonical_brand = str(row.get("canonical_brand") or "").strip()
+        if not canonical_brand:
+            raise ValueError("Không thể xác định canonical brand cho một dòng import.")
+        counts[canonical_brand] = counts.get(canonical_brand, 0) + 1
+    return counts
+
+
+def _canonical_brand_replace_counts(cur, rows: list[dict]) -> dict[str, dict[str, int]]:
+    """Return visible per-canonical-brand delete/insert counts for the CLI."""
+    insert_counts = _canonical_brand_insert_counts(rows)
+    result: dict[str, dict[str, int]] = {}
+    for canonical_brand in sorted(insert_counts, key=str.casefold):
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM products
+            WHERE UPPER(TRIM(brand)) = UPPER(TRIM(%s))
+            """,
+            (canonical_brand,),
+        )
+        result[canonical_brand] = {
+            "delete": cur.fetchone()[0],
+            "insert": insert_counts[canonical_brand],
+        }
+    return result
+
+
+def _print_canonical_brand_replace_plan(counts: dict[str, dict[str, int]]) -> None:
+    print("[DRY-RUN] Phạm vi thay thế theo canonical brand (bao gồm mọi source_brand):")
+    for canonical_brand, values in counts.items():
+        print(
+            f"[DRY-RUN] - {canonical_brand}: "
+            f"xóa {values['delete']:,}, chèn {values['insert']:,} dòng."
+        )
+    total_delete = sum(values["delete"] for values in counts.values())
+    total_insert = sum(values["insert"] for values in counts.values())
+    print(f"[DRY-RUN] TỔNG: xóa {total_delete:,}, chèn {total_insert:,} dòng.")
+
+
+def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description="Import products từ Excel vào PostgreSQL")
     parser.add_argument("xlsx_path", help="Đường dẫn file .xlsx")
     parser.add_argument(
@@ -92,14 +132,17 @@ def main() -> None:
         "--replace-brands-from-file",
         action="store_true",
         dest="replace_brands",
-        help="Xóa theo canonical brand + source_brand scope (an toàn hơn full delete)",
+        help=(
+            "Resolve Brand qua Brand Gateway rồi xóa toàn bộ products của mỗi "
+            "canonical brand có trong file (bao gồm mọi source_brand)"
+        ),
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Chỉ resolve Brand Gateway + đếm số dòng sẽ ghi/xóa, KHÔNG ghi vào DB.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.append and args.replace_brands:
         print("Chọn một trong hai: --append hoặc --replace-brands-from-file", file=sys.stderr)
@@ -137,13 +180,8 @@ def main() -> None:
                 print(f"[DRY-RUN] Brand mới: {brand['name']} ({brand['row_count']} dòng).")
             with pg.cursor() as cur:
                 if args.replace_brands:
-                    _, scope_errors, delete_count = inspect_replace_by_brand_scopes(cur, preview_rows, gateway)
-                    if scope_errors:
-                        for error in scope_errors:
-                            print(f"  - {error}", file=sys.stderr)
-                        pg.rollback()
-                        sys.exit(1)
-                    print(f"[DRY-RUN] Sẽ xóa {delete_count} dòng hiện có theo brand/source scope.")
+                    replace_counts = _canonical_brand_replace_counts(cur, preview_rows)
+                    _print_canonical_brand_replace_plan(replace_counts)
                 elif not args.append:
                     cur.execute("SELECT COUNT(*) FROM products")
                     print(f"[DRY-RUN] Sẽ xóa TOÀN BỘ {cur.fetchone()[0]} dòng hiện có.")
@@ -159,22 +197,16 @@ def main() -> None:
 
                 resolved_dicts, created_brands = register_and_resolve_import_rows(cur, import_rows)
                 resolved_rows = _rows_as_insert_tuples(resolved_dicts)
-                scope_rows = resolved_dicts
-                gateway = load_brand_gateway(cur)
 
                 delete_target_ids: list[int] = []
                 full_delete_count = 0
 
                 if args.replace_brands:
-                    brand_to_sources, scope_errors, _total_deletable = inspect_replace_by_brand_scopes(
-                        cur, scope_rows, gateway
-                    )
-                    if scope_errors:
-                        print("Import bị TỪ CHỐI (an toàn phạm vi xóa, chưa ghi gì vào DB):", file=sys.stderr)
-                        for e in scope_errors:
-                            print(f"  - {e}", file=sys.stderr)
-                        pg.rollback()
-                        sys.exit(1)
+                    canonical_brands = _canonical_brand_insert_counts(resolved_dicts)
+                    # Empty source sets intentionally select every historical
+                    # source_brand under each resolved canonical brand. This is
+                    # the explicit contract of this CLI flag only.
+                    brand_to_sources = {brand: set() for brand in canonical_brands}
                     target_ids_by_brand = resolve_replace_by_brand_target_ids(cur, brand_to_sources)
                     delete_target_ids = [i for ids in target_ids_by_brand.values() for i in ids]
                 elif not args.append:

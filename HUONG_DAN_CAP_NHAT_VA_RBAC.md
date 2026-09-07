@@ -21,7 +21,7 @@ Tài liệu này bổ sung cho **`HUONG_DAN_LOCAL.md`** (chạy Docker + Postgre
 
 ## 1. Tư vấn ngắn (ý tưởng)
 
-- **Cập nhật từ Excel (ít khi):** dùng `import_excel.py --replace-brands-from-file` — trong DB chỉ **xóa các dòng đúng brand có trong file**, rồi chèn lại toàn bộ dòng trong file (giống logic cũ). Không cần copy file `.db` lên server.
+- **Cập nhật từ Excel (ít khi):** dùng `import_excel.py --replace-brands-from-file` — mỗi Brand trong file được đổi qua Brand Gateway thành canonical brand, rồi DB **xóa toàn bộ sản phẩm của các canonical brand đó (bao gồm mọi `source_brand` lịch sử)** trước khi chèn lại toàn bộ dòng trong file. Không cần copy file `.db` lên server.
 - **Phân quyền:** cột **`brand`** trên `products` vẫn là tên brand của sản phẩm. Bảng **`team_brands`** quy định **team nào được xem brand nào** — linh hoạt hơn là gắn cứng “team” vào từng dòng sản phẩm.
 
 ---
@@ -263,7 +263,7 @@ source .venv/bin/activate
 set -a && source .env && set +a
 ```
 
-**Giống logic cũ (chỉ xóa các brand có trong file, rồi import lại):**
+**Thay thế toàn bộ canonical brand có trong file (bao gồm mọi `source_brand` lịch sử), rồi import lại:**
 
 ```bash
 python scripts/import_excel.py ~/Desktop/ten_file.xlsx --replace-brands-from-file

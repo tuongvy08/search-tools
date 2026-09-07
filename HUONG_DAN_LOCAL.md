@@ -214,7 +214,7 @@ python scripts/import_excel.py ~/Desktop/du_lieu.xlsx
 ```
 
 Chỉ thêm không xóa: thêm `--append`.  
-Cập nhật theo brand (xóa đúng brand trong file rồi import): `--replace-brands-from-file` — xem `HUONG_DAN_CAP_NHAT_VA_RBAC.md`.
+Cập nhật theo canonical brand (xóa toàn bộ sản phẩm của canonical brand trong file, gồm mọi `source_brand`, rồi import): `--replace-brands-from-file` — xem `HUONG_DAN_CAP_NHAT_VA_RBAC.md`.
 
 ---
 

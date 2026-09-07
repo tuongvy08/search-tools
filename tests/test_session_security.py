@@ -25,8 +25,9 @@ import session_security
 
 
 class _FakeUserDB:
-    def __init__(self, users=None):
+    def __init__(self, users=None, active_teams=None):
         self.users = dict(users or {})  # user_id -> (account_status, auth_version)
+        self.active_teams = set({1} if active_teams is None else active_teams)
         self.audits = []
 
 
@@ -47,6 +48,9 @@ class _FakeCursor:
             (user_id,) = params
             row = self.db.users.get(user_id)
             self._result = [row] if row is not None else []
+        elif "SELECT 1 FROM teams WHERE id = %s AND lifecycle_status = 'ACTIVE'" in s:
+            (team_id,) = params
+            self._result = [(1,)] if team_id in self.db.active_teams else []
         elif "INSERT INTO login_audit_events" in s:
             self.db.audits.append(params)
             self._result = []
@@ -140,6 +144,29 @@ class SessionRevocationTests(_ClientTestCase):
             resp = self.client.get("/")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(db.audits, [])
+
+    def test_archived_team_revokes_staff_even_when_ip_allowlist_disabled(self):
+        db = _FakeUserDB({10: ("ACTIVE", 2)}, active_teams=set())
+        self._set_session(
+            authenticated=True, user_id=10, auth_version=2,
+            username="staff", role="user", is_admin=False, team_id=1,
+        )
+        with mock.patch.object(session_security, "get_connection", _fake_get_connection(db)):
+            resp = self.client.get("/")
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(db.audits[0][3], "TEAM_NOT_ACTIVE")
+
+    def test_legacy_staff_session_requires_active_team(self):
+        db = _FakeUserDB({}, active_teams=set())
+        self._set_session(
+            authenticated=True, username="legacy-staff", role="user",
+            is_admin=False, team_id=1,
+        )
+        with mock.patch.dict(os.environ, {"ENABLE_LEGACY_PASSWORD_LOGIN": "true"}, clear=False), \
+             mock.patch.object(session_security, "get_connection", _fake_get_connection(db)):
+            resp = self.client.get("/")
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(db.audits[0][3], "TEAM_NOT_ACTIVE")
 
     def test_api_path_gets_json_401_instead_of_redirect(self):
         db = _FakeUserDB({7: ("ACTIVE", 5)})
@@ -259,7 +286,7 @@ class NavigationVisibilityTests(_ClientTestCase):
     # `auth_version` like a real session would, with the per-request
     # liveness check mocked to match.
     def test_staff_sees_search_and_quick_quote_but_not_admin_links(self):
-        self._set_session(authenticated=True, user_id=101, auth_version=1, username="staff1", role="user", is_admin=False)
+        self._set_session(authenticated=True, user_id=101, auth_version=1, username="staff1", role="user", is_admin=False, team_id=1)
         db = _FakeUserDB({101: ("ACTIVE", 1)})
         with mock.patch.object(session_security, "get_connection", _fake_get_connection(db)):
             resp = self.client.get("/")
@@ -286,7 +313,7 @@ class NavigationVisibilityTests(_ClientTestCase):
         self.assertNotIn(b"sq-user-nav", resp.data)
 
     def test_logout_form_carries_a_csrf_token(self):
-        self._set_session(authenticated=True, user_id=103, auth_version=1, username="staff1", role="user", is_admin=False)
+        self._set_session(authenticated=True, user_id=103, auth_version=1, username="staff1", role="user", is_admin=False, team_id=1)
         db = _FakeUserDB({103: ("ACTIVE", 1)})
         with mock.patch.object(session_security, "get_connection", _fake_get_connection(db)):
             resp = self.client.get("/")

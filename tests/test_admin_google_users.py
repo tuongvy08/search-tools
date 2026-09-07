@@ -287,18 +287,18 @@ class AccessControlTests(_ClientTestCase):
     def test_staff_cannot_load_admin_users_page(self):
         # _require_admin_page() rejects before any DB access is attempted,
         # so no connection mock is needed (and none is installed) here.
-        self._set_session(authenticated=True, user_id=9, auth_version=1, is_admin=False, role="user", username="staff1")
+        self._set_session(authenticated=True, user_id=9, auth_version=1, is_admin=False, role="user", username="staff1", team_id=1)
         resp = self.client.get("/admin/users")
         self.assertEqual(resp.status_code, 403)
 
     def test_staff_cannot_call_approve_action(self):
-        self._set_session(authenticated=True, user_id=9, auth_version=1, is_admin=False, role="user")
+        self._set_session(authenticated=True, user_id=9, auth_version=1, is_admin=False, role="user", team_id=1)
         with mock.patch.object(admin_google_users, "get_connection", _refuse_to_connect):
             resp = self.client.post("/admin/users/google/approve", data=self._csrf_form(user_id="5", role="staff", team_id="1"))
         self.assertEqual(resp.status_code, 403)
 
     def test_staff_cannot_call_any_google_users_action(self):
-        self._set_session(authenticated=True, user_id=9, auth_version=1, is_admin=False, role="user")
+        self._set_session(authenticated=True, user_id=9, auth_version=1, is_admin=False, role="user", team_id=1)
         actions = [
             "/admin/users/google/invite",
             "/admin/users/google/suspend",

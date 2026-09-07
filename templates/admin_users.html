@@ -37,6 +37,14 @@
     .gu-inline-form { display: inline-flex; gap: 6px; align-items: center; margin: 2px 4px 2px 0; }
     .gu-filter-btn { border-radius: 999px; padding: 6px 12px; }
     .gu-filter-btn[aria-pressed="true"] { background: #2563eb; color: #fff; border-color: #2563eb; }
+    .filters { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0; }
+    .filters a { padding:7px 12px; border:1px solid #ddd; border-radius:999px; text-decoration:none; color:#1f2937; }
+    .filters a.active { background:#2563eb; color:#fff; border-color:#2563eb; }
+    .lifecycle-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+    @media (max-width: 600px) {
+      body { max-width:100%; box-sizing:border-box; overflow-x:hidden; }
+      .card, input, select, button { max-width:100%; box-sizing:border-box; }
+    }
   </style>
 </head>
 <body>
@@ -244,6 +252,11 @@
 
   <div class="card">
     <h2 style="margin-top:0;">Danh sách users</h2>
+    <p class="muted">“Lưu trữ” loại tài khoản LOCAL khỏi vận hành và chặn đăng nhập ngay, nhưng vẫn giữ lịch sử/audit.</p>
+    <nav class="filters" aria-label="Lọc vòng đời tài khoản LOCAL">
+      <a class="{{ 'active' if local_lifecycle == 'active' else '' }}" href="{{ url_for('admin_users') }}">Đang hoạt động</a>
+      <a class="{{ 'active' if local_lifecycle == 'archived' else '' }}" href="{{ url_for('admin_users', lifecycle='archived') }}">Đã lưu trữ</a>
+    </nav>
     <div class="gu-table-scroll">
     <table>
       <thead>
@@ -253,6 +266,7 @@
           <th>Role</th>
           <th>Bypass IP</th>
           <th>Team &amp; brand kế thừa</th>
+          <th>Trạng thái</th>
           <th>Cập nhật</th>
         </tr>
       </thead>
@@ -277,7 +291,9 @@
                 <div class="small muted" style="margin-top:4px;">Chỉnh brand ở <a href="/admin/teams">trang Team</a>.</div>
               {% endif %}
             </td>
+            <td>{{ 'Đã lưu trữ' if u.archived_at else 'Đang hoạt động' }}</td>
             <td style="min-width: 320px;">
+              {% if not u.archived_at %}
               <form id="form_update_{{ u.id }}" method="post" action="/admin/users">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                 <input type="hidden" name="action" value="update_user" />
@@ -315,6 +331,25 @@
 
                 <button class="primary" type="submit" style="margin-top:8px;">Lưu thay đổi</button>
               </form>
+              <div class="lifecycle-actions">
+                {% if u.id == session.get('user_id') %}
+                  <span class="small muted">Không thể tự lưu trữ tài khoản đang dùng.</span>
+                {% else %}
+                <form method="post" action="{{ url_for('admin_lifecycle.archive_local_user') }}" class="local-archive-form">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="user_id" value="{{ u.id }}">
+                  <button class="danger" type="submit">Lưu trữ</button>
+                </form>
+                {% endif %}
+              </div>
+              {% else %}
+              <p class="small muted">Tài khoản không thể đăng nhập; dữ liệu lịch sử vẫn được giữ.</p>
+              <form method="post" action="{{ url_for('admin_lifecycle.restore_local_user') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="user_id" value="{{ u.id }}">
+                <button class="primary" type="submit">Khôi phục</button>
+              </form>
+              {% endif %}
             </td>
           </tr>
         {% endfor %}
@@ -324,6 +359,14 @@
   </div>
 
   <script>
+    document.querySelectorAll('.local-archive-form').forEach(function (form) {
+      form.addEventListener('submit', function (event) {
+        if (!window.confirm('Lưu trữ 1 tài khoản sẽ chặn đăng nhập ngay và vô hiệu hoá mọi phiên hiện tại. Tiếp tục?')) {
+          event.preventDefault();
+        }
+      });
+    });
+
     // Phase 5D2B: pure visibility filter on server-rendered rows. Never
     // uses innerHTML and never writes any DB-sourced value into the DOM --
     // it only toggles the `hidden` attribute of rows Jinja already
@@ -378,4 +421,3 @@
   </script>
 </body>
 </html>
-

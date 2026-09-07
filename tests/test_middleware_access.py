@@ -17,10 +17,10 @@ Covers:
   - INHERIT / ALLOWLIST_ONLY / ANY_AUTHENTICATED: matching/non-matching IP,
     genuinely empty rule sets (valid, not an error).
   - `_load_db_cidrs` / `_load_team_ip_policy` read FAILURES (connection
-    lost, migration-015 column/table missing, team deleted, invalid
-    stored value, staff session missing team_id) -- all now denied with
-    503 (dependency unavailable), never silently opened or downgraded to
-    a specific policy value such as INHERIT.
+    lost, migration-015 column/table missing, team deleted, invalid stored
+    value) -- all now deny with 503. A staff session missing its team is
+    revoked earlier by the independent session lifecycle gate; neither case
+    is silently opened or downgraded to a policy such as INHERIT.
   - A session already rejected by `session_security.enforce_session_validity`
     (revoked/suspended/auth_version-mismatched) never reaches this
     middleware at all, so a stale cookie's `ip_bypass_allowlist=True`
@@ -332,16 +332,18 @@ class AnyAuthenticatedModeTests(_MiddlewareTestBase):
 
 class TeamPolicyUnavailableTests(_MiddlewareTestBase):
     def _staff_session(self, team_id, user_id=11, auth_version=1):
-        start_auth_db_patch(self, user_id=user_id, auth_version=auth_version)
+        auth_db = start_auth_db_patch(self, user_id=user_id, auth_version=auth_version)
         self._set_session(authenticated=True, user_id=user_id, auth_version=auth_version,
                            username="staff", is_admin=False, team_id=team_id)
+        return auth_db
 
-    def test_staff_missing_team_id_denies_503_not_broader_policy(self):
-        self._staff_session(team_id=None)
+    def test_staff_missing_team_id_revokes_session_before_policy_resolution(self):
+        auth_db = self._staff_session(team_id=None)
         # Even with wide-open INHERIT rules, a staff session with no team
-        # must be denied (503), never silently treated as INHERIT-allow.
+        # is invalid and must be revoked before it can inherit a broader policy.
         resp = self._get(environ_overrides={"REMOTE_ADDR": "1.2.3.4"})
-        self.assertEqual(resp.status_code, 503)
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(auth_db.audits[0][3], "TEAM_NOT_ACTIVE")
 
     def test_team_deleted_denies_503_not_inherit(self):
         # team_id=99 has no entry in self.db.team_policies -> "not found".

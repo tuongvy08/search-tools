@@ -52,6 +52,7 @@ import session_security
 MIGRATION_006_PATH = os.path.join(os.path.dirname(__file__), "..", "sql", "migration_006_office_ip_allowlist.sql")
 MIGRATION_014_PATH = os.path.join(os.path.dirname(__file__), "..", "sql", "migration_014_google_oidc.sql")
 MIGRATION_015_PATH = os.path.join(os.path.dirname(__file__), "..", "sql", "migration_015_team_policy.sql")
+MIGRATION_020_PATH = os.path.join(os.path.dirname(__file__), "..", "sql", "migration_020_admin_lifecycle.sql")
 
 _REAL_DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
@@ -99,6 +100,8 @@ with open(MIGRATION_014_PATH, "r", encoding="utf-8") as _f:
 # to behave like a fully-migrated app DB (never applied to products_local).
 with open(MIGRATION_015_PATH, "r", encoding="utf-8") as _f:
     _MIGRATION_015_SQL = _f.read()
+with open(MIGRATION_020_PATH, "r", encoding="utf-8") as _f:
+    _MIGRATION_020_SQL = _f.read()
 
 # Phase 6A-Fix1: `middleware_access._restrict_office_ip` runs as a REAL
 # `before_request` hook on `search.app` for every request this file makes
@@ -163,6 +166,7 @@ class _RealPgTestBase(unittest.TestCase):
                     cur.execute(_MINIMAL_BASE_SCHEMA_SQL)
                     cur.execute(_MIGRATION_014_SQL)
                     cur.execute(_MIGRATION_015_SQL)
+                    cur.execute(_MIGRATION_020_SQL)
                     cur.execute(_MIGRATION_006_SQL)
         finally:
             conn.close()

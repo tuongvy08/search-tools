@@ -265,7 +265,9 @@ def fetch_google_admin_context(cur):
              account_status, approved_at, last_login_at) in cur.fetchall()
     ]
 
-    cur.execute("SELECT id, name FROM teams ORDER BY name")
+    cur.execute(
+        "SELECT id, name FROM teams WHERE lifecycle_status = 'ACTIVE' ORDER BY name"
+    )
     teams = [{"id": tid, "name": name} for (tid, name) in cur.fetchall()]
 
     return google_users, teams
@@ -316,7 +318,10 @@ def approve():
                         candidate_team_id = int(team_id_raw)
                     except (TypeError, ValueError):
                         raise _ActionError(_ERR_STAFF_NEEDS_TEAM)
-                    cur.execute("SELECT id FROM teams WHERE id = %s", (candidate_team_id,))
+                    cur.execute(
+                        "SELECT id FROM teams WHERE id = %s AND lifecycle_status = 'ACTIVE'",
+                        (candidate_team_id,),
+                    )
                     if cur.fetchone() is None:
                         raise _ActionError(_ERR_STAFF_NEEDS_TEAM)
                     team_id = candidate_team_id
@@ -560,7 +565,10 @@ def update():
                         candidate_team_id = int(team_id_raw)
                     except (TypeError, ValueError):
                         raise _ActionError(_ERR_STAFF_NEEDS_TEAM)
-                    cur.execute("SELECT id FROM teams WHERE id = %s", (candidate_team_id,))
+                    cur.execute(
+                        "SELECT id FROM teams WHERE id = %s AND lifecycle_status = 'ACTIVE'",
+                        (candidate_team_id,),
+                    )
                     if cur.fetchone() is None:
                         raise _ActionError(_ERR_STAFF_NEEDS_TEAM)
                     team_id = candidate_team_id

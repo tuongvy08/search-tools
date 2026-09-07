@@ -412,7 +412,7 @@ def google_callback():
         _clear_authenticated_identity()
         return _generic_oauth_conflict_response()
 
-    user_id, _username, status, _is_admin, _team_id, _ip_bypass, _auth_version = row
+    user_id, _username, status, is_admin, team_id, _ip_bypass, _auth_version = row
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -435,6 +435,16 @@ def google_callback():
                 return render_template("pending_approval.html"), 200
 
             if status == "ACTIVE":
+                if not is_admin:
+                    cur.execute(
+                        "SELECT 1 FROM teams WHERE id = %s AND lifecycle_status = 'ACTIVE'",
+                        (team_id,),
+                    )
+                    if cur.fetchone() is None:
+                        _write_audit(cur, user_id=user_id, outcome="DENIED", reason_code="TEAM_NOT_ACTIVE", email=canonical_email, domain=hd, request_id=request_id)
+                        conn.commit()
+                        _clear_authenticated_identity()
+                        return render_template("login.html", error="Team của tài khoản không còn hoạt động.", google_auth_enabled=True), 403
                 cur.execute("UPDATE app_users SET last_login_at = NOW() WHERE id = %s", (user_id,))
                 _write_audit(cur, user_id=user_id, outcome="SUCCESS", reason_code="LOGIN", email=canonical_email, domain=hd, request_id=request_id)
                 conn.commit()

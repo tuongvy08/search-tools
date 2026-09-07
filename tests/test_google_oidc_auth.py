@@ -132,6 +132,9 @@ class FakeCursor:
             (user_id,) = params
             self.db.touch_login(user_id)
             self._result = []
+        elif "SELECT 1 FROM teams WHERE id = %s AND lifecycle_status = 'ACTIVE'" in s:
+            (team_id,) = params
+            self._result = [(1,)] if team_id is not None else []
         elif "SELECT id FROM app_users" in s and "INVITED" in s:
             (email,) = params
             row = self.db.find_invited(email)

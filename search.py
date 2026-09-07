@@ -23,6 +23,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 import admin_google_users
+import admin_lifecycle
 import admin_login_history
 import admin_teams
 import auth_google
@@ -116,6 +117,7 @@ app.register_blueprint(admin_login_history.admin_login_history_bp)
 # 3-mode IP policy, gated behind the preview -> confirm flow described in
 # that module's docstring.
 app.register_blueprint(admin_teams.admin_teams_bp)
+app.register_blueprint(admin_lifecycle.admin_lifecycle_bp)
 
 
 @app.after_request
@@ -409,7 +411,12 @@ def _visibility_sql(alias: str):
     tid = session.get("team_id")
     if tid is None:
         return " AND FALSE", ()
-    return (f" AND {alias}.brand IN (SELECT brand FROM team_brands WHERE team_id = %s)", (tid,))
+    return (
+        f" AND {alias}.brand IN ("
+        f"SELECT tb.brand FROM team_brands tb JOIN teams t ON t.id = tb.team_id "
+        f"WHERE tb.team_id = %s AND t.lifecycle_status = 'ACTIVE')",
+        (tid,),
+    )
 
 
 def _warning_css_type(label: Optional[str]) -> Optional[str]:
@@ -2624,16 +2631,20 @@ def login():
             try:
                 with conn.cursor() as cur:
                     cur.execute(
-                        "SELECT id, password_hash, team_id, is_admin, ip_bypass_allowlist, "
-                        "account_status, auth_version "
-                        "FROM app_users WHERE username = %s AND auth_provider = 'LOCAL'",
+                        "SELECT a.id, a.password_hash, a.team_id, a.is_admin, "
+                        "a.ip_bypass_allowlist, a.account_status, a.auth_version, "
+                        "a.archived_at, t.lifecycle_status "
+                        "FROM app_users a LEFT JOIN teams t ON t.id = a.team_id "
+                        "WHERE a.username = %s AND a.auth_provider = 'LOCAL'",
                         (username,),
                     )
                     row = cur.fetchone()
             finally:
                 conn.close()
 
-            if row and row[1] and check_password_hash(row[1], password) and row[5] == "ACTIVE":
+            team_allowed = bool(row and (row[3] or row[8] == "ACTIVE"))
+            if (row and row[1] and check_password_hash(row[1], password)
+                    and row[5] == "ACTIVE" and row[7] is None and team_allowed):
                 session.clear()
                 session["authenticated"] = True
                 session["username"] = username
@@ -4133,7 +4144,10 @@ def admin_users():
                                 raise ValueError(f"Username đã tồn tại: {username}")
 
                             if not is_admin:
-                                cur.execute("SELECT id FROM teams WHERE id = %s", (team_id,))
+                                cur.execute(
+                                    "SELECT id FROM teams WHERE id = %s AND lifecycle_status = 'ACTIVE'",
+                                    (team_id,),
+                                )
                                 if cur.fetchone() is None:
                                     raise ValueError("Team đã chọn không còn tồn tại.")
 
@@ -4225,6 +4239,14 @@ def admin_users():
                                 raise ValueError("Không tìm thấy user.")
 
                             username, team_id, old_is_admin = row
+                            cur.execute(
+                                "SELECT account_status, is_admin, auth_version "
+                                "FROM app_users WHERE id = %s",
+                                (user_id,),
+                            )
+                            lifecycle_row = cur.fetchone()
+                            if lifecycle_row is None or lifecycle_row[0] != "ACTIVE":
+                                raise ValueError("Tài khoản đã lưu trữ không thể cập nhật.")
                             demoting = bool(old_is_admin) and not set_is_admin
 
                             if demoting and user_id == session.get("user_id"):
@@ -4258,7 +4280,10 @@ def admin_users():
                                 )
                                 final_team_id = None
                             else:
-                                cur.execute("SELECT id FROM teams WHERE id = %s", (new_team_id,))
+                                cur.execute(
+                                    "SELECT id FROM teams WHERE id = %s AND lifecycle_status = 'ACTIVE'",
+                                    (new_team_id,),
+                                )
                                 if cur.fetchone() is None:
                                     raise ValueError("Team đã chọn không còn tồn tại.")
                                 cur.execute(
@@ -4295,34 +4320,38 @@ def admin_users():
         if msg or err:
             return redirect(url_for("admin_users", msg=msg, err=err))
 
-    # GET: load users + brands
+    # GET: active LOCAL accounts by default; archived accounts are an
+    # explicit operational-history filter, never mixed into assignment UI.
+    local_lifecycle = (request.args.get("lifecycle") or "active").strip().lower()
+    if local_lifecycle not in {"active", "archived"}:
+        local_lifecycle = "active"
     conn = get_connection()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT a.id, a.username, a.is_admin, a.team_id, t.name, a.ip_bypass_allowlist
+                SELECT a.id, a.username, a.is_admin, a.team_id, t.name,
+                       a.ip_bypass_allowlist, a.archived_at,
+                       COALESCE((
+                           SELECT array_agg(tb.brand ORDER BY tb.brand)
+                           FROM team_brands tb
+                           WHERE tb.team_id = a.team_id
+                       ), ARRAY[]::TEXT[]) AS inherited_brands
                 FROM app_users a
                 LEFT JOIN teams t ON t.id = a.team_id
                 WHERE a.auth_provider = 'LOCAL'
+                  AND ((%s = 'active' AND a.archived_at IS NULL)
+                    OR (%s = 'archived' AND a.archived_at IS NOT NULL))
                 ORDER BY a.id DESC
                 """
+                , (local_lifecycle, local_lifecycle)
             )
             user_rows = cur.fetchall()
 
             users = []
-            for (uid, username, is_admin, team_id, team_name, ip_bypass_allowlist) in user_rows:
-                # Phase 6A: brands are shown READ-ONLY here (inherited from
-                # the assigned team, managed on /admin/teams) -- this page
-                # never edits team_brands directly anymore.
-                inherited_brands = []
-                if (not is_admin) and team_id:
-                    cur.execute(
-                        "SELECT brand FROM team_brands WHERE team_id = %s ORDER BY brand",
-                        (team_id,),
-                    )
-                    inherited_brands = [r[0] for r in cur.fetchall()]
-
+            for (uid, username, is_admin, team_id, team_name, ip_bypass_allowlist,
+                 archived_at, inherited_brand_rows) in user_rows:
+                inherited_brands = list(inherited_brand_rows or []) if not is_admin else []
                 users.append(
                     {
                         "id": uid,
@@ -4333,6 +4362,7 @@ def admin_users():
                         "team_name": team_name,
                         "inherited_brands": inherited_brands,
                         "inherited_brands_count": len(inherited_brands),
+                        "archived_at": archived_at,
                     }
                 )
 
@@ -4368,6 +4398,7 @@ def admin_users():
         google_users=google_users,
         google_teams=google_teams,
         google_allowed_domains=google_allowed_domains,
+        local_lifecycle=local_lifecycle,
         message=msg or request.args.get("msg"),
         error=err or request.args.get("err"),
     )

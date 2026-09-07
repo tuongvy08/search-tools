@@ -73,6 +73,7 @@ from psycopg2 import IntegrityError
 from admin_google_users import acquire_last_admin_lock, revalidate_actor, write_permission_audit
 from db import get_connection
 from session_security import verify_csrf_token
+import admin_lifecycle
 
 admin_teams_bp = Blueprint("admin_teams", __name__)
 
@@ -181,7 +182,11 @@ def _fetch_team_brands(cur, team_id) -> list[str]:
 
 def _fetch_team_row(cur, team_id):
     """Returns (id, name, ip_policy, updated_at) or None."""
-    cur.execute("SELECT id, name, ip_policy, updated_at FROM teams WHERE id = %s", (team_id,))
+    cur.execute(
+        "SELECT id, name, ip_policy, updated_at FROM teams "
+        "WHERE id = %s AND lifecycle_status = 'ACTIVE'",
+        (team_id,),
+    )
     return cur.fetchone()
 
 
@@ -310,6 +315,12 @@ def index():
     distinct_brands = []
     preview_result = None
     preview_token = request.args.get("preview")
+    archive_preview_token = request.args.get("archive_preview")
+    lifecycle = (request.args.get("lifecycle") or "active").strip().lower()
+    if lifecycle not in {"active", "archived"}:
+        lifecycle = "active"
+    archive_preview_result = None
+    active_teams = []
 
     conn = get_connection()
     try:
@@ -320,13 +331,22 @@ def index():
                 cur.execute(
                     """
                     SELECT t.id, t.name, t.ip_policy, t.updated_at,
-                           (SELECT COUNT(*) FROM app_users a WHERE a.team_id = t.id) AS member_count
+                           t.lifecycle_status, t.archived_at,
+                           COUNT(DISTINCT a.id) AS member_count,
+                           COALESCE(array_agg(DISTINCT tb.brand ORDER BY tb.brand)
+                               FILTER (WHERE tb.brand IS NOT NULL), '{}') AS brands
                     FROM teams t
+                    LEFT JOIN app_users a ON a.team_id = t.id
+                    LEFT JOIN team_brands tb ON tb.team_id = t.id
+                    WHERE t.lifecycle_status = %s
+                    GROUP BY t.id
                     ORDER BY t.name ASC
-                    """
+                    """,
+                    (lifecycle.upper(),),
                 )
                 team_rows = cur.fetchall()
-                for (tid, name, ip_policy, updated_at, member_count) in team_rows:
+                for (tid, name, ip_policy, updated_at, status, archived_at,
+                     member_count, brands) in team_rows:
                     teams.append({
                         "id": tid,
                         "name": name,
@@ -334,8 +354,15 @@ def index():
                         "ip_policy_label": _IP_POLICY_LABELS.get(ip_policy, ip_policy),
                         "updated_at": updated_at,
                         "member_count": member_count,
-                        "brands": _fetch_team_brands(cur, tid),
+                        "brands": list(brands or []),
+                        "lifecycle_status": status,
+                        "archived_at": archived_at,
                     })
+
+                cur.execute(
+                    "SELECT id, name FROM teams WHERE lifecycle_status = 'ACTIVE' ORDER BY name"
+                )
+                active_teams = [{"id": row[0], "name": row[1]} for row in cur.fetchall()]
 
                 distinct_brands = _fetch_distinct_brands(cur)
 
@@ -365,8 +392,14 @@ def index():
                                 "affected_members": _fetch_affected_members(cur, record["team_id"]),
                                 "stale": current_updated_at != record["captured_updated_at"],
                             }
-    except Exception as e:
-        err = err or str(e)
+                if archive_preview_token:
+                    archive_preview_result = admin_lifecycle.fetch_team_archive_preview(
+                        cur, archive_preview_token, session.get("user_id")
+                    )
+                    if archive_preview_result is None:
+                        err = err or admin_lifecycle._ERR_PREVIEW_EXPIRED
+    except Exception:
+        err = err or _ERR_GENERIC
     finally:
         conn.close()
 
@@ -377,6 +410,9 @@ def index():
         ip_policies=_VALID_IP_POLICIES,
         ip_policy_labels=_IP_POLICY_LABELS,
         preview_result=preview_result,
+        archive_preview_result=archive_preview_result,
+        active_teams=active_teams,
+        lifecycle=lifecycle,
         message=msg,
         error=err,
     )
@@ -464,7 +500,10 @@ def rename_team():
                 if not new_name:
                     raise _ActionError(_ERR_MISSING_NAME)
 
-                cur.execute("SELECT id FROM teams WHERE id = %s FOR UPDATE", (team_id,))
+                cur.execute(
+                    "SELECT id FROM teams WHERE id = %s AND lifecycle_status = 'ACTIVE' FOR UPDATE",
+                    (team_id,),
+                )
                 if cur.fetchone() is None:
                     raise _ActionError(_ERR_TEAM_NOT_FOUND)
 
@@ -505,6 +544,7 @@ def preview_permissions():
     team_id = _parse_team_id(request.form.get("team_id"))
     ip_policy = (request.form.get("ip_policy") or "INHERIT").strip().upper()
     submitted_brands = request.form.getlist("brands")
+    expected_auth_version = session.get("auth_version")
 
     if team_id is None:
         return _redirect_result(err=_ERR_TEAM_NOT_FOUND)
@@ -515,6 +555,8 @@ def preview_permissions():
     try:
         with conn:
             with conn.cursor() as cur:
+                acquire_last_admin_lock(cur)
+                revalidate_actor(cur, admin_id, expected_auth_version)
                 team_row = _fetch_team_row(cur, team_id)
                 if team_row is None:
                     raise _ActionError(_ERR_TEAM_NOT_FOUND)
@@ -580,7 +622,8 @@ def confirm_permissions():
                 revalidate_actor(cur, admin_id, expected_auth_version)
 
                 cur.execute(
-                    "SELECT id, ip_policy, updated_at FROM teams WHERE id = %s FOR UPDATE",
+                    "SELECT id, ip_policy, updated_at FROM teams WHERE id = %s "
+                    "AND lifecycle_status = 'ACTIVE' FOR UPDATE",
                     (team_id,),
                 )
                 row = cur.fetchone()

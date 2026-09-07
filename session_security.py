@@ -4,8 +4,8 @@ Kept out of `search.py` on purpose (same rationale as `auth_google.py`).
 This module owns:
 - the shared per-request session-liveness check — confirms the account in
   `session["user_id"]` still exists, is `account_status = 'ACTIVE'`, and
-  that `session["auth_version"]` still matches the DB. Exactly one
-  verification query per request, and only for requests that already carry
+  that `session["auth_version"]` still matches the DB. Staff sessions also
+  receive one constant-size team-lifecycle lookup. Validation runs only for requests that already carry
   a `user_id` in session (anonymous requests, legacy break-glass sessions
   with no per-user row, static assets, and pre-login endpoints are all
   skipped — no query at all),
@@ -124,6 +124,30 @@ def _legacy_password_login_enabled() -> bool:
     return auth_google.strict_bool_env("ENABLE_LEGACY_PASSWORD_LOGIN", False)
 
 
+def _team_is_active(team_id) -> bool:
+    """Fresh lifecycle gate independent of the optional IP allowlist.
+
+    This is a constant one-row PK lookup, not a per-result/per-product query.
+    Missing schema, connection errors, missing teams, and archived teams all
+    fail closed by returning False.
+    """
+    if team_id is None:
+        return False
+    try:
+        conn = get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM teams WHERE id = %s AND lifecycle_status = 'ACTIVE'",
+                    (team_id,),
+                )
+                return cur.fetchone() is not None
+        finally:
+            conn.close()
+    except Exception:
+        return False
+
+
 def enforce_session_validity():
     """Registered as a Flask `before_request` hook. Returning None lets the
     normal view run; returning a response short-circuits the request.
@@ -144,6 +168,8 @@ def enforce_session_validity():
         # legacy password login is disabled, any such session must be
         # rejected/cleared here (fail closed), not silently passed through.
         if _legacy_password_login_enabled():
+            if session.get("is_admin") is False and not _team_is_active(session.get("team_id")):
+                return _reject_invalid_session(None, "TEAM_NOT_ACTIVE")
             return None
         return _reject_invalid_session(None, "LEGACY_SESSION_DISABLED")
 
@@ -165,6 +191,11 @@ def enforce_session_validity():
         return _reject_invalid_session(user_id, "ACCOUNT_NOT_ACTIVE")
     if auth_version != session.get("auth_version"):
         return _reject_invalid_session(user_id, "AUTH_VERSION_MISMATCH")
+    # Every real staff login/session explicitly carries is_admin=False and a
+    # team_id. Validate its team independently of the IP middleware so
+    # DISABLE_IP_ALLOWLIST can never disable lifecycle enforcement.
+    if session.get("is_admin") is False and not _team_is_active(session.get("team_id")):
+        return _reject_invalid_session(user_id, "TEAM_NOT_ACTIVE")
     return None
 
 

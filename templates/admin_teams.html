@@ -50,6 +50,10 @@
     .diff-added { color: #0b7a0b; }
     .diff-removed { color: #b00020; text-decoration: line-through; }
     .preview-card { border: 2px solid #2563eb; }
+    .filters { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0; }
+    .filters a { padding:7px 12px; border:1px solid #ddd; border-radius:999px; text-decoration:none; color:#1f2937; }
+    .filters a.active { background:#2563eb; color:#fff; border-color:#2563eb; }
+    .archive-panel { border-left: 4px solid #dc2626; padding-left: 10px; margin-top: 12px; }
     .stale-banner { background: #fef3c7; border: 1px solid #f59e0b; padding: 10px; border-radius: 8px; margin-bottom: 10px; color: #92400e; }
     @media (max-width: 600px) {
       .row { flex-direction: column; align-items: stretch; }
@@ -181,6 +185,33 @@
   </div>
   {% endif %}
 
+  {% if archive_preview_result %}
+  <div class="card preview-card">
+    <h2 style="margin-top:0;">Xác nhận lưu trữ team “{{ archive_preview_result.team_name }}”</h2>
+    {% if archive_preview_result.stale %}
+      <div class="stale-banner">Team hoặc số thành viên đã thay đổi. Hãy đóng và xem trước lại.</div>
+    {% else %}
+      <p>
+        Team sẽ bị loại khỏi vận hành nhưng vẫn giữ lịch sử, brand và chính sách IP.
+        <b>{{ archive_preview_result.member_count }} thành viên</b>
+        {% if archive_preview_result.member_count %}
+          sẽ được chuyển sang team <b>{{ archive_preview_result.replacement_team_name }}</b> trong cùng transaction;
+          phiên hiện tại của họ sẽ bị vô hiệu hoá.
+        {% else %}
+          đang thuộc team này nên không cần chuyển thành viên.
+        {% endif %}
+      </p>
+      <p class="muted">Khôi phục team sau này không tự chuyển các thành viên này quay lại.</p>
+      <form method="post" action="{{ url_for('admin_lifecycle.confirm_team_archive') }}" class="archive-confirm-form" data-impact-count="{{ archive_preview_result.member_count }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="preview_token" value="{{ archive_preview_result.token }}">
+        <button class="danger" type="submit">Lưu trữ team</button>
+      </form>
+    {% endif %}
+    <p><a href="{{ url_for('admin_teams.index') }}">Đóng xem trước</a></p>
+  </div>
+  {% endif %}
+
   <div class="card">
     <h2 style="margin-top:0;">Tạo team mới</h2>
     <form method="post" action="{{ url_for('admin_teams.create_team') }}">
@@ -209,6 +240,11 @@
 
   <div class="card">
     <h2 style="margin-top:0;">Danh sách team</h2>
+    <p class="muted">Lưu trữ chỉ loại team khỏi vận hành; lịch sử và cấu hình vẫn được giữ.</p>
+    <nav class="filters" aria-label="Lọc vòng đời team">
+      <a class="{{ 'active' if lifecycle == 'active' else '' }}" href="{{ url_for('admin_teams.index', lifecycle='active') }}">Đang hoạt động</a>
+      <a class="{{ 'active' if lifecycle == 'archived' else '' }}" href="{{ url_for('admin_teams.index', lifecycle='archived') }}">Đã lưu trữ</a>
+    </nav>
     <table>
       <thead>
         <tr>
@@ -216,6 +252,7 @@
           <th>Số thành viên</th>
           <th>Brand được phép</th>
           <th>Chính sách IP</th>
+          <th>Trạng thái</th>
           <th>Hành động</th>
         </tr>
       </thead>
@@ -233,7 +270,9 @@
             {% endif %}
           </td>
           <td data-label="Chính sách IP">{{ t.ip_policy_label }}</td>
+          <td data-label="Trạng thái">{{ 'Đang hoạt động' if t.lifecycle_status == 'ACTIVE' else 'Đã lưu trữ' }}</td>
           <td data-label="Hành động" style="min-width: 260px;">
+            {% if t.lifecycle_status == 'ACTIVE' %}
             <form method="post" action="{{ url_for('admin_teams.rename_team') }}" style="display:flex; gap:6px; margin-bottom:8px;">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" name="team_id" value="{{ t.id }}">
@@ -261,16 +300,49 @@
                 <button class="primary" type="submit" style="margin-top:8px;">Xem trước thay đổi</button>
               </form>
             </details>
+            <div class="archive-panel">
+              <form method="post" action="{{ url_for('admin_lifecycle.preview_team_archive') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="team_id" value="{{ t.id }}">
+                {% if t.member_count %}
+                <label class="small" for="replacement-{{ t.id }}">Chuyển {{ t.member_count }} thành viên sang:</label>
+                <select id="replacement-{{ t.id }}" name="replacement_team_id" required style="min-width:160px; max-width:100%;">
+                  <option value="">-- Chọn team đang hoạt động --</option>
+                  {% for replacement in active_teams if replacement.id != t.id %}
+                    <option value="{{ replacement.id }}">{{ replacement.name }}</option>
+                  {% endfor %}
+                </select>
+                {% endif %}
+                <button type="submit" style="margin-top:8px;">Xem trước lưu trữ ({{ t.member_count }} thành viên)</button>
+              </form>
+            </div>
+            {% else %}
+            <p class="small muted">Khôi phục chỉ mở lại team; thành viên đã chuyển không tự quay lại.</p>
+            <form method="post" action="{{ url_for('admin_lifecycle.restore_team') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="team_id" value="{{ t.id }}">
+              <button class="primary" type="submit">Khôi phục</button>
+            </form>
+            {% endif %}
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="5" class="muted">Chưa có team nào -- tạo team ở form phía trên.</td></tr>
+        <tr><td colspan="6" class="muted">Không có team trong bộ lọc này.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 
   <script>
+    document.querySelectorAll('.archive-confirm-form').forEach(function (form) {
+      form.addEventListener('submit', function (event) {
+        var count = form.getAttribute('data-impact-count') || '0';
+        if (!window.confirm('Lưu trữ team sẽ loại team khỏi vận hành và chuyển ' + count + ' thành viên. Tiếp tục?')) {
+          event.preventDefault();
+        }
+      });
+    });
+
     // Phase 6B1 brand picker: filter (existing, unchanged) + bulk
     // select/deselect/clear + live "Đã chọn N brand" counter.
     //

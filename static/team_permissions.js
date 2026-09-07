@@ -14,5 +14,19 @@ var TeamPermissions = (() => {
         if (!response.ok) throw new Error('Quyền truy cập hoặc dữ liệu đã thay đổi. Vui lòng tải lại trang.');
         return action === 'copy' ? (await response.json()).text : response.blob();
     }
-    return { can, field, transfer };
+    async function quoteExport(selections, context = {}) {
+        const body = new FormData();
+        body.append('selections', JSON.stringify(selections));
+        if (context.team_id) body.append('team_id', String(context.team_id));
+        if (context.template_id) body.append('template_id', String(context.template_id));
+        const response = await fetch('/api/results/quote-export', {
+            method: 'POST', credentials: 'same-origin', headers: { 'X-CSRF-Token': data.csrf }, body,
+        });
+        if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.error || 'Không thể xuất báo giá. Vui lòng thử lại.');
+        }
+        return { blob: await response.blob(), disposition: response.headers.get('Content-Disposition') || '' };
+    }
+    return { can, field, transfer, quoteExport, csrfToken: () => data.csrf || '' };
 })();

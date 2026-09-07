@@ -64,11 +64,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _SQL_DIR = os.path.join(os.path.dirname(__file__), "..", "sql")
 
 _FULL_SCHEMA_SQL_FILES = (
+    "migration_013_quote_templates.sql",
     "migration_014_google_oidc.sql",
     "migration_015_team_policy.sql",
     "migration_016_team_permission_previews.sql",
     "migration_020_admin_lifecycle.sql",
     "migration_021_team_capabilities.sql",
+    "migration_022_team_quote_templates.sql",
     "migration_006_office_ip_allowlist.sql",
     "schema.sql",
     "migration_003_regulatory_rules.sql",

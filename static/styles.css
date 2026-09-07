@@ -584,6 +584,15 @@ h1 {
 }
 
 /* Quick Quote */
+.quote-export-context {
+    display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin: 10px 0;
+    padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc;
+}
+.quote-export-context label { display: grid; gap: 3px; min-width: min(240px, 100%); font-size: .8rem; font-weight: 700; }
+.quote-export-context select { max-width: 100%; min-height: 36px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; }
+.quote-export-context span { color: #64748b; font-size: .8rem; }
+.quote-export-context.is-error span { color: #b91c1c; }
+@media (max-width: 480px) { .quote-export-context { display: grid; } .quote-export-context label { min-width: 0; } }
 .quick-quote-page {
   max-width: 1200px;
   margin: 0 auto;

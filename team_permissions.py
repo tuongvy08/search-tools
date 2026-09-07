@@ -39,6 +39,7 @@ ROUTES = {
     'quote_assistant_request_file_parse': ('QUICK_QUOTE',),
     'quote_assistant_workbook_template': ('QUICK_QUOTE',),
     'quote_assistant_workbook_export': ('QUICK_QUOTE', 'EXPORT'),
+    'results_quote_export': ('EXPORT',),
     'results_copy': ('COPY',), 'results_export': ('EXPORT',),
 }
 # All wire aliases, including derived values and nested quote metadata.

@@ -1150,7 +1150,11 @@ async function qqLoadActiveTemplateMetadata() {
     qqRenderTemplateStatus();
     qqUpdateExportButton();
     try {
-        const response = await fetch(QQ_TEMPLATE_ENDPOINT, { credentials: 'same-origin' });
+        const context = window.QuoteExportContext ? window.QuoteExportContext.params() : {};
+        const query = new URLSearchParams();
+        if (context.team_id) query.set('team_id', String(context.team_id));
+        if (context.template_id) query.set('template_id', String(context.template_id));
+        const response = await fetch(`${QQ_TEMPLATE_ENDPOINT}${query.size ? `?${query}` : ''}`, { credentials: 'same-origin' });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
             if (response.status === 409) {
@@ -3254,11 +3258,15 @@ async function qqSubmitExport() {
     const fd = new FormData();
     /* v2 contract: export_items is the single source of truth. */
     fd.append('export_items', JSON.stringify(exportItems));
+    const context = window.QuoteExportContext ? window.QuoteExportContext.params() : {};
+    if (context.team_id) fd.append('team_id', String(context.team_id));
+    if (context.template_id) fd.append('template_id', String(context.template_id));
 
     try {
         const response = await fetch(QQ_EXPORT_ENDPOINT, {
             method: 'POST',
             body: fd,
+            headers: { 'X-CSRF-Token': TeamPermissions.csrfToken() },
             credentials: 'same-origin',
         });
 
@@ -3360,6 +3368,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('qqCopyBtnBottom')?.addEventListener('click', qqCopyResults);
     document.getElementById('qqExportBtn')?.addEventListener('click', qqSubmitExport);
     document.getElementById('qqExportBtnBottom')?.addEventListener('click', qqSubmitExport);
+    document.addEventListener('quote-context-change', qqLoadActiveTemplateMetadata);
     document.getElementById('qqRequestBody')?.addEventListener('paste', qqHandlePaste);
 
     document.getElementById('qqEquivDefault')?.addEventListener('change', () => {

@@ -1341,7 +1341,7 @@ class QuickQuoteExportStaticTests(unittest.TestCase):
     def test_metadata_fetch_and_template_states(self):
         js = QUICK_QUOTE_JS.read_text(encoding="utf-8")
         self.assertIn("QQ_TEMPLATE_ENDPOINT = '/api/quote-assistant/workbook/template'", js)
-        self.assertIn("fetch(QQ_TEMPLATE_ENDPOINT", js)
+        self.assertIn("fetch(`${QQ_TEMPLATE_ENDPOINT}", js)
         self.assertIn("Mẫu báo giá:", js)
         self.assertIn("Đang kiểm tra mẫu báo giá…", js)
         self.assertIn("Chưa có mẫu báo giá. Vui lòng liên hệ admin.", js)
@@ -1360,7 +1360,7 @@ class QuickQuoteExportStaticTests(unittest.TestCase):
         self.assertIn("fetch(QQ_EXPORT_ENDPOINT", export_section)
         self.assertIn("QQ_EXPORT_ENDPOINT = '/api/quote-assistant/workbook/export'", js)
         self.assertNotIn("fd.append('workbook'", export_section)
-        self.assertNotIn("headers:", export_section)
+        self.assertIn("'X-CSRF-Token': TeamPermissions.csrfToken()", export_section)
         self.assertNotIn("contentType", export_section)
 
     def test_js_export_no_product_fields_beyond_product_id(self):

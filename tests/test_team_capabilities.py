@@ -13,6 +13,7 @@ import team_permissions as permissions
 from pg_temp_db import (create_full_schema_temp_db, drop_temp_db, probe_postgres_reachable,
                         apply_brand_master_and_currency_migrations, apply_dynamic_brand_currency_migration)
 from test_quote_workbook_export import make_workbook
+import quote_workbook_export as qwe
 
 
 class RegistryTests(unittest.TestCase):
@@ -55,7 +56,15 @@ class TeamCapabilitiesPgTests(unittest.TestCase):
                 cur.execute("INSERT INTO products(name,code,cas,brand,source_brand,size,ship,price,note,manual_compliance,manual_compliance_note) "
                             "VALUES ('HiddenName','ITEM-X','123-45-6','TRC','TRC','100mg','1','100','SecretNote','Được bán','SecretCompliance') RETURNING id")
                 cls.product = cur.fetchone()[0]
+                cur.execute("INSERT INTO products(name,code,cas,brand,source_brand,size,ship,price,note,manual_compliance) "
+                            "VALUES ('NoPrice','ITEM-NO-PRICE','223-45-6','TRC','TRC','100mg','1',NULL,'','Được bán') RETURNING id")
+                cls.no_price_product = cur.fetchone()[0]
                 cur.execute("INSERT INTO brand_compliance_settings(brand_norm,manual_compliance_priority) VALUES ('TRC',true)")
+                template_raw = make_workbook()
+                cur.execute("""INSERT INTO quote_templates(filename,content,content_sha256,content_size,profile_version,mapping_json,is_active)
+                    VALUES ('team-test.xlsx',%s,%s,%s,'BG_V1',%s::jsonb,true)""",
+                    (psycopg2.Binary(template_raw), __import__('hashlib').sha256(template_raw).hexdigest(),
+                     len(template_raw), json.dumps(search._quote_template_mapping_snapshot())))
             conn.close()
         except Exception:
             cls.env.stop()
@@ -162,13 +171,40 @@ class TeamCapabilitiesPgTests(unittest.TestCase):
         self.assertEqual(response.status_code,200,response.data)
         self.assertNotIn('123-45-6',response.get_data(as_text=True))
         response=self.client.post('/api/quote-assistant/workbook/export',data={
-            'workbook':(io.BytesIO(make_workbook()),'template.xlsx'),'selections':json.dumps([{'product_id':self.product}])})
+            'selections':json.dumps([{'product_id':self.product}])},headers={'X-CSRF-Token':'csrf-test'})
         self.assertEqual(response.status_code,200,response.data[:200])
-        wb=load_workbook(io.BytesIO(response.data))
-        values=str(list(wb.active.values))
+        entries=qwe._read_valid_xlsx_entries(response.data)
+        shared=qwe._read_shared_strings(entries)
+        _workbook_path,sheet_path=qwe._find_worksheet_path(entries,'BG')
+        sheet=qwe._parse_xml(entries[sheet_path])
+        values=' '.join(qwe._cell_text(cell,shared) for cell in sheet.iter() if cell.tag.endswith('}c'))
         self.assertIn('ITEM-X',values)
         for forbidden in ('HiddenName','123-45-6','SecretCompliance','SecretNote'):
             self.assertNotIn(forbidden,values)
+
+    def test_search_quote_export_without_view_price_keeps_template_and_clears_price(self):
+        self.set_grants(set(permissions.LEGACY_PERMISSIONS)-{'VIEW_PRICE','QUICK_QUOTE'})
+        response=self.client.post('/api/results/quote-export',data={
+            'selections':json.dumps([{'product_id':self.product}])},headers={'X-CSRF-Token':'csrf-test'})
+        self.assertEqual(response.status_code,200,response.data[:200])
+        entries=qwe._read_valid_xlsx_entries(response.data)
+        shared=qwe._read_shared_strings(entries)
+        _workbook_path,sheet_path=qwe._find_worksheet_path(entries,'BG')
+        sheet=qwe._parse_xml(entries[sheet_path])
+        self.assertEqual(qwe._cell_text(qwe._get_cell(sheet,'P17'),shared),'')
+        self.assertEqual(qwe._cell_text(qwe._get_cell(sheet,'C17'),shared),'ITEM-X')
+
+        # Price validity is not an oracle: missing-price and valid-price rows
+        # both export successfully with the exact same blank price cell.
+        missing=self.client.post('/api/results/quote-export',data={
+            'selections':json.dumps([{'product_id':self.no_price_product}])},headers={'X-CSRF-Token':'csrf-test'})
+        self.assertEqual(missing.status_code,200,missing.data[:200])
+        missing_entries=qwe._read_valid_xlsx_entries(missing.data)
+        missing_shared=qwe._read_shared_strings(missing_entries)
+        _workbook_path,missing_sheet_path=qwe._find_worksheet_path(missing_entries,'BG')
+        missing_sheet=qwe._parse_xml(missing_entries[missing_sheet_path])
+        self.assertEqual(qwe._cell_text(qwe._get_cell(missing_sheet,'P17'),missing_shared),'')
+        self.assertEqual(qwe._cell_text(qwe._get_cell(missing_sheet,'C17'),missing_shared),'ITEM-NO-PRICE')
 
     def test_hidden_compliance_reasons_and_fallback_counts_are_generic(self):
         self.set_grants(set(permissions.LEGACY_PERMISSIONS)-{'VIEW_COMPLIANCE','VIEW_COMPLIANCE_NOTE'})

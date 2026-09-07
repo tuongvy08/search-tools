@@ -1,6 +1,6 @@
 {% if session.get('authenticated') %}
 <script id="teamPermissionData" type="application/json">{{ {'keys': permission_keys, 'fields': permission_fields, 'csrf': csrf_token()}|tojson }}</script>
-<script src="{{ url_for('static', filename='team_permissions.js', v='20260907c01') }}"></script>
+<script src="{{ url_for('static', filename='team_permissions.js', v='20260907c1') }}"></script>
 {#
   Phase 6B1: one shared admin/app navigation shell, included by every page
   (Search, Quick Quote, every /admin/* page) via `{% include "_user_nav.html" %}`.

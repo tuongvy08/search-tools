@@ -16,6 +16,7 @@ used by `tests/test_session_security.py` -- with a tiny in-memory fake that
 answers ONLY the two queries that module issues:
 
     SELECT account_status, auth_version FROM app_users WHERE id = %s
+    SELECT 1 FROM teams WHERE id = %s AND lifecycle_status = 'ACTIVE'
     INSERT INTO login_audit_events (...)
 
 Any other SQL raises immediately, so a business-logic query accidentally
@@ -71,6 +72,9 @@ class _FakeAuthCursor:
             (user_id,) = params
             row = self.db.lookup(user_id)
             self._result = [row] if row is not None else []
+        elif "SELECT 1 FROM teams WHERE id = %s AND lifecycle_status = 'ACTIVE'" in s:
+            (team_id,) = params
+            self._result = [(1,)] if team_id is not None else []
         elif "INSERT INTO login_audit_events" in s:
             self.db.audits.append(params)
             self._result = []

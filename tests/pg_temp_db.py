@@ -67,6 +67,7 @@ _FULL_SCHEMA_SQL_FILES = (
     "migration_014_google_oidc.sql",
     "migration_015_team_policy.sql",
     "migration_016_team_permission_previews.sql",
+    "migration_020_admin_lifecycle.sql",
     "migration_006_office_ip_allowlist.sql",
     "schema.sql",
     "migration_003_regulatory_rules.sql",

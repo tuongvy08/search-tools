@@ -137,6 +137,19 @@ CREATE TABLE app_users (
 # 1. Access control -- no real DB needed.
 # --------------------------------------------------------------------------
 
+class LifecycleReasonClassificationUnitTests(unittest.TestCase):
+    def test_phase6c0_reasons_are_admin_actions_with_vietnamese_labels(self):
+        expected = {
+            "LOCAL_USER_ARCHIVED": "Quản trị: lưu trữ tài khoản LOCAL",
+            "LOCAL_USER_RESTORED": "Quản trị: khôi phục tài khoản LOCAL",
+            "TEAM_ARCHIVED": "Quản trị: lưu trữ team",
+            "TEAM_RESTORED": "Quản trị: khôi phục team",
+        }
+        for reason_code, label in expected.items():
+            with self.subTest(reason_code=reason_code):
+                self.assertEqual(admin_login_history._classify_event_type(reason_code), "ADMIN")
+                self.assertEqual(admin_login_history._reason_label(reason_code), label)
+
 class AccessControlTests(unittest.TestCase):
     def setUp(self):
         search.app.testing = True

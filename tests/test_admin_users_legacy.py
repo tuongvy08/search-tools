@@ -147,21 +147,23 @@ class FakeCursor:
             # at all (nothing else here reads it); just accept the call.
             self._result = []
 
-        elif s.startswith("SELECT brand FROM team_brands WHERE team_id = %s"):
-            # Phase 6A: search.py's admin_users() GET still reads this for
-            # the READ-ONLY "inherited brands" display -- create_user()/
-            # update_user() no longer WRITE to team_brands at all.
-            (team_id,) = params
-            self._result = [(b,) for b in sorted(db.team_brands.get(team_id, set()))]
-
         elif s.startswith("SELECT a.id, a.username, a.is_admin, a.team_id, t.name, a.ip_bypass_allowlist"):
-            # Legacy LOCAL listing -- must only ever return auth_provider='LOCAL'.
+            # Legacy LOCAL listing -- provider/lifecycle filtered, with the
+            # inherited brand aggregate returned in the same query (no N+1).
+            (lifecycle_a, lifecycle_b) = params
             rows = []
             for u in sorted(db.users.values(), key=lambda x: -x["id"]):
                 if u.get("auth_provider") != "LOCAL":
                     continue
+                archived_at = u.get("archived_at")
+                if lifecycle_a == "active" and archived_at is not None:
+                    continue
+                if lifecycle_b == "archived" and archived_at is None:
+                    continue
                 team_name = db.teams.get(u["team_id"]) if u.get("team_id") else None
-                rows.append((u["id"], u["username"], u["is_admin"], u["team_id"], team_name, u["ip_bypass_allowlist"]))
+                brands = sorted(db.team_brands.get(u.get("team_id"), set())) if not u["is_admin"] else []
+                rows.append((u["id"], u["username"], u["is_admin"], u["team_id"], team_name,
+                             u["ip_bypass_allowlist"], archived_at, brands))
             self._result = rows
 
         elif s.startswith("SELECT DISTINCT brand FROM products"):
@@ -179,6 +181,9 @@ class FakeCursor:
                 ))
             self._result = rows
 
+        elif s.startswith("SELECT id, name FROM teams WHERE lifecycle_status = 'ACTIVE' ORDER BY name"):
+            self._result = list(db.teams.items())
+
         elif s.startswith("SELECT id, name FROM teams ORDER BY name"):
             self._result = list(db.teams.items())
 
@@ -187,6 +192,10 @@ class FakeCursor:
             (uid,) = params
             u = db.users.get(uid)
             self._result = [(u["account_status"], u["auth_version"])] if u else []
+
+        elif s.startswith("SELECT 1 FROM teams WHERE id = %s AND lifecycle_status = 'ACTIVE'"):
+            (team_id,) = params
+            self._result = [(1,)] if team_id in db.teams else []
 
         elif s.startswith("INSERT INTO login_audit_events"):
             self._result = []

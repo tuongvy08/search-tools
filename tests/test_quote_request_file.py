@@ -78,7 +78,7 @@ class QuoteRequestFileApiTests(unittest.TestCase):
 
         self.auth(admin=False, team_id=None)
         response = post_file(self.client, "/api/quote-assistant/request-file/analyze", raw, "sales.xlsx")
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 401)
 
         self.auth(admin=False, team_id=7)
         response = post_file(self.client, "/api/quote-assistant/request-file/analyze", raw, "sales.xlsx")

@@ -437,25 +437,10 @@ class QuoteAssistantApiTests(unittest.TestCase):
         response, _recorder = self._call_api({"rows": []}, authenticated=False)
         self.assertEqual(response.status_code, 401)
 
-        # Phase 6A -- Local Release Gate finding: this used to expect 403
-        # from `_require_authenticated_quote_api`'s own "Tài khoản chưa
-        # được gán team." check. That code path is UNREACHABLE for a real
-        # account now: every write path that can make a non-admin account
-        # ACTIVE (admin_google_users.approve/update, search.py's legacy
-        # create_user/update_user) already REJECTS the write outright if
-        # staff has no valid team -- there is no real flow that produces
-        # an ACTIVE, non-admin, team_id=NULL account. This session shape
-        # (authenticated=True, is_admin=False, no team_id at all) can only
-        # happen from a forged/stale cookie, and Fix1's real, already-
-        # reviewed middleware (`middleware_access.py`, see
-        # `_load_team_ip_policy`'s docstring) now deliberately fails
-        # CLOSED on exactly that data/session inconsistency with 503,
-        # before this route's own 403 ever runs. 503 here is the correct,
-        # intended contract from an already-shipped security fix, not an
-        # app bug this test should paper over -- the assertion changed to
-        # match reality, not the other way around.
+        # A teamless staff cookie is invalid and is now revoked by the
+        # lifecycle-independent session gate before endpoint policy runs.
         response, _recorder = self._call_api({"rows": []}, is_admin=False)
-        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.status_code, 401)
 
         response, _recorder = self._call_api({"rows": [{}] * 2001})
         self.assertEqual(response.status_code, 413)

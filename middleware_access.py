@@ -193,7 +193,11 @@ def _load_team_ip_policy(team_id) -> str:
         conn = get_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT ip_policy FROM teams WHERE id = %s", (team_id,))
+                cur.execute(
+                    "SELECT ip_policy FROM teams "
+                    "WHERE id = %s AND lifecycle_status = 'ACTIVE'",
+                    (team_id,),
+                )
                 row = cur.fetchone()
         finally:
             conn.close()

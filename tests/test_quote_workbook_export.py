@@ -714,7 +714,7 @@ class QuoteWorkbookExportApiTests(unittest.TestCase):
         unauth, _conn, _mock = self._post([], [{"product_id": 42}], authenticated=False)
         self.assertEqual(unauth.status_code, 401)
         no_team, _conn, _mock = self._post([], [{"product_id": 42}], is_admin=False, team_id=None)
-        self.assertEqual(no_team.status_code, 403)
+        self.assertEqual(no_team.status_code, 401)
 
         missing, _conn, _mock = self._post([], [{"product_id": 99}])
         self.assertEqual(missing.status_code, 400)

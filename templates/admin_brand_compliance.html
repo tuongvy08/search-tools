@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Manual compliance theo brand</title>
+  <title>Tình trạng quản lý theo hãng</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
   <style>
@@ -87,10 +87,10 @@
 <body>
   {% include "_user_nav.html" %}
 
-  <h1 style="margin-top:0;">Manual compliance theo brand</h1>
+  <h1 style="margin-top:0;">Tình trạng quản lý theo hãng</h1>
   <p class="muted">
-    Bật để <code>/search</code> ưu tiên <code>manual_compliance</code> trên sản phẩm (nhập qua Excel).
-    Không có dòng trong <code>brand_compliance_settings</code> hoặc toggle tắt = dùng quy tắc legacy.
+    Bật để màn hình tìm kiếm ưu tiên tình trạng quản lý nhập tay trên sản phẩm (nhập qua Excel).
+    Khi tắt, hệ thống dùng quy tắc quản lý hiện có.
   </p>
 
   {% if message %}<p class="ok">{{ message }}</p>{% endif %}
@@ -131,7 +131,7 @@
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                 <input type="hidden" name="brand_norm" value="{{ r.brand_norm }}" />
                 <input type="hidden" name="action" value="{% if r.manual_enabled %}disable{% else %}enable{% endif %}" />
-                <label class="switch" title="{% if r.manual_enabled %}Tắt{% else %}Bật{% endif %} manual compliance cho {{ r.brand }}">
+                <label class="switch" title="{% if r.manual_enabled %}Tắt{% else %}Bật{% endif %} ưu tiên tình trạng quản lý nhập tay cho {{ r.brand }}">
                   <input type="checkbox" {% if r.manual_enabled %}checked{% endif %} onchange="this.form.submit(); this.disabled=true;" />
                   <span class="slider"></span>
                 </label>

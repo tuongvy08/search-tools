@@ -4,7 +4,7 @@ const qqField = (key) => typeof TeamPermissions === 'undefined' || TeamPermissio
 
 const QQ_MAX_ROWS = 2000;
 const QQ_AJAX_TIMEOUT_MS = 180000;
-const QQ_BLOCKED_COMPLIANCE = new Set(['CẤM NHẬP', 'Cấm nhập', 'Chưa xác định']);
+const QQ_BLOCKED_COMPLIANCE = new Set(['CẤM NHẬP', 'Cấm nhập']);
 
 const QQ_LIFECYCLE_SELECTED = 'SELECTED';
 const QQ_LIFECYCLE_REVIEW = 'REVIEW';
@@ -15,7 +15,7 @@ const QQ_LIFECYCLE_EXPORTED = 'EXPORTED';
 const QQ_LIFECYCLE_LABELS = {
     SELECTED: 'Đã chọn',
     REVIEW: 'Cần xem',
-    UNRESOLVED: 'Chưa resolve',
+    UNRESOLVED: 'Chưa xử lý',
     BLOCKED: 'Bị chặn',
     EXPORTED: 'Đã xuất',
 };
@@ -34,8 +34,8 @@ const QQ_REASON_CODE_LABELS = {
     MANUAL_SELECTION_REQUIRED: 'Cần chọn sản phẩm',
     CANDIDATE_LIMIT_EXCEEDED: 'Quá nhiều kết quả — vui lòng thu hẹp tìm kiếm',
     FILTER_NO_MATCH: 'Không khớp bộ lọc quy cách/dạng',
-    COMPLIANCE_BLOCKED: 'Tất cả sản phẩm bị chặn compliance',
-    COMPLIANCE_UNRESOLVED: 'Compliance chưa xác định',
+    COMPLIANCE_BLOCKED: 'Tất cả sản phẩm thuộc diện CẤM NHẬP',
+    COMPLIANCE_UNRESOLVED: 'Tình trạng quản lý chưa xác định',
     DUPLICATE_CODE_BRAND_SIZE: 'Trùng Code + Brand + Size — cần chọn thủ công',
     AUTO_SELECTED: 'Đã chọn tự động',
     MANUALLY_SELECTED: 'Đã chọn thủ công',
@@ -74,7 +74,7 @@ const QQ_WARNING_LABELS = {
     FALLBACK_TIER_USED: 'Đã dùng brand ưu tiên thấp hơn (fallback)',
 };
 const QQ_FALLBACK_REJECT_LABELS = {
-    COMPLIANCE: 'Compliance',
+    COMPLIANCE: 'Tình trạng quản lý',
     FILTER: 'Bộ lọc',
     NO_VALID_PRICE: 'Không có giá',
 };
@@ -829,7 +829,7 @@ function qqExplainCopyBlocked() {
         qqSetStatus('Chọn sản phẩm ở cột checkbox trong bảng kết quả trước khi copy.', 'error');
         return;
     }
-    qqSetStatus('Không có dòng eligible để copy (compliance hoặc chưa có giá).', 'error');
+    qqSetStatus('Không có dòng đủ điều kiện để sao chép (do tình trạng quản lý hoặc chưa có giá).', 'error');
 }
 
 function qqExplainExportBlocked() {
@@ -838,7 +838,7 @@ function qqExplainExportBlocked() {
         return;
     }
     if (!qqHasActiveTemplate()) {
-        qqSetStatus('Chưa có mẫu báo giá. Vui lòng liên hệ admin.', 'error');
+        qqSetStatus('Chưa có mẫu báo giá. Vui lòng liên hệ quản trị viên.', 'error');
         return;
     }
     qqSetStatus('Không có yêu cầu nào để xuất Excel.', 'error');
@@ -1107,7 +1107,7 @@ function qqFormatAjaxError(xhr, fallback) {
     if (status === 401) return 'Chưa đăng nhập.';
     if (status === 403) return 'Không có quyền hoặc chưa gán team.';
     if (status === 413) return 'Dữ liệu quá lớn hoặc file quá 10MB.';
-    if (status >= 500) return 'Server đang lỗi, vui lòng thử lại.';
+    if (status >= 500) return 'Hệ thống đang lỗi, vui lòng thử lại.';
     let body = '';
     try { const json = xhr.responseJSON; if (json && json.error) body = String(json.error); } catch (_e) { /* ignore */ }
     if (!body && xhr.responseText) body = String(xhr.responseText).trim().slice(0, 280);
@@ -1134,7 +1134,7 @@ function qqRenderTemplateStatus() {
         return;
     }
     if (qqTemplateState === 'missing') {
-        qqSetTemplateStatus('Chưa có mẫu báo giá. Vui lòng liên hệ admin.', 'error');
+        qqSetTemplateStatus('Chưa có mẫu báo giá. Vui lòng liên hệ quản trị viên.', 'error');
         return;
     }
     qqSetTemplateStatus('Không tải được thông tin mẫu báo giá.', 'error');
@@ -1729,9 +1729,9 @@ async function qqAnalyzeRequestFile(options = {}) {
 function qqRequestFileErrorMessage(status, bodyMessage) {
     if (status === 401) return 'Chưa đăng nhập.';
     if (status === 403) return 'Không có quyền hoặc chưa gán team.';
-    if (status === 400) return bodyMessage || 'File hoặc mapping không hợp lệ.';
+    if (status === 400) return bodyMessage || 'Tệp hoặc ánh xạ không hợp lệ.';
     if (status === 413) return bodyMessage || 'File quá 10MB hoặc vượt 2.000 dòng.';
-    if (status >= 500) return 'Server đang lỗi khi xử lý file.';
+    if (status >= 500) return 'Hệ thống đang lỗi khi xử lý tệp.';
     return bodyMessage || 'Không xử lý được file.';
 }
 
@@ -2641,7 +2641,7 @@ function qqBuildFallbackDetailTable(entries) {
     table.className = 'qq-fallback-detail-table';
     const thead = document.createElement('thead');
     const headRow = document.createElement('tr');
-    ['Ưu tiên', 'Brand', 'Ứng viên hợp lệ', 'Bị loại: Compliance', 'Bị loại: Bộ lọc', 'Bị loại: Không có giá'].forEach((label) => {
+    ['Ưu tiên', 'Hãng', 'Ứng viên hợp lệ', 'Bị loại: Tình trạng quản lý', 'Bị loại: Bộ lọc', 'Bị loại: Không có giá'].forEach((label) => {
         const th = document.createElement('th');
         th.textContent = label;
         headRow.appendChild(th);
@@ -2748,7 +2748,7 @@ function qqBuildStatusCellContent(td, lifecycleInfo, result, resultIndex) {
     } else if (lifecycleInfo.lifecycle === QQ_LIFECYCLE_BLOCKED) {
         const hint = document.createElement('div');
         hint.className = 'qq-blocked-hint';
-        hint.textContent = 'Tất cả sản phẩm bị cấm nhập / chưa xác định';
+        hint.textContent = 'Tất cả sản phẩm thuộc diện CẤM NHẬP';
         td.appendChild(hint);
     }
 
@@ -2854,8 +2854,8 @@ function qqRenderResultTable(results) {
     [
         ['', null], ['Yêu cầu', null], ['Trạng thái', null], ['Sản phẩm', 'Name'],
         ['Code', 'Code'], ['CAS', 'Cas'], ['Brand', 'Brand'], ['Size', 'Size'],
-        ['Giá nhập', 'Unit_Price'], ['Note', 'Note'], ['Compliance', 'Compliance'],
-        ['Ghi chú CL', 'Compliance_Note'], ['Loại khớp', null],
+        ['Giá nhập', 'Unit_Price'], ['Ghi chú hàng hóa', 'Note'], ['Tình trạng quản lý', 'Compliance'],
+        ['Ghi chú quản lý', 'Compliance_Note'], ['Loại khớp', null],
     ].filter(([, field]) => !field || qqField(field)).forEach(([label]) => {
         const th = document.createElement('th');
         th.textContent = label;
@@ -3226,10 +3226,10 @@ function qqTriggerBlobDownload(blob, filename) {
 function qqExportErrorMessage(status, bodyMessage) {
     if (status === 401) return 'Chưa đăng nhập.';
     if (status === 403) return 'Không có quyền hoặc chưa gán team.';
-    if (status === 409) return 'Chưa có mẫu báo giá active. Vui lòng liên hệ admin.';
-    if (status === 400) return bodyMessage || 'Template hoặc danh sách sản phẩm không hợp lệ.';
+    if (status === 409) return 'Chưa có mẫu báo giá khả dụng. Vui lòng liên hệ quản trị viên.';
+    if (status === 400) return bodyMessage || 'Mẫu hoặc danh sách sản phẩm không hợp lệ.';
     if (status === 413) return 'Dữ liệu quá lớn để xuất báo giá.';
-    if (status >= 500) return 'Server đang lỗi khi tạo báo giá.';
+    if (status >= 500) return 'Hệ thống đang lỗi khi tạo báo giá.';
     return bodyMessage || `Xuất báo giá thất bại (${status}).`;
 }
 
@@ -3247,7 +3247,7 @@ async function qqSubmitExport() {
     }
     if (!qqHasActiveTemplate()) {
         qqUpdateExportButton();
-        qqSetStatus('Chưa có mẫu báo giá. Vui lòng liên hệ admin.', 'error');
+        qqSetStatus('Chưa có mẫu báo giá. Vui lòng liên hệ quản trị viên.', 'error');
         return;
     }
 

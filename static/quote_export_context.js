@@ -20,12 +20,12 @@
     fetch('/api/admin/quote-template-contexts', { credentials: 'same-origin' })
         .then(async (response) => {
             const data = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(data.error || 'Không tải được context báo giá.');
+            if (!response.ok) throw new Error(data.error || 'Không tải được phạm vi xuất báo giá.');
             (data.teams || []).filter((item) => item.status === 'ACTIVE').forEach((item) =>
                 team.appendChild(option(item.id, item.name)));
-            (data.templates || []).forEach((item) =>
-                template.appendChild(option(item.id, `#${item.id} · ${item.filename}${item.is_active ? ' · global' : ''}`)));
-            status.textContent = 'Backend sẽ kiểm tra lại context khi xuất.';
+            (data.templates || []).filter((item) => !item.archived_at).forEach((item) =>
+                template.appendChild(option(item.id, `#${item.id} · ${item.filename}${item.is_active ? ' · Mẫu mặc định toàn hệ thống' : ''}`)));
+            status.textContent = 'Hệ thống sẽ kiểm tra lại phạm vi khi xuất.';
         })
         .catch((error) => { status.textContent = error.message; root.classList.add('is-error'); });
     root.addEventListener('change', () => document.dispatchEvent(new CustomEvent('quote-context-change')));

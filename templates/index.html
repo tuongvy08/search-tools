@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Product Search</title>
     <!-- Include stylesheets -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260907c1') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260908c1') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
 </head>
@@ -47,8 +47,8 @@
     {% if session.get('is_admin') %}
     <div id="quoteExportContext" class="quote-export-context">
         <label>Team <select data-quote-team><option value="">Toàn hệ thống</option></select></label>
-        <label>Template <select data-quote-template><option value="">Tự động team / global</option></select></label>
-        <span data-quote-context-status>Đang tải context…</span>
+        <label>Mẫu báo giá <select data-quote-template><option value="">Theo team / mẫu mặc định</option></select></label>
+        <span data-quote-context-status>Đang tải phạm vi xuất…</span>
     </div>
     {% endif %}
     {% if not can("SEARCH") and not can("FIND_CODE") and not can("ADVANCED_SEARCH") and not can("CHECK_LICENSE") %}<p class="permission-empty">Team chưa được bật chức năng tra cứu.</p>{% endif %}
@@ -129,8 +129,8 @@
                 {% if can("VIEW_SIZE") %}<th>Size</th>{% endif %}
                 {% if can("VIEW_PRICE") %}<th>Unit_Price</th>{% endif %}
                 {% if can("VIEW_NOTE") %}<th>Note</th>{% endif %}
-                {% if can("VIEW_COMPLIANCE") %}<th>Compliance</th>{% endif %}
-                {% if can("VIEW_COMPLIANCE_NOTE") %}<th>Compliance Note</th>{% endif %}
+                {% if can("VIEW_COMPLIANCE") %}<th>Tình trạng quản lý</th>{% endif %}
+                {% if can("VIEW_COMPLIANCE_NOTE") %}<th>Ghi chú quản lý</th>{% endif %}
             </tr>
         </thead>
         <tbody>
@@ -140,7 +140,7 @@
 
     <!-- Include necessary scripts -->
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>    
-    <script src="{{ url_for('static', filename='quote_export_context.js', v='20260907a') }}"></script>
-    <script src="{{ url_for('static', filename='script.js', v='20260907c1') }}"></script>
+    <script src="{{ url_for('static', filename='quote_export_context.js', v='20260908c1') }}"></script>
+    <script src="{{ url_for('static', filename='script.js', v='20260908c1') }}"></script>
 </body>
 </html>

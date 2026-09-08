@@ -13,8 +13,8 @@ const EXPORT_COLUMNS = [
     { key: 'Size', label: 'Size' },
     { key: 'Unit_Price', label: 'Unit_Price' },
     { key: 'Note', label: 'Note', resolve: productNote },
-    { key: 'Compliance', label: 'Compliance', resolve: productCompliance },
-    { key: 'Compliance_Note', label: 'Compliance_Note', resolve: productComplianceNote },
+    { key: 'Compliance', label: 'Tình trạng quản lý', resolve: productCompliance },
+    { key: 'Compliance_Note', label: 'Ghi chú quản lý', resolve: productComplianceNote },
 ].filter((col) => TeamPermissions.field(col.key));
 
 const COMPLIANCE_CLASS = {
@@ -810,8 +810,8 @@ $(document).ready(function() {
                         <thead>
                           <tr>
                             ${TeamPermissions.field('Cas') ? '<th>CAS</th>' : ''}
-                            <th>Compliance_Status</th>
-                            ${TeamPermissions.field('Compliance_Note') ? '<th>Compliance_Note</th>' : ''}
+                            <th>Tình trạng quản lý</th>
+                            ${TeamPermissions.field('Compliance_Note') ? '<th>Ghi chú quản lý</th>' : ''}
                           </tr>
                         </thead>
                         <tbody>

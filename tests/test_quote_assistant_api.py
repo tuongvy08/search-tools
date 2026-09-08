@@ -527,7 +527,10 @@ class QuoteAssistantApiTests(unittest.TestCase):
         self.assertFalse(blocked["candidates"][0]["eligible"])
 
         response, _recorder = self._call_api({"rows": [{"code": self.CODE_UNKNOWN}]})
-        self.assertEqual(response.get_json()["results"][0]["reason"], "MANUAL_REVIEW")
+        unknown = response.get_json()["results"][0]
+        self.assertEqual(unknown["reason"], "NO_VALID_PRICE")
+        self.assertEqual(unknown["candidates"][0]["ineligible_reason"], "NO_VALID_PRICE")
+        self.assertIn("Chưa xác định", unknown["candidates"][0]["warnings"])
 
         response, _recorder = self._call_api({"rows": [{"code": self.CODE_LICENSE}], "selection_strategy": "LOWEST_OVERALL"})
         license_row = response.get_json()["results"][0]

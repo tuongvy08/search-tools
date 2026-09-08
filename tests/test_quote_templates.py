@@ -468,7 +468,7 @@ class QuoteTemplateAssistantApiTests(unittest.TestCase):
         with patch.object(search, "get_connection", return_value=conn):
             response = self.client.get("/api/quote-assistant/workbook/template")
         self.assertEqual(response.status_code, 409)
-        self.assertIn("không có mẫu global active", response.get_json()["error"])
+        self.assertIn("không có mẫu mặc định toàn hệ thống", response.get_json()["error"])
 
     def test_export_without_workbook_uses_active_template(self):
         with patch.object(

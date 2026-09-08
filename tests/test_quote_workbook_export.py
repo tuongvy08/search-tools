@@ -851,17 +851,20 @@ class QuoteWorkbookExportApiTests(unittest.TestCase):
 
         missing, _conn, _mock = self._post([], [{"product_id": 99}])
         self.assertEqual(missing.status_code, 400)
-        self.assertIn("không visible", missing.get_json()["error"])
+        self.assertIn("không còn khả dụng", missing.get_json()["error"])
 
         blocked_row = (1, 7, "Blocked", "B", "CAS", "Brand", "1g", "1", "100", "", "NEAT", "CẤM NHẬP", "", True, None, None)
         blocked, _conn, _mock = self._post([blocked_row], [{"product_id": 7}])
         self.assertEqual(blocked.status_code, 400)
-        self.assertIn("compliance", blocked.get_json()["error"])
+        self.assertEqual(
+            blocked.get_json()["error"],
+            "Dòng 1 không thể xuất báo giá: Sản phẩm thuộc diện CẤM NHẬP.",
+        )
 
         zero_row = (1, 8, "Zero", "Z", "CAS", "Brand", "1g", "1", "0", "", "NEAT", "Được bán", "", True, None, None)
         zero, _conn, _mock = self._post([zero_row], [{"product_id": 8}])
         self.assertEqual(zero.status_code, 400)
-        self.assertIn("Unit_Price", zero.get_json()["error"])
+        self.assertIn("đơn giá", zero.get_json()["error"])
 
     def test_export_returns_stable_missing_currency_reason_after_live_recheck(self):
         from currency_rates import CurrencyRateResolver
@@ -1163,7 +1166,7 @@ class QuoteWorkbookExportV2ApiTests(unittest.TestCase):
         products = export_mock.call_args.args[1]
         self.assertEqual(
             products[0]["Compliance_Combined"],
-            "Không thể báo giá: tất cả sản phẩm bị chặn compliance",
+            "Không thể xuất báo giá: sản phẩm thuộc diện CẤM NHẬP",
         )
 
     def test_export_items_blocked_placeholder_without_reason_uses_default_text(self):
@@ -1177,7 +1180,7 @@ class QuoteWorkbookExportV2ApiTests(unittest.TestCase):
         products = export_mock.call_args.args[1]
         self.assertEqual(
             products[0]["Compliance_Combined"],
-            "Không thể báo giá: không đủ điều kiện báo giá",
+            "Không thể xuất báo giá: không đủ điều kiện báo giá",
         )
 
     def test_export_items_all_placeholders_zero_selected_succeeds(self):

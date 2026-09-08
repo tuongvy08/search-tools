@@ -169,7 +169,7 @@ class NavShellStaticTests(unittest.TestCase):
         # confirms real rendered pages show only the human labels.
         for label in [
             "Nhập dữ liệu", "Team & quyền truy cập", "Người dùng",
-            "Mạng / IP", "Mẫu báo giá", "Tỷ giá", "Manual compliance",
+            "Mạng / IP", "Mẫu báo giá", "Tỷ giá", "Tình trạng quản lý",
             "Lịch sử đăng nhập",
         ]:
             self.assertIn(label, NAV_HTML)

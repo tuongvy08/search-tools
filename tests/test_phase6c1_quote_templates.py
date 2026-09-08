@@ -168,7 +168,7 @@ class Phase6C1SharedBoundaryTests(unittest.TestCase):
         conn.cursor.return_value.__enter__.return_value.fetchone.return_value = (["SEARCH"],)
         with search.app.test_request_context("/?team_id=7"):
             search.session.update(authenticated=True, is_admin=True)
-            with self.assertRaisesRegex(search.QuoteTemplateError, "quyền Export"):
+            with self.assertRaisesRegex(search.QuoteTemplateError, "quyền xuất báo giá"):
                 search._quote_context(conn)
 
     def test_quick_quote_export_requires_valid_csrf(self):

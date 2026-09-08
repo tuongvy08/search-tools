@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, urlsplit
 from jinja2 import Environment, nodes
 
 ROOT = Path(__file__).resolve().parents[1]
-RELEASE_VERSION = '20260907c1'
+RELEASE_VERSION = '20260908c1'
 CAPABILITY_ASSETS = {
     'script.js', 'quick_quote.js', 'styles.css',
     'team_permissions.js', 'admin_team_permissions.js', 'admin_teams.css',

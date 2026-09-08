@@ -71,6 +71,7 @@ _FULL_SCHEMA_SQL_FILES = (
     "migration_020_admin_lifecycle.sql",
     "migration_021_team_capabilities.sql",
     "migration_022_team_quote_templates.sql",
+    "migration_023_quote_template_archiving.sql",
     "migration_006_office_ip_allowlist.sql",
     "schema.sql",
     "migration_003_regulatory_rules.sql",

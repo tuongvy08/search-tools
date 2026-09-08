@@ -106,14 +106,14 @@ class AdminQuoteTemplatesStaticTests(unittest.TestCase):
     def test_html_has_required_sections(self):
         html = ADMIN_QUOTE_HTML.read_text(encoding="utf-8")
         for text in [
-            "Mẫu đang sử dụng",
+            "Mẫu mặc định toàn hệ thống",
             "Chưa có mẫu báo giá",
-            "Upload phiên bản mới",
-            "Kích hoạt ngay sau khi upload",
-            "Mapping cột",
-            "Template theo team",
+            "Tải lên phiên bản mới",
+            "Đặt làm mẫu mặc định sau khi tải lên",
+            "Ánh xạ cột",
+            "Mẫu theo team",
             "Lịch sử phiên bản",
-            "Đang sử dụng",
+            "Lưu trữ",
         ]:
             self.assertIn(text, html)
         for ident in [
@@ -184,7 +184,7 @@ class AdminQuoteTemplatesStaticTests(unittest.TestCase):
         html = ADMIN_QUOTE_HTML.read_text(encoding="utf-8")
         self.assertIn(".table-wrap", html)
         self.assertIn("overflow-x: auto", html)
-        self.assertIn(".history-table { min-width: 880px; }", html)
+        self.assertIn(".history-table { min-width: 1040px; }", html)
         self.assertIn("@media (max-width: 760px)", html)
         self.assertNotIn('class="card', html)
         self.assertNotIn("gradient", html.lower())

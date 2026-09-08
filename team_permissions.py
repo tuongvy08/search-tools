@@ -16,8 +16,8 @@ FIELDS = {
     'VIEW_NAME': ('Name', 'Name'), 'VIEW_CODE': ('Code', 'Code'),
     'VIEW_CAS': ('Cas', 'CAS'), 'VIEW_BRAND': ('Brand', 'Brand'),
     'VIEW_SIZE': ('Size', 'Size'), 'VIEW_PRICE': ('Unit_Price', 'Unit Price'),
-    'VIEW_NOTE': ('Note', 'Note'), 'VIEW_COMPLIANCE': ('Compliance', 'Compliance'),
-    'VIEW_COMPLIANCE_NOTE': ('Compliance_Note', 'Compliance Note'),
+    'VIEW_NOTE': ('Note', 'Note'), 'VIEW_COMPLIANCE': ('Compliance', 'Tình trạng quản lý'),
+    'VIEW_COMPLIANCE_NOTE': ('Compliance_Note', 'Ghi chú quản lý'),
 }
 REGISTRY = {**FEATURES, **{key: value[1] for key, value in FIELDS.items()}}
 LEGACY_PERMISSIONS = tuple(REGISTRY)

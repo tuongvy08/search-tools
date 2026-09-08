@@ -89,10 +89,13 @@ def _read(path):
 
 
 _MIGRATION_006_SQL = _read("migration_006_office_ip_allowlist.sql")
+_MIGRATION_013_SQL = _read("migration_013_quote_templates.sql")
 _MIGRATION_014_SQL = _read("migration_014_google_oidc.sql")
 _MIGRATION_015_SQL = _read("migration_015_team_policy.sql")
 _MIGRATION_016_SQL = _read("migration_016_team_permission_previews.sql")
 _MIGRATION_020_SQL = _read("migration_020_admin_lifecycle.sql") + "\n" + _read("migration_021_team_capabilities.sql")
+_MIGRATION_022_SQL = _read("migration_022_team_quote_templates.sql")
+_MIGRATION_023_SQL = _read("migration_023_quote_template_archiving.sql")
 _SCHEMA_PRODUCTS_SQL = _read("schema.sql")
 _MIGRATION_003_REGULATORY_RULES_SQL = _read("migration_003_regulatory_rules.sql")
 _MIGRATION_011_MANUAL_COMPLIANCE_SQL = _read("migration_011_manual_compliance.sql")
@@ -178,10 +181,13 @@ class _RealPgTestBase(unittest.TestCase):
             with conn:
                 with conn.cursor() as cur:
                     cur.execute(_MINIMAL_BASE_SCHEMA_SQL)
+                    cur.execute(_MIGRATION_013_SQL)
                     cur.execute(_MIGRATION_014_SQL)
                     cur.execute(_MIGRATION_015_SQL)
                     cur.execute(_MIGRATION_016_SQL)
                     cur.execute(_MIGRATION_020_SQL)
+                    cur.execute(_MIGRATION_022_SQL)
+                    cur.execute(_MIGRATION_023_SQL)
                     cur.execute(_MIGRATION_006_SQL)
                     cur.execute(_SCHEMA_PRODUCTS_SQL)
                     cur.execute(_MIGRATION_003_REGULATORY_RULES_SQL)
@@ -254,7 +260,7 @@ class _RealPgTestBase(unittest.TestCase):
             with conn:
                 with conn.cursor() as cur:
                     cur.execute(
-                        "TRUNCATE login_audit_events, team_permission_previews, team_brands, "
+                        "TRUNCATE team_quote_templates, quote_templates, login_audit_events, team_permission_previews, team_brands, "
                         "app_users, teams, office_ip_allowlist, regulatory_rules, "
                         "brand_compliance_settings, products "
                         "RESTART IDENTITY CASCADE"
@@ -1584,14 +1590,21 @@ class ExportWorkbookHttpTests(_RealPgTestBase):
         self.brand_a_product = self._insert_product(brand="BrandA", code="CODE-A1", cas="111-11-1", price="1000", ship="1")
         self.brand_b_product = self._insert_product(brand="BrandB", code="CODE-B1", cas="222-22-2", price="2000", ship="1")
         self.team_alpha = self._insert_team("Team Alpha", brands=["BrandA"])
+        conn = self._connect()
+        try:
+            search._insert_quote_template(
+                conn, filename="quote.xlsx", raw=make_workbook(),
+                mapping=search._quote_template_mapping_snapshot(), activate=True,
+                uploaded_by="test",
+            )
+        finally:
+            conn.close()
 
     def _export(self, client, product_id):
         return client.post(
             "/api/quote-assistant/workbook/export",
-            data={
-                "workbook": (io.BytesIO(make_workbook()), "quote.xlsx"),
-                "selections": json.dumps([{"product_id": product_id}]),
-            },
+            data={"selections": json.dumps([{"product_id": product_id}])},
+            headers={"X-CSRF-Token": "the-real-token"},
             content_type="multipart/form-data",
         )
 

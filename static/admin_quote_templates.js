@@ -4,6 +4,10 @@
   const API_UPLOAD = '/api/admin/quote-templates';
   const API_ACTIVATE_PREFIX = '/api/admin/quote-templates/';
   const API_DOWNLOAD_PREFIX = '/api/admin/quote-templates/';
+  const API_ARCHIVE_PREFIX = '/api/admin/quote-templates/';
+  const API_INSPECT = '/api/admin/quote-templates/inspect';
+  const API_CONTEXTS = '/api/admin/quote-template-contexts';
+  const API_ASSIGN = '/api/admin/quote-template-assignments';
 
   const els = {
     pageAlert: document.getElementById('qtPageAlert'),
@@ -22,17 +26,34 @@
     activate: document.getElementById('qtActivate'),
     uploadBtn: document.getElementById('qtUploadBtn'),
     uploadStatus: document.getElementById('qtUploadStatus'),
+    inspectBtn: document.getElementById('qtInspectBtn'),
+    sheet: document.getElementById('qtSheet'),
+    headerRow: document.getElementById('qtHeaderRow'),
+    dataStartRow: document.getElementById('qtDataStartRow'),
+    totalLabel: document.getElementById('qtTotalLabel'),
+    mappingBody: document.getElementById('qtMappingBody'),
+    mappingState: document.getElementById('qtMappingState'),
+    mappingBadge: document.getElementById('qtMappingBadge'),
+    assignments: document.getElementById('qtAssignments'),
     historyBody: document.getElementById('qtHistoryBody'),
     activateDialog: document.getElementById('qtActivateDialog'),
     activateDialogText: document.getElementById('qtActivateDialogText'),
     activateCancel: document.getElementById('qtActivateCancel'),
     activateConfirm: document.getElementById('qtActivateConfirm'),
+    archiveDialog: document.getElementById('qtArchiveDialog'),
+    archiveDialogText: document.getElementById('qtArchiveDialogText'),
+    archiveCancel: document.getElementById('qtArchiveCancel'),
+    archiveConfirm: document.getElementById('qtArchiveConfirm'),
   };
 
   let templates = [];
   let uploadInProgress = false;
   let activateInProgress = false;
   let pendingActivateId = null;
+  let archiveInProgress = false;
+  let pendingArchiveId = null;
+  let preview = null;
+  let teams = [];
 
   function setText(el, value) {
     if (el) el.textContent = value == null || value === '' ? '-' : String(value);
@@ -56,11 +77,11 @@
 
   function statusMessage(status, fallback) {
     if (status === 401) return 'Chưa đăng nhập. Vui lòng đăng nhập lại.';
-    if (status === 403) return 'Không có quyền admin để thao tác mẫu báo giá.';
+    if (status === 403) return 'Không có quyền quản trị để thao tác mẫu báo giá.';
     if (status === 400) return fallback || 'Dữ liệu gửi lên không hợp lệ.';
     if (status === 413) return 'File quá lớn. Vui lòng chọn file .xlsx tối đa 10 MB.';
-    if (status === 409) return fallback || 'Không thể hoàn tất do xung đột trạng thái template.';
-    if (status >= 500) return 'Server đang lỗi. Vui lòng thử lại sau.';
+    if (status === 409) return fallback || 'Không thể hoàn tất do trạng thái mẫu vừa thay đổi.';
+    if (status >= 500) return 'Hệ thống đang lỗi. Vui lòng thử lại sau.';
     return fallback || 'Thao tác thất bại.';
   }
 
@@ -104,7 +125,7 @@
   }
 
   function renderActive() {
-    const active = templates.find((item) => item.is_active);
+    const active = templates.find((item) => item.is_active && !item.archived_at);
     if (!active) {
       if (els.emptyActive) els.emptyActive.hidden = false;
       if (els.activeMeta) els.activeMeta.hidden = true;
@@ -119,7 +140,7 @@
     if (els.activeMeta) els.activeMeta.hidden = false;
     if (els.activeBadge) {
       els.activeBadge.className = 'badge active';
-      setText(els.activeBadge, 'Đang sử dụng');
+      setText(els.activeBadge, 'Mẫu mặc định toàn hệ thống');
     }
     setText(els.activeFilename, active.filename);
     setText(els.activeProfile, active.profile_version);
@@ -141,8 +162,8 @@
   function appendStatusCell(row, item) {
     const cell = document.createElement('td');
     const badge = document.createElement('span');
-    badge.className = item.is_active ? 'badge active' : 'badge inactive';
-    setText(badge, item.is_active ? 'Đang sử dụng' : 'Inactive');
+    badge.className = item.archived_at ? 'badge archived' : (item.is_active ? 'badge active' : 'badge inactive');
+    setText(badge, item.archived_at ? 'Đã lưu trữ' : (item.is_active ? 'Mẫu mặc định toàn hệ thống' : 'Sẵn sàng gán cho team'));
     cell.appendChild(badge);
     row.appendChild(cell);
   }
@@ -151,7 +172,7 @@
     const link = document.createElement('a');
     link.className = 'btn icon-btn';
     link.href = `${API_DOWNLOAD_PREFIX}${encodeURIComponent(item.id)}/download`;
-    link.title = `Tải lại ${item.filename || 'template'}`;
+    link.title = `Tải lại ${item.filename || 'mẫu báo giá'} để đối soát`;
     link.setAttribute('aria-label', link.title);
     link.appendChild(icon('fas fa-download'));
     return link;
@@ -161,13 +182,31 @@
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'btn';
-    button.title = `Kích hoạt phiên bản ${item.id}`;
+    button.title = `Đặt phiên bản ${item.id} làm mẫu mặc định`;
     button.appendChild(icon('fas fa-check'));
     const label = document.createElement('span');
-    setText(label, 'Kích hoạt');
+    setText(label, 'Đặt làm mẫu mặc định');
     button.appendChild(label);
     button.addEventListener('click', () => openActivateDialog(item));
     return button;
+  }
+
+  function buildArchiveButton(item) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn';
+    button.title = `Lưu trữ phiên bản ${item.id}`;
+    button.appendChild(icon('fas fa-archive'));
+    const label = document.createElement('span');
+    setText(label, 'Lưu trữ');
+    button.appendChild(label);
+    button.addEventListener('click', () => openArchiveDialog(item));
+    return button;
+  }
+
+  function appendUsageCell(row, item) {
+    const usage = Array.isArray(item.team_usage) ? item.team_usage : [];
+    appendCell(row, usage.length ? usage.map((team) => team.name).join(', ') : 'Chưa có team');
   }
 
   function renderHistory() {
@@ -176,7 +215,7 @@
     if (!templates.length) {
       const row = document.createElement('tr');
       appendCell(row, 'Chưa có phiên bản nào.', '');
-      row.firstChild.colSpan = 8;
+      row.firstChild.colSpan = 9;
       els.historyBody.appendChild(row);
       return;
     }
@@ -189,13 +228,17 @@
       appendCell(row, item.uploaded_by);
       appendCell(row, formatDate(item.created_at));
       appendStatusCell(row, item);
+      appendUsageCell(row, item);
 
       const actionsCell = document.createElement('td');
       const actions = document.createElement('div');
       actions.className = 'actions';
       actions.appendChild(buildDownloadLink(item));
-      if (!item.is_active) {
+      if (!item.is_active && !item.archived_at) {
         actions.appendChild(buildActivateButton(item));
+      }
+      if (!item.is_active && !item.archived_at && !(item.team_usage || []).length) {
+        actions.appendChild(buildArchiveButton(item));
       }
       actionsCell.appendChild(actions);
       row.appendChild(actionsCell);
@@ -209,7 +252,6 @@
   }
 
   async function loadTemplates() {
-    setAlert('', '');
     try {
       const response = await fetch(API_LIST, { credentials: 'same-origin' });
       const data = await parseJsonResponse(response);
@@ -240,6 +282,10 @@
   }
 
   function updateSelectedFileStatus() {
+    preview = null;
+    if (els.uploadBtn) els.uploadBtn.disabled = true;
+    if (els.mappingBody) clearNode(els.mappingBody);
+    setText(els.mappingBadge, 'Chưa xem trước');
     const file = selectedFile();
     if (!file) {
       setUploadStatus('Chưa chọn file.', '');
@@ -253,6 +299,92 @@
     setUploadStatus(`Đã chọn: ${file.name} (${formatBytes(file.size)}).`, 'ok');
   }
 
+  function normalized(value) {
+    return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  }
+
+  const FIELD_HINTS = {
+    sequence: ['stt', 'so thu tu'], Name: ['ten hang', 'name'], Code: ['code', 'ma hang'],
+    Cas: ['cas'], Brand: ['hang', 'brand'], Size: ['don vi tinh', 'on vi tinh', 'quy cach', 'size'],
+    Note: ['ghi chu hang hoa', 'note'], Compliance_Combined: ['ghi chu khac', 'compliance'],
+    Unit_Price_Value: ['gia nhap chua vat', 'don gia', 'unit price'],
+  };
+
+  function suggestedColumn(field, headers, used) {
+    const hints = FIELD_HINTS[field] || [];
+    let hit = headers.find((item) => !used.has(item.column) && hints.some((hint) => normalized(item.header).includes(hint)));
+    if (!hit && field === 'sequence') hit = headers.find((item) => item.column === 'A' && !used.has(item.column));
+    if (hit) used.add(hit.column);
+    return hit ? hit.column : '';
+  }
+
+  function mappingValue() {
+    if (!preview) return null;
+    const mapping = {};
+    els.mappingBody.querySelectorAll('select[data-field]').forEach((select) => {
+      if (select.value) mapping[select.dataset.field] = select.value;
+    });
+    return { profile_version: 'BG_V1', mapping_version: 1, sheet: els.sheet.value,
+      header_row: Number(els.headerRow.value), product_start_row: Number(els.dataStartRow.value),
+      total_label: els.totalLabel.value.trim(), mapping };
+  }
+
+  function validateMappingUI() {
+    const value = mappingValue();
+    if (!value) return false;
+    const selected = Object.values(value.mapping);
+    const required = preview.fields.filter((field) => field.required && !value.mapping[field.key]);
+    const duplicate = new Set(selected).size !== selected.length;
+    const valid = !required.length && !duplicate && value.product_start_row > value.header_row && Boolean(value.total_label);
+    els.mappingState.className = `mapping-state${valid ? '' : ' err'}`;
+    setText(els.mappingState, valid ? 'Ánh xạ hợp lệ để lưu; hệ thống sẽ kiểm tra vùng tổng và công thức trong cùng giao dịch.' :
+      required.length ? `Thiếu trường bắt buộc: ${required.map((item) => item.label).join(', ')}.` :
+      duplicate ? 'Một cột đang được ánh xạ nhiều lần.' : 'Kiểm tra lại vùng dữ liệu và nhãn tổng.');
+    setText(els.mappingBadge, valid ? 'Sẵn sàng' : 'Cần chỉnh');
+    els.mappingBadge.className = `badge ${valid ? 'active' : 'warn'}`;
+    if (els.uploadBtn) els.uploadBtn.disabled = !valid;
+    return valid;
+  }
+
+  function renderMapping(data) {
+    preview = data;
+    clearNode(els.mappingBody);
+    clearNode(els.sheet);
+    data.sheets.forEach((name) => {
+      const option = document.createElement('option'); option.value = name; option.textContent = name;
+      option.selected = name === data.sheet; els.sheet.appendChild(option);
+    });
+    els.headerRow.value = data.header_row;
+    els.dataStartRow.value = data.product_start_row;
+    const used = new Set();
+    data.fields.forEach((field) => {
+      const row = document.createElement('tr');
+      const label = document.createElement('td'); label.textContent = field.label;
+      if (field.required) { const mark = document.createElement('span'); mark.className = 'required-mark'; mark.textContent = ' *'; label.appendChild(mark); }
+      const cell = document.createElement('td'); const select = document.createElement('select');
+      select.dataset.field = field.key;
+      const empty = document.createElement('option'); empty.value = ''; empty.textContent = field.required ? 'Chọn cột…' : 'Không ánh xạ'; select.appendChild(empty);
+      const suggested = suggestedColumn(field.key, data.headers, used);
+      data.headers.forEach((header) => { const option = document.createElement('option'); option.value = header.column;
+        option.textContent = `${header.column} — ${header.header}`; option.selected = header.column === suggested; select.appendChild(option); });
+      select.addEventListener('change', validateMappingUI); cell.appendChild(select); row.append(label, cell); els.mappingBody.appendChild(row);
+    });
+    validateMappingUI();
+  }
+
+  async function inspectTemplate() {
+    const file = selectedFile(); const error = validateSelectedFile(file);
+    if (error) { setUploadStatus(error, 'err'); return; }
+    els.inspectBtn.disabled = true; setUploadStatus('Đang đọc trang tính và hàng tiêu đề…', 'loading');
+    try {
+      const body = new FormData(); body.append('workbook', file); body.append('csrf_token', els.csrfToken.value);
+      body.append('sheet', els.sheet.value || 'BG'); body.append('header_row', els.headerRow.value || '16');
+      const response = await fetch(API_INSPECT, { method: 'POST', body, credentials: 'same-origin' });
+      const data = await parseJsonResponse(response); renderMapping(data.preview); setUploadStatus('Đã đọc tệp. Kiểm tra ánh xạ trước khi lưu.', 'ok');
+    } catch (err) { preview = null; setUploadStatus(err.message || 'Không xem trước được tệp.', 'err'); }
+    finally { els.inspectBtn.disabled = false; }
+  }
+
   async function uploadTemplate(event) {
     event.preventDefault();
     if (uploadInProgress) return;
@@ -262,18 +394,20 @@
       setUploadStatus(error, 'err');
       return;
     }
+    if (!validateMappingUI()) { setUploadStatus('Cần xem trước và hoàn tất ánh xạ trước khi lưu.', 'err'); return; }
 
     uploadInProgress = true;
     if (els.uploadBtn) els.uploadBtn.disabled = true;
     if (els.workbook) els.workbook.disabled = true;
     if (els.activate) els.activate.disabled = true;
-    setUploadStatus('Đang upload và kiểm tra workbook...', 'loading');
+    setUploadStatus('Đang tải lên và kiểm tra tệp...', 'loading');
     setAlert('', '');
 
     try {
       const body = new FormData();
       body.append('workbook', file);
       body.append('activate', els.activate && els.activate.checked ? 'true' : 'false');
+      body.append('mapping', JSON.stringify(mappingValue()));
       body.append('csrf_token', els.csrfToken ? els.csrfToken.value : '');
       const response = await fetch(API_UPLOAD, {
         method: 'POST',
@@ -283,22 +417,56 @@
       await parseJsonResponse(response);
       if (els.workbook) els.workbook.value = '';
       if (els.activate) els.activate.checked = true;
-      setUploadStatus('Upload thành công. Đã làm mới lịch sử phiên bản.', 'ok');
-      setAlert('Đã upload mẫu báo giá.', 'ok');
+      preview = null;
+      clearNode(els.mappingBody);
+      setText(els.mappingBadge, 'Chưa xem trước');
+      setUploadStatus('Tải lên thành công. Đã làm mới lịch sử phiên bản.', 'ok');
+      setAlert('Đã tải lên mẫu báo giá.', 'ok');
       await loadTemplates();
+      await loadContexts();
     } catch (err) {
-      setUploadStatus(err.message || 'Upload thất bại.', 'err');
+      setUploadStatus(err.message || 'Tải lên thất bại.', 'err');
     } finally {
       uploadInProgress = false;
-      if (els.uploadBtn) els.uploadBtn.disabled = false;
+      if (els.uploadBtn) els.uploadBtn.disabled = !preview;
       if (els.workbook) els.workbook.disabled = false;
       if (els.activate) els.activate.disabled = false;
     }
   }
 
+  function renderAssignments() {
+    clearNode(els.assignments);
+    teams.filter((team) => team.status === 'ACTIVE').forEach((team) => {
+      const row = document.createElement('div'); row.className = 'assignment-row';
+      const name = document.createElement('strong'); name.textContent = team.name;
+      const select = document.createElement('select'); select.appendChild(new Option('Dùng mẫu mặc định', ''));
+      templates.filter((item) => !item.archived_at).forEach((item) => select.appendChild(new Option(
+        `#${item.id} · ${item.filename}${item.is_active ? ' · Mẫu mặc định toàn hệ thống' : ''}`,
+        item.id,
+      )));
+      select.value = team.template_id == null ? '' : String(team.template_id);
+      const save = document.createElement('button'); save.type = 'button'; save.className = 'btn'; save.textContent = 'Lưu gán';
+      save.addEventListener('click', async () => {
+        save.disabled = true;
+        try { const response = await fetch(API_ASSIGN, { method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': els.csrfToken.value },
+          body: JSON.stringify({ team_id: team.id, template_id: select.value || null }) });
+          await parseJsonResponse(response); setAlert(`Đã cập nhật mẫu cho team ${team.name}.`, 'ok'); await loadContexts();
+        } catch (err) { setAlert(err.message, 'err'); } finally { save.disabled = false; }
+      });
+      row.append(name, select, save); els.assignments.appendChild(row);
+    });
+  }
+
+  async function loadContexts() {
+    try { const response = await fetch(API_CONTEXTS, { credentials: 'same-origin' }); const data = await parseJsonResponse(response);
+      teams = data.teams || []; templates = data.templates || templates; renderAll(); renderAssignments();
+    } catch (err) { setText(els.assignments, err.message || 'Không tải được thông tin gán mẫu.'); }
+  }
+
   function openActivateDialog(item) {
     pendingActivateId = item.id;
-    setText(els.activateDialogText, `Kích hoạt phiên bản #${item.id} (${item.filename}) thay cho mẫu đang sử dụng?`);
+    setText(els.activateDialogText, `Đặt phiên bản #${item.id} (${item.filename}) làm mẫu mặc định toàn hệ thống?`);
     if (els.activateDialog && typeof els.activateDialog.showModal === 'function') {
       els.activateDialog.showModal();
     }
@@ -324,25 +492,69 @@
       });
       await parseJsonResponse(response);
       closeActivateDialog();
-      setAlert('Đã kích hoạt phiên bản mẫu báo giá.', 'ok');
-      await loadTemplates();
+      setAlert('Đã đặt phiên bản làm mẫu mặc định toàn hệ thống.', 'ok');
+      await loadContexts();
     } catch (err) {
-      setAlert(err.message || 'Kích hoạt thất bại.', 'err');
+      setAlert(err.message || 'Không thể đặt mẫu mặc định.', 'err');
     } finally {
       activateInProgress = false;
       if (els.activateConfirm) els.activateConfirm.disabled = false;
     }
   }
 
+  function openArchiveDialog(item) {
+    pendingArchiveId = item.id;
+    setText(els.archiveDialogText, `Lưu trữ phiên bản #${item.id} (${item.filename})? Mẫu vẫn có thể tải lại để đối soát.`);
+    if (els.archiveDialog && typeof els.archiveDialog.showModal === 'function') {
+      els.archiveDialog.showModal();
+    }
+  }
+
+  function closeArchiveDialog() {
+    pendingArchiveId = null;
+    if (els.archiveDialog && els.archiveDialog.open) els.archiveDialog.close();
+  }
+
+  async function archiveTemplate() {
+    if (!pendingArchiveId || archiveInProgress) return;
+    archiveInProgress = true;
+    if (els.archiveConfirm) els.archiveConfirm.disabled = true;
+    setAlert('', '');
+    try {
+      const response = await fetch(`${API_ARCHIVE_PREFIX}${encodeURIComponent(pendingArchiveId)}/archive`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'X-CSRF-Token': els.csrfToken ? els.csrfToken.value : '' },
+      });
+      await parseJsonResponse(response);
+      closeArchiveDialog();
+      setAlert('Đã lưu trữ phiên bản mẫu báo giá.', 'ok');
+      await loadContexts();
+    } catch (err) {
+      setAlert(err.message || 'Lưu trữ thất bại.', 'err');
+    } finally {
+      archiveInProgress = false;
+      if (els.archiveConfirm) els.archiveConfirm.disabled = false;
+    }
+  }
+
   if (els.workbook) els.workbook.addEventListener('change', updateSelectedFileStatus);
+  if (els.inspectBtn) els.inspectBtn.addEventListener('click', inspectTemplate);
   if (els.uploadForm) els.uploadForm.addEventListener('submit', uploadTemplate);
   if (els.activateCancel) els.activateCancel.addEventListener('click', closeActivateDialog);
   if (els.activateConfirm) els.activateConfirm.addEventListener('click', activateTemplate);
+  if (els.archiveCancel) els.archiveCancel.addEventListener('click', closeArchiveDialog);
+  if (els.archiveConfirm) els.archiveConfirm.addEventListener('click', archiveTemplate);
   if (els.activateDialog) {
     els.activateDialog.addEventListener('cancel', () => {
       pendingActivateId = null;
     });
   }
+  if (els.archiveDialog) {
+    els.archiveDialog.addEventListener('cancel', () => { pendingArchiveId = null; });
+  }
 
-  loadTemplates();
+  if (els.sheet) els.sheet.addEventListener('change', () => { preview = null; if (els.uploadBtn) els.uploadBtn.disabled = true; });
+  if (els.headerRow) els.headerRow.addEventListener('change', () => { preview = null; if (els.uploadBtn) els.uploadBtn.disabled = true; });
+  loadTemplates().then(loadContexts);
 })();

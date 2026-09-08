@@ -16,8 +16,8 @@ FIELDS = {
     'VIEW_NAME': ('Name', 'Name'), 'VIEW_CODE': ('Code', 'Code'),
     'VIEW_CAS': ('Cas', 'CAS'), 'VIEW_BRAND': ('Brand', 'Brand'),
     'VIEW_SIZE': ('Size', 'Size'), 'VIEW_PRICE': ('Unit_Price', 'Unit Price'),
-    'VIEW_NOTE': ('Note', 'Note'), 'VIEW_COMPLIANCE': ('Compliance', 'Compliance'),
-    'VIEW_COMPLIANCE_NOTE': ('Compliance_Note', 'Compliance Note'),
+    'VIEW_NOTE': ('Note', 'Note'), 'VIEW_COMPLIANCE': ('Compliance', 'Tình trạng quản lý'),
+    'VIEW_COMPLIANCE_NOTE': ('Compliance_Note', 'Ghi chú quản lý'),
 }
 REGISTRY = {**FEATURES, **{key: value[1] for key, value in FIELDS.items()}}
 LEGACY_PERMISSIONS = tuple(REGISTRY)
@@ -25,6 +25,9 @@ DEPENDENCIES = {
     'QUICK_QUOTE': ('VIEW_PRICE',),
     'CHECK_LICENSE': ('SEARCH_BY_CAS', 'VIEW_COMPLIANCE'),
     'ADVANCED_SEARCH': ('SEARCH_BY_CAS',),
+    # Export eligibility depends on live compliance state. Without this field
+    # grant, a product-specific success/failure becomes a compliance oracle.
+    'EXPORT': ('VIEW_COMPLIANCE',),
 }
 ROUTES = {
     'home': (), 'search_products': ('SEARCH',),
@@ -39,6 +42,7 @@ ROUTES = {
     'quote_assistant_request_file_parse': ('QUICK_QUOTE',),
     'quote_assistant_workbook_template': ('QUICK_QUOTE',),
     'quote_assistant_workbook_export': ('QUICK_QUOTE', 'EXPORT'),
+    'results_quote_export': ('EXPORT',),
     'results_copy': ('COPY',), 'results_export': ('EXPORT',),
 }
 # All wire aliases, including derived values and nested quote metadata.
@@ -88,9 +92,12 @@ def current_permissions():
     return g.team_permissions
 
 
-def can(key):
-    grants = current_permissions()
+def allows(key, grants):
     return key in grants and all(dep in grants for dep in DEPENDENCIES.get(key, ()))
+
+
+def can(key):
+    return allows(key, current_permissions())
 
 
 def redact(value, grants=None):

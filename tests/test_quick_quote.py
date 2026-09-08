@@ -290,7 +290,7 @@ class QuickQuoteMirrorHelpers:
     without unittest re-discovering and re-running inherited test_* methods
     under each subclass name."""
 
-    BLOCKED = {"CẤM NHẬP", "Cấm nhập", "Chưa xác định"}
+    BLOCKED = {"CẤM NHẬP", "Cấm nhập"}
     GRID_FIELDS = ["requested_name", "code", "cas"]
     INITIAL_ROW_COUNT = 5
     REASON_LABELS = {
@@ -974,8 +974,10 @@ class QuickQuoteHelperMirrorTests(QuickQuoteMirrorHelpers, unittest.TestCase):
         }
 
     def test_blocked_candidates_not_selectable(self):
-        blocked = {"Compliance": "Chưa xác định", "eligible": False}
+        blocked = {"Compliance": "CẤM NHẬP", "eligible": False}
         self.assertFalse(self._is_selectable(blocked))
+        unresolved_warning = {"Compliance": "Chưa xác định", "eligible": True}
+        self.assertTrue(self._is_selectable(unresolved_warning))
         ok = {"Compliance": "Được bán", "eligible": True}
         self.assertTrue(self._is_selectable(ok))
 
@@ -1110,7 +1112,7 @@ class QuickQuoteHelperMirrorTests(QuickQuoteMirrorHelpers, unittest.TestCase):
     def test_result_table_js_has_all_columns(self):
         js = QUICK_QUOTE_JS.read_text(encoding="utf-8")
         for col in ["Yêu cầu", "Sản phẩm", "Code", "CAS", "Brand", "Size", "Giá nhập",
-                    "Note", "Compliance", "Ghi chú CL", "Loại khớp"]:
+                    "Ghi chú hàng hóa", "Tình trạng quản lý", "Ghi chú quản lý", "Loại khớp"]:
             self.assertIn(col, js, f"Missing column label: {col}")
 
     def test_result_table_css_containment(self):
@@ -1341,10 +1343,10 @@ class QuickQuoteExportStaticTests(unittest.TestCase):
     def test_metadata_fetch_and_template_states(self):
         js = QUICK_QUOTE_JS.read_text(encoding="utf-8")
         self.assertIn("QQ_TEMPLATE_ENDPOINT = '/api/quote-assistant/workbook/template'", js)
-        self.assertIn("fetch(QQ_TEMPLATE_ENDPOINT", js)
+        self.assertIn("fetch(`${QQ_TEMPLATE_ENDPOINT}", js)
         self.assertIn("Mẫu báo giá:", js)
         self.assertIn("Đang kiểm tra mẫu báo giá…", js)
-        self.assertIn("Chưa có mẫu báo giá. Vui lòng liên hệ admin.", js)
+        self.assertIn("Chưa có mẫu báo giá. Vui lòng liên hệ quản trị viên.", js)
         self.assertIn("Không tải được thông tin mẫu báo giá.", js)
         self.assertNotIn("uploaded_by", js)
         self.assertNotIn("mapping_json", js)
@@ -1360,7 +1362,7 @@ class QuickQuoteExportStaticTests(unittest.TestCase):
         self.assertIn("fetch(QQ_EXPORT_ENDPOINT", export_section)
         self.assertIn("QQ_EXPORT_ENDPOINT = '/api/quote-assistant/workbook/export'", js)
         self.assertNotIn("fd.append('workbook'", export_section)
-        self.assertNotIn("headers:", export_section)
+        self.assertIn("'X-CSRF-Token': TeamPermissions.csrfToken()", export_section)
         self.assertNotIn("contentType", export_section)
 
     def test_js_export_no_product_fields_beyond_product_id(self):
@@ -1591,7 +1593,7 @@ class QuickQuoteExportClickabilityTests(unittest.TestCase):
 class QuickQuoteExportHelperTests(unittest.TestCase):
     """Python mirrors of export JS helpers."""
 
-    BLOCKED = {"CẤM NHẬP", "Cấm nhập", "Chưa xác định"}
+    BLOCKED = {"CẤM NHẬP", "Cấm nhập"}
 
     @classmethod
     def _is_selectable(cls, candidate):
@@ -1949,7 +1951,7 @@ class QuickQuoteLifecycleTests(unittest.TestCase):
     def test_vietnamese_labels_no_raw_enum_exposed(self):
         js = QUICK_QUOTE_JS.read_text(encoding="utf-8")
         # Ensure all lifecycle labels are friendly Vietnamese
-        for label in ["Đã chọn", "Cần xem", "Chưa resolve", "Bị chặn", "Đã xuất"]:
+        for label in ["Đã chọn", "Cần xem", "Chưa xử lý", "Bị chặn", "Đã xuất"]:
             self.assertIn(label, js)
         # Ensure specific Vietnamese reason descriptions exist
         for reason in [
@@ -1963,7 +1965,7 @@ class QuickQuoteLifecycleTests(unittest.TestCase):
             "Không có giá hợp lệ",
             "Cần chọn sản phẩm",
             "Không khớp bộ lọc quy cách/dạng",
-            "Tất cả sản phẩm bị chặn compliance",
+            "Tất cả sản phẩm thuộc diện CẤM NHẬP",
             "Trùng Code + Brand + Size — cần chọn thủ công",
             "Đã chọn tự động",
             "Đã chọn thủ công",

@@ -73,6 +73,7 @@
     .badge.active { background: #dcfce7; color: #166534; }
     .badge.inactive { background: #f1f5f9; color: #475569; }
     .badge.warn { background: #fef3c7; color: #92400e; }
+    .badge.archived { background: #e2e8f0; color: #334155; }
     .meta-grid {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -100,7 +101,7 @@
     }
     .upload-form {
       display: grid;
-      grid-template-columns: minmax(220px, 1fr) auto auto;
+      grid-template-columns: minmax(220px, 1fr) auto auto auto;
       gap: 12px;
       align-items: end;
     }
@@ -173,6 +174,14 @@
       gap: 12px;
       align-items: start;
     }
+    .mapping-controls { display:flex; flex-wrap:wrap; gap:10px; align-items:end; margin-bottom:12px; }
+    .mapping-controls label { display:grid; gap:4px; min-width:140px; }
+    select, input[type="number"], input[type="text"] { min-height:38px; max-width:100%; border:1px solid var(--border); border-radius:var(--radius); background:#fff; padding:7px 9px; font:inherit; }
+    .required-mark { color:var(--danger); font-weight:800; }
+    .mapping-state { font-size:.88rem; color:var(--muted); }
+    .mapping-state.err { color:var(--danger); }
+    .assignment-row { display:grid; grid-template-columns:minmax(150px,1fr) minmax(220px,2fr) auto; gap:10px; align-items:center; padding:9px 0; border-top:1px solid var(--border); }
+    .assignment-row:first-child { border-top:0; }
     .facts,
     .mapping-table,
     .history-table {
@@ -198,7 +207,7 @@
       overflow-x: auto;
       -webkit-overflow-scrolling: touch;
     }
-    .history-table { min-width: 880px; }
+    .history-table { min-width: 1040px; }
     .filename-cell {
       max-width: 260px;
       overflow: hidden;
@@ -256,6 +265,8 @@
       .upload-form { grid-template-columns: 1fr; }
       .check { white-space: normal; }
       .mapping-grid { grid-template-columns: 1fr; }
+      .assignment-row { grid-template-columns:minmax(0,1fr); }
+      .assignment-row > * { min-width:0; width:100%; }
       .filename-cell { max-width: 180px; }
     }
   </style>
@@ -265,7 +276,7 @@
   <div class="wrap">
     <header>
       <h1>Mẫu báo giá</h1>
-      <p class="sub">Quản lý phiên bản workbook báo giá do admin upload. Profile hiện tại: <code>BG_V1</code>.</p>
+      <p class="sub">Quản lý các phiên bản tệp báo giá do quản trị viên tải lên. Cấu hình hiện tại: <code>BG_V1</code>.</p>
     </header>
 
     <div id="qtPageAlert" class="alert" role="status" aria-live="polite"></div>
@@ -273,30 +284,30 @@
     <section class="panel" aria-labelledby="qtActiveTitle">
       <div class="panel-head">
         <div>
-          <h2 id="qtActiveTitle"><i class="fas fa-check-circle" aria-hidden="true"></i> Mẫu đang sử dụng</h2>
-          <p class="hint">Template active được dùng cho workflow export ở phase tiếp theo.</p>
+          <h2 id="qtActiveTitle"><i class="fas fa-check-circle" aria-hidden="true"></i> Mẫu mặc định toàn hệ thống</h2>
+          <p class="hint">Một mẫu mặc định phục vụ các team chưa được gán riêng; các mẫu khả dụng khác vẫn có thể đồng thời phục vụ từng team.</p>
         </div>
-        <span id="qtActiveBadge" class="badge inactive" data-active-label="Đang sử dụng">Chưa có mẫu</span>
+        <span id="qtActiveBadge" class="badge inactive" data-active-label="Mẫu mặc định toàn hệ thống">Chưa có mẫu</span>
       </div>
       <div id="qtEmptyActive" class="empty-state">
         <strong>Chưa có mẫu báo giá.</strong>
-        <div>Upload mẫu <code>.xlsx</code> đầu tiên và giữ tùy chọn kích hoạt để bắt đầu quản lý phiên bản.</div>
+        <div>Tải lên mẫu <code>.xlsx</code> đầu tiên và chọn đặt làm mẫu mặc định để bắt đầu.</div>
       </div>
       <div id="qtActiveMeta" class="meta-grid" hidden>
-        <div class="meta-item"><span class="meta-label">Filename</span><span id="qtActiveFilename" class="meta-value"></span></div>
-        <div class="meta-item"><span class="meta-label">Profile</span><span id="qtActiveProfile" class="meta-value"></span></div>
+        <div class="meta-item"><span class="meta-label">Tên tệp</span><span id="qtActiveFilename" class="meta-value"></span></div>
+        <div class="meta-item"><span class="meta-label">Cấu hình</span><span id="qtActiveProfile" class="meta-value"></span></div>
         <div class="meta-item"><span class="meta-label">Dung lượng</span><span id="qtActiveSize" class="meta-value"></span></div>
-        <div class="meta-item"><span class="meta-label">Ngày upload</span><span id="qtActiveCreated" class="meta-value"></span></div>
-        <div class="meta-item"><span class="meta-label">Ngày kích hoạt</span><span id="qtActiveActivated" class="meta-value"></span></div>
-        <div class="meta-item"><span class="meta-label">Người upload</span><span id="qtActiveUploader" class="meta-value"></span></div>
+        <div class="meta-item"><span class="meta-label">Ngày tải lên</span><span id="qtActiveCreated" class="meta-value"></span></div>
+        <div class="meta-item"><span class="meta-label">Ngày đặt mặc định</span><span id="qtActiveActivated" class="meta-value"></span></div>
+        <div class="meta-item"><span class="meta-label">Người tải lên</span><span id="qtActiveUploader" class="meta-value"></span></div>
       </div>
     </section>
 
     <section class="panel" aria-labelledby="qtUploadTitle">
       <div class="panel-head">
         <div>
-          <h2 id="qtUploadTitle"><i class="fas fa-upload" aria-hidden="true"></i> Upload phiên bản mới</h2>
-          <p class="hint">Chỉ nhận Excel Workbook <code>.xlsx</code>, tối đa 10 MB. Backend tự kiểm tra và gán <code>BG_V1</code>.</p>
+          <h2 id="qtUploadTitle"><i class="fas fa-upload" aria-hidden="true"></i> Tải lên phiên bản mới</h2>
+          <p class="hint">Chỉ nhận tệp Excel <code>.xlsx</code>, tối đa 10 MB. Hệ thống tự kiểm tra và gán <code>BG_V1</code>.</p>
         </div>
       </div>
       <form id="qtUploadForm" class="upload-form" enctype="multipart/form-data" novalidate>
@@ -307,9 +318,10 @@
         </div>
         <label class="check" for="qtActivate">
           <input id="qtActivate" name="activate" type="checkbox" checked />
-          Kích hoạt ngay sau khi upload
+          Đặt làm mẫu mặc định sau khi tải lên
         </label>
-        <button id="qtUploadBtn" type="submit" class="btn btn-primary">
+        <button id="qtInspectBtn" type="button" class="btn"><i class="fas fa-eye" aria-hidden="true"></i> Xem trước</button>
+        <button id="qtUploadBtn" type="submit" class="btn btn-primary" disabled>
           <i class="fas fa-upload" aria-hidden="true"></i>
           <span>Tải lên</span>
         </button>
@@ -320,44 +332,31 @@
     <section class="panel" aria-labelledby="qtMappingTitle">
       <div class="panel-head">
         <div>
-          <h2 id="qtMappingTitle"><i class="fas fa-map" aria-hidden="true"></i> Mapping được kiểm tra</h2>
-          <p class="hint">Profile cố định <code>BG_V1</code>, chưa phải mapping tùy chỉnh.</p>
+          <h2 id="qtMappingTitle"><i class="fas fa-map" aria-hidden="true"></i> Ánh xạ cột</h2>
+          <p class="hint">Xem hàng tiêu đề, ánh xạ trường dữ liệu rồi lưu cùng phiên bản mẫu.</p>
         </div>
-        <span class="badge warn">Read-only</span>
+        <span id="qtMappingBadge" class="badge warn">Chưa xem trước</span>
       </div>
-      <div class="mapping-grid">
-        <table class="facts" aria-label="BG_V1 facts">
-          <tbody>
-            <tr><th>Sheet</th><td><code>BG</code></td></tr>
-            <tr><th>Header row</th><td><code>16</code></td></tr>
-            <tr><th>Data start row</th><td><code>17</code></td></tr>
-            <tr><th>Footer label</th><td><code>Tổng giá</code></td></tr>
-          </tbody>
-        </table>
-        <div class="table-wrap">
-          <table class="mapping-table" aria-label="BG_V1 column mapping">
-            <thead><tr><th>Cột</th><th>Trường</th></tr></thead>
-            <tbody>
-              <tr><td><code>A</code></td><td>STT</td></tr>
-              <tr><td><code>B</code></td><td>Name</td></tr>
-              <tr><td><code>C</code></td><td>Code</td></tr>
-              <tr><td><code>D</code></td><td>CAS</td></tr>
-              <tr><td><code>E</code></td><td>Brand</td></tr>
-              <tr><td><code>F</code></td><td>Size</td></tr>
-              <tr><td><code>M</code></td><td>Note</td></tr>
-              <tr><td><code>N</code></td><td>Compliance + Compliance Note</td></tr>
-              <tr><td><code>P</code></td><td>Unit Price</td></tr>
-            </tbody>
-          </table>
-        </div>
+      <div class="mapping-controls">
+        <label>Trang tính<select id="qtSheet"><option>BG</option></select></label>
+        <label>Hàng tiêu đề<input id="qtHeaderRow" type="number" min="1" max="500" value="16"></label>
+        <label>Hàng bắt đầu dữ liệu<input id="qtDataStartRow" type="number" min="2" value="17"></label>
+        <label>Nhãn tổng<input id="qtTotalLabel" type="text" value="Tổng giá" maxlength="120"></label>
       </div>
+      <p id="qtMappingState" class="mapping-state">Chọn file và bấm Xem trước.</p>
+      <div class="table-wrap"><table class="mapping-table"><thead><tr><th>Trường dữ liệu</th><th>Cột / tiêu đề</th></tr></thead><tbody id="qtMappingBody"></tbody></table></div>
+    </section>
+
+    <section class="panel" aria-labelledby="qtAssignTitle">
+      <div class="panel-head"><div><h2 id="qtAssignTitle"><i class="fas fa-users-cog" aria-hidden="true"></i> Mẫu theo team</h2><p class="hint">Mỗi team dùng một mẫu; không gán riêng thì dùng mẫu mặc định. Nhiều mẫu khác nhau có thể được các team sử dụng đồng thời.</p></div></div>
+      <div id="qtAssignments"><p class="hint">Đang tải team…</p></div>
     </section>
 
     <section class="panel" aria-labelledby="qtHistoryTitle">
       <div class="panel-head">
         <div>
           <h2 id="qtHistoryTitle"><i class="fas fa-history" aria-hidden="true"></i> Lịch sử phiên bản</h2>
-          <p class="hint">Có thể tải lại file hoặc kích hoạt phiên bản cũ để rollback.</p>
+          <p class="hint">Có thể tải lại mọi phiên bản để đối soát. Chỉ mẫu không mặc định và không được đội nhóm sử dụng mới có thể lưu trữ.</p>
         </div>
       </div>
       <div class="table-wrap">
@@ -365,17 +364,18 @@
           <thead>
             <tr>
               <th>ID/phiên bản</th>
-              <th>Filename</th>
-              <th>Profile</th>
+              <th>Tên tệp</th>
+              <th>Cấu hình</th>
               <th>Dung lượng</th>
-              <th>Người upload</th>
-              <th>Ngày upload</th>
+              <th>Người tải lên</th>
+              <th>Ngày tải lên</th>
               <th>Trạng thái</th>
+              <th>Team đang dùng</th>
               <th>Thao tác</th>
             </tr>
           </thead>
           <tbody id="qtHistoryBody">
-            <tr><td colspan="8">Đang tải lịch sử...</td></tr>
+            <tr><td colspan="9">Đang tải lịch sử...</td></tr>
           </tbody>
         </table>
       </div>
@@ -384,15 +384,26 @@
 
   <dialog id="qtActivateDialog" aria-labelledby="qtActivateDialogTitle">
     <div class="dialog-body">
-      <h2 id="qtActivateDialogTitle">Kích hoạt phiên bản này?</h2>
-      <p id="qtActivateDialogText">Template được chọn sẽ thay thế mẫu đang sử dụng.</p>
+      <h2 id="qtActivateDialogTitle">Đặt làm mẫu mặc định?</h2>
+      <p id="qtActivateDialogText">Mẫu được chọn sẽ thay thế mẫu mặc định toàn hệ thống.</p>
       <div class="dialog-actions">
         <button id="qtActivateCancel" type="button" class="btn">Hủy</button>
-        <button id="qtActivateConfirm" type="button" class="btn btn-primary">Kích hoạt</button>
+        <button id="qtActivateConfirm" type="button" class="btn btn-primary">Đặt làm mẫu mặc định</button>
       </div>
     </div>
   </dialog>
 
-  <script src="{{ url_for('static', filename='admin_quote_templates.js', v='20260827a') }}"></script>
+  <dialog id="qtArchiveDialog" aria-labelledby="qtArchiveDialogTitle">
+    <div class="dialog-body">
+      <h2 id="qtArchiveDialogTitle">Lưu trữ phiên bản này?</h2>
+      <p id="qtArchiveDialogText">Mẫu đã lưu trữ vẫn có thể tải lại để đối soát nhưng không thể gán hoặc đặt làm mặc định.</p>
+      <div class="dialog-actions">
+        <button id="qtArchiveCancel" type="button" class="btn">Hủy</button>
+        <button id="qtArchiveConfirm" type="button" class="btn btn-danger"><i class="fas fa-archive" aria-hidden="true"></i> Lưu trữ</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="{{ url_for('static', filename='admin_quote_templates.js', v='20260908c2') }}"></script>
 </body>
 </html>

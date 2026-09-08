@@ -90,7 +90,7 @@ class SearchDisplayStaticTests(unittest.TestCase):
         html = INDEX_HTML.read_text(encoding="utf-8")
         self.assertIn('name="viewport"', html)
         self.assertIn("results-table-wrap", html)
-        self.assertIn("<th>Compliance Note</th>", html)
+        self.assertIn("<th>Ghi chú quản lý</th>", html)
         self.assertIn("overflow-x", (ROOT / "static" / "styles.css").read_text(encoding="utf-8"))
 
     def test_script_has_compliance_classes_and_copy_columns(self):
@@ -98,7 +98,7 @@ class SearchDisplayStaticTests(unittest.TestCase):
         self.assertIn("'Được bán': 'warning-duoc-ban'", js)
         self.assertIn("'Chưa xác định': 'warning-chua-xac-dinh'", js)
         self.assertIn("'Không phát hiện hạn chế': 'warning-khong-phat-hien'", js)
-        self.assertIn("label: 'Compliance_Note'", js)
+        self.assertIn("label: 'Ghi chú quản lý'", js)
         self.assertIn("cell.textContent", js)
         self.assertNotIn("button-brand", js)
 

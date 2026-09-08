@@ -16,6 +16,7 @@ from flask import Flask, jsonify, redirect, render_template, request, send_file,
 from flask_cors import CORS
 import psycopg2
 from openpyxl import Workbook, load_workbook
+from openpyxl.utils import get_column_letter
 from psycopg2 import Binary, IntegrityError
 from psycopg2.errors import UndefinedTable
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -149,10 +150,12 @@ IMPORT_PREVIEWS = {}
 QUOTE_TEMPLATE_PROFILE_VERSION = "BG_V1"
 QUOTE_TEMPLATE_MAPPING_SNAPSHOT = {
     "profile_version": QUOTE_TEMPLATE_PROFILE_VERSION,
+    "mapping_version": 1,
     "sheet": "BG",
     "header_row": 16,
     "product_start_row": 17,
     "total_label": "Tổng giá",
+    "total_formula_column": "J",
     "mapping": {
         "sequence": "A",
         "Name": "B",
@@ -165,6 +168,20 @@ QUOTE_TEMPLATE_MAPPING_SNAPSHOT = {
         "Unit_Price_Value": "P",
     },
 }
+QUOTE_MAPPING_FIELDS = {
+    "sequence": ("STT", True),
+    "Name": ("Tên hàng", True),
+    "Code": ("Mã hàng", True),
+    "Cas": ("CAS", False),
+    "Brand": ("Hãng", False),
+    "Size": ("Quy cách", False),
+    "Note": ("Ghi chú hàng hóa", False),
+    "Compliance_Combined": ("Ghi chú quản lý", False),
+    # Full-access exports still use the approved workbook mapping. Restricted
+    # exports are rebuilt as a clean package and never open the stored template.
+    "Unit_Price_Value": ("Đơn giá", True),
+}
+RESULT_QUOTE_EXPORT_SOURCES = frozenset({"SEARCH", "FIND_CODE", "ADVANCED_SEARCH"})
 
 
 class QuoteTemplateError(ValueError):
@@ -177,7 +194,7 @@ class QuotePricingUnavailableError(ValueError):
     def __init__(self, selection_ord: int, reason_code: str):
         self.reason_code = reason_code
         self.currency_rate_message = currency_status_label_vi(reason_code)
-        super().__init__(f"Selection {selection_ord}: {self.currency_rate_message}")
+        super().__init__(f"Dòng {selection_ord}: {self.currency_rate_message}")
 
 
 MAX_EXCHANGE_RATE = Decimal("1000000000")
@@ -543,6 +560,7 @@ def _product_row_to_result(
     brand_manual_enabled=False,
     manual_compliance=None,
     manual_compliance_note=None,
+    product_id=None,
 ) -> dict:
     unit_price, unit_price_display, rate_valid, rate_status = _compute_unit_price_details(
         price, ship, brand, rate_map
@@ -556,6 +574,7 @@ def _product_row_to_result(
         cas=cas,
     )
     return {
+        "product_id": product_id,
         "Name": name or "",
         "Code": code or "",
         "Cas": cas or "",
@@ -591,8 +610,8 @@ QUOTE_SELECTION_STRATEGIES = {
     QUOTE_SELECTION_LOWEST_OVERALL,
     QUOTE_SELECTION_LOWEST_PER_BRAND,
 }
-QUOTE_BLOCKED_COMPLIANCE = {"CẤM NHẬP", "Cấm nhập", "Chưa xác định"}
-QUOTE_WARNING_COMPLIANCE = {"Phụ lục II", "Phụ lục III", "Cần giấy phép"}
+QUOTE_BLOCKED_COMPLIANCE = {"CẤM NHẬP", "Cấm nhập"}
+QUOTE_WARNING_COMPLIANCE = {"Phụ lục II", "Phụ lục III", "Cần giấy phép", "Chưa xác định"}
 QUOTE_UNIT_GROUP_ANY = "ANY"
 QUOTE_UNIT_GROUP_SOLID = "SOLID"
 QUOTE_UNIT_GROUP_LIQUID = "LIQUID"
@@ -698,8 +717,8 @@ QUOTE_EXPORT_PLACEHOLDER_NOTES = {
     LIFECYCLE_REVIEW: "Cần kiểm tra/chọn thủ công",
 }
 QUOTE_EXPORT_BLOCKED_REASON_VN = {
-    REASON_COMPLIANCE_BLOCKED: "tất cả sản phẩm bị chặn compliance",
-    REASON_COMPLIANCE_UNRESOLVED: "compliance chưa xác định",
+    REASON_COMPLIANCE_BLOCKED: "sản phẩm thuộc diện CẤM NHẬP",
+    REASON_COMPLIANCE_UNRESOLVED: "tình trạng quản lý chưa xác định",
 }
 QUOTE_EXPORT_BLOCKED_REASON_VN_DEFAULT = "không đủ điều kiện báo giá"
 
@@ -728,6 +747,9 @@ MAX_POLICY_BRANDS = 100
 
 
 QUOTE_TEMPLATE_TABLE_UNAVAILABLE_MSG = "Hệ thống quản lý mẫu báo giá chưa sẵn sàng. Vui lòng liên hệ quản trị viên."
+# Serializes the one-global-default transition (upload/activate) so concurrent
+# requests cannot deadlock while each holds a different template row.
+QUOTE_TEMPLATE_ACTIVE_LOCK_ID = 600_101_1
 
 
 def _is_table_missing_error(exc: BaseException) -> bool:
@@ -1073,7 +1095,7 @@ def _quote_parse_payload(payload: dict) -> tuple[list[dict], dict, str]:
 
     strategy = _quote_text(payload.get("selection_strategy") or payload.get("strategy") or QUOTE_SELECTION_MANUAL, max_len=50).upper()
     if strategy not in QUOTE_SELECTION_STRATEGIES:
-        raise ValueError("selection_strategy không hợp lệ.")
+        raise ValueError("Chiến lược chọn sản phẩm không hợp lệ.")
     filters_out = {
         "brands_norm": brands_norm,
         "sizes_norm": sizes_norm,
@@ -2371,7 +2393,7 @@ def _quote_template_mapping_snapshot() -> dict:
 def _safe_uploaded_xlsx_filename(filename: str) -> str:
     base = (filename or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
     if not base:
-        raise ValueError("Thiếu tên file workbook.")
+        raise ValueError("Thiếu tên tệp mẫu báo giá.")
     lower = base.lower()
     if lower.endswith(".xlsm") or lower.endswith(".xls") or not lower.endswith(".xlsx"):
         raise ValueError("Chỉ hỗ trợ file .xlsx, không hỗ trợ .xls/.xlsm.")
@@ -2387,15 +2409,134 @@ def _read_bounded_workbook_upload(file_storage) -> bytes:
     if len(raw) > MAX_XLSX_BYTES:
         raise OverflowError(f"File .xlsx quá lớn, tối đa {MAX_XLSX_BYTES // (1024 * 1024)}MB.")
     if not raw:
-        raise ValueError("File workbook rỗng.")
+        raise ValueError("Tệp mẫu báo giá rỗng.")
     return raw
 
 
 def _validate_bg_v1_template(raw: bytes) -> dict:
     info = inspect_bg_template(raw)
     if info.capacity < 1:
-        raise QuoteTemplateError("Template BG_V1 không có vùng dòng sản phẩm hợp lệ.")
+        raise QuoteTemplateError("Mẫu BG_V1 không có vùng dòng sản phẩm hợp lệ.")
     return _quote_template_mapping_snapshot()
+
+
+def _quote_column_name(value) -> str:
+    col = str(value or "").strip().upper()
+    if not col or len(col) > 3 or not col.isalpha():
+        raise QuoteTemplateError("Cột ánh xạ phải có dạng A đến XFD.")
+    number = 0
+    for char in col:
+        number = number * 26 + ord(char) - ord("A") + 1
+    if number > 16384:
+        raise QuoteTemplateError("Cột ánh xạ vượt quá giới hạn XFD của Excel.")
+    return col
+
+
+def _validate_quote_template_mapping(raw: bytes, value) -> dict:
+    if not isinstance(value, dict):
+        raise QuoteTemplateError("Ánh xạ mẫu không hợp lệ.")
+    sheet = str(value.get("sheet") or "").strip()
+    total_label = str(value.get("total_label") or "").strip()
+    try:
+        header_row = int(value.get("header_row"))
+        product_start_row = int(value.get("product_start_row"))
+    except (TypeError, ValueError) as exc:
+        raise QuoteTemplateError("Hàng tiêu đề và hàng bắt đầu dữ liệu phải là số nguyên.") from exc
+    if not sheet or len(sheet) > 31 or not total_label or len(total_label) > 120:
+        raise QuoteTemplateError("Thiếu trang tính hoặc nhãn dòng tổng hợp lệ.")
+    if not 1 <= header_row < product_start_row <= 1_048_576:
+        raise QuoteTemplateError("Vùng tiêu đề/dữ liệu không hợp lệ.")
+
+    raw_mapping = value.get("mapping")
+    if not isinstance(raw_mapping, dict) or any(key not in QUOTE_MAPPING_FIELDS for key in raw_mapping):
+        raise QuoteTemplateError("Ánh xạ chứa trường dữ liệu không hợp lệ.")
+    columns = {}
+    for field in QUOTE_MAPPING_FIELDS:
+        raw_col = raw_mapping.get(field)
+        if raw_col in (None, ""):
+            if QUOTE_MAPPING_FIELDS[field][1]:
+                raise QuoteTemplateError(f"Thiếu ánh xạ bắt buộc: {QUOTE_MAPPING_FIELDS[field][0]}.")
+            continue
+        columns[field] = _quote_column_name(raw_col)
+    if len(set(columns.values())) != len(columns):
+        raise QuoteTemplateError("Mỗi cột chỉ được ánh xạ cho một trường dữ liệu.")
+
+    # The OOXML engine performs the authoritative ZIP/XML safety checks first.
+    from quote_workbook_export import _read_valid_xlsx_entries
+    _read_valid_xlsx_entries(raw)
+    try:
+        wb = load_workbook(BytesIO(raw), read_only=True, data_only=False)
+        if sheet not in wb.sheetnames:
+            raise QuoteTemplateError("Trang tính đã chọn không tồn tại trong tệp.")
+        ws = wb[sheet]
+        if ws.max_row > 20_000 or ws.max_column > 256:
+            raise QuoteTemplateError("Mẫu vượt quá giới hạn 20.000 dòng hoặc 256 cột.")
+        for field, col in columns.items():
+            if field == "sequence":
+                continue
+            if ws[f"{col}{header_row}"].value in (None, ""):
+                raise QuoteTemplateError(f"Cột {col} của {QUOTE_MAPPING_FIELDS[field][0]} không có tiêu đề.")
+        total_rows = []
+        for row_number, row in enumerate(ws.iter_rows(min_row=product_start_row, values_only=False), start=product_start_row):
+            if any(str(cell.value or "").strip().casefold() == total_label.casefold() for cell in row):
+                total_rows.append(row_number)
+        if len(total_rows) != 1:
+            raise QuoteTemplateError("Mẫu phải có đúng một dòng mang nhãn tổng đã chọn.")
+        total_row = total_rows[0]
+        formula_columns = []
+        for cell in ws[total_row]:
+            if isinstance(cell.value, str) and cell.value.startswith("="):
+                col = cell.column_letter
+                if all(isinstance(ws[f"{col}{offset}"].value, str) and ws[f"{col}{offset}"].value.startswith("=")
+                       for offset in (total_row + 1, total_row + 2)):
+                    formula_columns.append(col)
+        requested_formula_col = value.get("total_formula_column")
+        if requested_formula_col:
+            formula_col = _quote_column_name(requested_formula_col)
+            if formula_col not in formula_columns:
+                raise QuoteTemplateError("Cột công thức tổng không hợp lệ.")
+        elif len(formula_columns) == 1:
+            formula_col = formula_columns[0]
+        else:
+            raise QuoteTemplateError("Không xác định duy nhất được cột công thức Tổng/VAT/Tổng gồm VAT.")
+    finally:
+        if 'wb' in locals():
+            wb.close()
+
+    normalized = {
+        "profile_version": QUOTE_TEMPLATE_PROFILE_VERSION,
+        "mapping_version": 1,
+        "sheet": sheet,
+        "header_row": header_row,
+        "product_start_row": product_start_row,
+        "total_label": total_label,
+        "total_formula_column": formula_col,
+        "mapping": columns,
+    }
+    info = inspect_bg_template(raw, normalized)
+    if info.capacity < 1:
+        raise QuoteTemplateError("Mẫu không có vùng dòng sản phẩm hợp lệ.")
+    return normalized
+
+
+def _inspect_quote_template(raw: bytes, sheet: str = "BG", header_row: int = 16) -> dict:
+    from quote_workbook_export import _read_valid_xlsx_entries
+    _read_valid_xlsx_entries(raw)
+    wb = load_workbook(BytesIO(raw), read_only=True, data_only=False)
+    try:
+        if sheet not in wb.sheetnames:
+            sheet = wb.sheetnames[0]
+        ws = wb[sheet]
+        headers = []
+        for index, cell in enumerate(list(ws[header_row])[:100], start=1):
+            headers.append({"column": get_column_letter(index),
+                            "header": str(cell.value)[:200] if cell.value not in (None, "") else "(trống)"})
+        return {"sheets": wb.sheetnames, "sheet": sheet, "header_row": header_row,
+                "product_start_row": header_row + 1, "headers": headers,
+                "fields": [{"key": key, "label": label, "required": required}
+                           for key, (label, required) in QUOTE_MAPPING_FIELDS.items()]}
+    finally:
+        wb.close()
 
 
 def _json_datetime(value):
@@ -2403,7 +2544,7 @@ def _json_datetime(value):
 
 
 def _quote_template_admin_metadata(row) -> dict:
-    return {
+    data = {
         "id": row[0],
         "filename": row[1],
         "content_sha256": row[2],
@@ -2414,6 +2555,12 @@ def _quote_template_admin_metadata(row) -> dict:
         "created_at": _json_datetime(row[7]),
         "activated_at": _json_datetime(row[8]),
     }
+    if len(row) > 9:
+        data["mapping"] = row[9]
+    data["archived_at"] = _json_datetime(row[10]) if len(row) > 10 else None
+    data["archived_by"] = row[11] if len(row) > 11 else None
+    data["team_usage"] = list(row[12] or []) if len(row) > 12 else []
+    return data
 
 
 def _quote_template_public_metadata(row) -> dict:
@@ -2432,9 +2579,19 @@ def _list_quote_templates(conn) -> list[dict]:
         cur.execute(
             """
             SELECT id, filename, content_sha256, content_size, profile_version,
-                   is_active, uploaded_by, created_at, activated_at
-            FROM quote_templates
-            ORDER BY created_at DESC, id DESC
+                   is_active, uploaded_by, created_at, activated_at,
+                   COALESCE(mapping_v2_json, mapping_json), archived_at, archived_by,
+                   COALESCE((
+                       SELECT jsonb_agg(
+                           jsonb_build_object('id', t.id, 'name', t.name)
+                           ORDER BY t.name, t.id
+                       )
+                       FROM team_quote_templates tqt
+                       JOIN teams t ON t.id = tqt.team_id
+                       WHERE tqt.template_id = qt.id
+                   ), '[]'::jsonb) AS team_usage
+            FROM quote_templates qt
+            ORDER BY qt.created_at DESC, qt.id DESC
             """
         )
         return [_quote_template_admin_metadata(row) for row in cur.fetchall()]
@@ -2445,16 +2602,18 @@ def _insert_quote_template(conn, *, filename: str, raw: bytes, mapping: dict, ac
     with conn:
         with conn.cursor() as cur:
             if activate:
-                cur.execute("UPDATE quote_templates SET is_active = FALSE WHERE is_active = TRUE")
+                cur.execute("SELECT pg_advisory_xact_lock(%s)", (QUOTE_TEMPLATE_ACTIVE_LOCK_ID,))
+                cur.execute("UPDATE quote_templates SET is_active = FALSE WHERE is_active = TRUE AND archived_at IS NULL")
             cur.execute(
                 """
                 INSERT INTO quote_templates (
                     filename, content, content_sha256, content_size, profile_version,
-                    mapping_json, is_active, uploaded_by, activated_at
+                    mapping_json, mapping_v2_json, is_active, uploaded_by, activated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, CASE WHEN %s THEN NOW() ELSE NULL END)
+                VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, CASE WHEN %s THEN NOW() ELSE NULL END)
                 RETURNING id, filename, content_sha256, content_size, profile_version,
-                          is_active, uploaded_by, created_at, activated_at
+                          is_active, uploaded_by, created_at, activated_at,
+                          COALESCE(mapping_v2_json, mapping_json)
                 """,
                 (
                     filename,
@@ -2462,6 +2621,7 @@ def _insert_quote_template(conn, *, filename: str, raw: bytes, mapping: dict, ac
                     digest,
                     len(raw),
                     QUOTE_TEMPLATE_PROFILE_VERSION,
+                    json.dumps(_quote_template_mapping_snapshot(), ensure_ascii=False),
                     json.dumps(mapping, ensure_ascii=False),
                     activate,
                     uploaded_by,
@@ -2474,25 +2634,28 @@ def _insert_quote_template(conn, *, filename: str, raw: bytes, mapping: dict, ac
 def _activate_quote_template(conn, template_id: int) -> dict:
     with conn:
         with conn.cursor() as cur:
+            cur.execute("SELECT pg_advisory_xact_lock(%s)", (QUOTE_TEMPLATE_ACTIVE_LOCK_ID,))
             cur.execute(
                 """
                 SELECT id
                 FROM quote_templates
                 WHERE id = %s
                   AND profile_version = %s
-                  AND mapping_json->>'profile_version' = %s
-                  AND mapping_json->>'sheet' = 'BG'
+                  AND archived_at IS NULL
+                  AND COALESCE(mapping_v2_json, mapping_json)->>'profile_version' = %s
+                  AND jsonb_typeof(COALESCE(mapping_v2_json, mapping_json)->'mapping') = 'object'
+                FOR UPDATE
                 """,
                 (template_id, QUOTE_TEMPLATE_PROFILE_VERSION, QUOTE_TEMPLATE_PROFILE_VERSION),
             )
             if cur.fetchone() is None:
-                raise QuoteTemplateError("Không tìm thấy template BG_V1 hợp lệ.")
-            cur.execute("UPDATE quote_templates SET is_active = FALSE WHERE is_active = TRUE")
+                raise QuoteTemplateError("Không tìm thấy mẫu BG_V1 đang khả dụng.")
+            cur.execute("UPDATE quote_templates SET is_active = FALSE WHERE is_active = TRUE AND archived_at IS NULL")
             cur.execute(
                 """
                 UPDATE quote_templates
                 SET is_active = TRUE, activated_at = NOW()
-                WHERE id = %s
+                WHERE id = %s AND archived_at IS NULL
                 RETURNING id, filename, content_sha256, content_size, profile_version,
                           is_active, uploaded_by, created_at, activated_at
                 """,
@@ -2501,37 +2664,165 @@ def _activate_quote_template(conn, template_id: int) -> dict:
             return _quote_template_admin_metadata(cur.fetchone())
 
 
-def _get_active_quote_template(conn, *, include_content: bool = False) -> dict:
+def _get_active_quote_template(conn, *, include_content: bool = False, team_id=None,
+                               template_id=None, admin_override: bool = False) -> dict:
     with conn.cursor() as cur:
-        if include_content:
+        select_columns = "id, filename, profile_version, content_size, created_at, activated_at"
+        select_columns += ", content" if include_content else ""
+        select_columns += ", COALESCE(mapping_v2_json, mapping_json)"
+        row = None
+        source = "global"
+        if template_id is not None:
+            if not admin_override:
+                raise QuoteTemplateError("Nhân viên không được đổi mẫu báo giá.")
+            cur.execute(
+                f"SELECT {select_columns} FROM quote_templates WHERE id = %s AND profile_version = %s AND archived_at IS NULL",
+                (template_id, QUOTE_TEMPLATE_PROFILE_VERSION),
+            )
+            row = cur.fetchone()
+            source = "admin"
+            if row is None:
+                raise QuoteTemplateError("Mẫu quản trị viên chọn không tồn tại hoặc không còn khả dụng.")
+        elif team_id is not None:
+            team_content_column = "qt.content," if include_content else ""
+            cur.execute(
+                f"""
+                SELECT qt.id, qt.filename, qt.profile_version, qt.content_size,
+                       qt.created_at, qt.activated_at, {team_content_column}
+                       COALESCE(qt.mapping_v2_json, qt.mapping_json)
+                FROM team_quote_templates tqt
+                JOIN teams t ON t.id = tqt.team_id AND t.lifecycle_status = 'ACTIVE'
+                JOIN quote_templates qt ON qt.id = tqt.template_id AND qt.archived_at IS NULL
+                WHERE tqt.team_id = %s AND qt.profile_version = %s
+                """,
+                (team_id, QUOTE_TEMPLATE_PROFILE_VERSION),
+            )
+            row = cur.fetchone()
+            if row is not None:
+                source = "team"
+        if row is None and include_content:
             cur.execute(
                 """
-                SELECT id, filename, profile_version, content_size, created_at, activated_at, content
+                SELECT id, filename, profile_version, content_size, created_at, activated_at,
+                       content, COALESCE(mapping_v2_json, mapping_json)
                 FROM quote_templates
-                WHERE is_active = TRUE AND profile_version = %s
+                WHERE is_active = TRUE AND archived_at IS NULL AND profile_version = %s
                 ORDER BY activated_at DESC NULLS LAST, id DESC
                 LIMIT 1
                 """,
                 (QUOTE_TEMPLATE_PROFILE_VERSION,),
             )
-        else:
+            row = cur.fetchone()
+        elif row is None:
             cur.execute(
                 """
-                SELECT id, filename, profile_version, content_size, created_at, activated_at
+                SELECT id, filename, profile_version, content_size, created_at, activated_at,
+                       COALESCE(mapping_v2_json, mapping_json)
                 FROM quote_templates
-                WHERE is_active = TRUE AND profile_version = %s
+                WHERE is_active = TRUE AND archived_at IS NULL AND profile_version = %s
                 ORDER BY activated_at DESC NULLS LAST, id DESC
                 LIMIT 1
                 """,
                 (QUOTE_TEMPLATE_PROFILE_VERSION,),
             )
-        row = cur.fetchone()
+            row = cur.fetchone()
     if row is None:
-        raise QuoteTemplateError("Chưa có mẫu báo giá active. Vui lòng nhờ admin upload và kích hoạt mẫu BG_V1.")
+        if team_id is not None:
+            raise QuoteTemplateError("Team chưa được gán mẫu báo giá và hiện không có mẫu mặc định toàn hệ thống. Vui lòng liên hệ quản trị viên.")
+        raise QuoteTemplateError("Hiện không có mẫu báo giá mặc định toàn hệ thống. Vui lòng liên hệ quản trị viên.")
     data = _quote_template_public_metadata(row[:6])
     if include_content:
         data["content"] = bytes(row[6])
+        data["mapping"] = row[7] if len(row) > 7 else _quote_template_mapping_snapshot()
+    else:
+        data["mapping_version"] = (row[6] or {}).get("mapping_version", 1) if len(row) > 6 else 1
+    data["source"] = source
     return data
+
+
+def _list_quote_template_assignments(conn) -> tuple[list[dict], list[dict]]:
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT t.id, t.name, t.lifecycle_status, qt.id, qt.filename
+            FROM teams t
+            LEFT JOIN team_quote_templates tqt ON tqt.team_id = t.id
+            LEFT JOIN quote_templates qt ON qt.id = tqt.template_id AND qt.archived_at IS NULL
+            ORDER BY t.name, t.id
+        """)
+        teams = [{"id": row[0], "name": row[1], "status": row[2],
+                  "template_id": row[3], "template_filename": row[4]} for row in cur.fetchall()]
+    return teams, _list_quote_templates(conn)
+
+
+def _assign_quote_template(conn, team_id: int, template_id) -> None:
+    with conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM teams WHERE id=%s AND lifecycle_status='ACTIVE' FOR UPDATE", (team_id,))
+            if cur.fetchone() is None:
+                raise QuoteTemplateError("Team không tồn tại hoặc không hoạt động.")
+            if template_id is None:
+                cur.execute("DELETE FROM team_quote_templates WHERE team_id=%s", (team_id,))
+                return
+            cur.execute("SELECT id FROM quote_templates WHERE id=%s AND profile_version=%s AND archived_at IS NULL FOR UPDATE",
+                        (template_id, QUOTE_TEMPLATE_PROFILE_VERSION))
+            if cur.fetchone() is None:
+                raise QuoteTemplateError("Mẫu không tồn tại hoặc không còn khả dụng.")
+            cur.execute("""
+                INSERT INTO team_quote_templates(team_id, template_id, assigned_by)
+                VALUES (%s,%s,%s)
+                ON CONFLICT(team_id) DO UPDATE SET template_id=EXCLUDED.template_id,
+                    assigned_by=EXCLUDED.assigned_by, assigned_at=NOW()
+            """, (team_id, template_id, _current_actor()))
+
+
+def _archive_quote_template(conn, template_id: int) -> dict:
+    """Archive one unused template while serializing activate/assign races."""
+    with conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT is_active, archived_at
+                FROM quote_templates
+                WHERE id = %s AND profile_version = %s
+                FOR UPDATE
+                """,
+                (template_id, QUOTE_TEMPLATE_PROFILE_VERSION),
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise QuoteTemplateError("Không tìm thấy mẫu báo giá.")
+            if row[1] is not None:
+                raise QuoteTemplateError("Mẫu báo giá này đã được lưu trữ.")
+            if bool(row[0]):
+                raise QuoteTemplateError("Không thể lưu trữ mẫu mặc định toàn hệ thống.")
+
+            cur.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM team_quote_templates WHERE template_id = %s
+                )
+                """,
+                (template_id,),
+            )
+            if bool(cur.fetchone()[0]):
+                raise QuoteTemplateError("Không thể lưu trữ mẫu đang được gán cho team.")
+
+            cur.execute(
+                """
+                UPDATE quote_templates
+                SET archived_at = NOW(), archived_by = %s, is_active = FALSE
+                WHERE id = %s AND archived_at IS NULL AND is_active = FALSE
+                RETURNING id, filename, content_sha256, content_size, profile_version,
+                          is_active, uploaded_by, created_at, activated_at,
+                          COALESCE(mapping_v2_json, mapping_json), archived_at, archived_by,
+                          '[]'::jsonb
+                """,
+                (_current_actor(), template_id),
+            )
+            archived = cur.fetchone()
+            if archived is None:
+                raise QuoteTemplateError("Không thể lưu trữ mẫu do trạng thái vừa thay đổi.")
+            return _quote_template_admin_metadata(archived)
 
 
 def _download_quote_template(conn, template_id: int) -> tuple[str, bytes]:
@@ -2539,7 +2830,7 @@ def _download_quote_template(conn, template_id: int) -> tuple[str, bytes]:
         cur.execute("SELECT filename, content FROM quote_templates WHERE id = %s", (template_id,))
         row = cur.fetchone()
     if row is None:
-        raise QuoteTemplateError("Không tìm thấy template.")
+        raise QuoteTemplateError("Không tìm thấy mẫu báo giá.")
     return _safe_uploaded_xlsx_filename(row[0]), bytes(row[1])
 
 
@@ -3762,16 +4053,24 @@ def admin_quote_templates_upload():
 
     workbook = request.files.get("workbook")
     if workbook is None:
-        return _quote_json_error("Thiếu multipart field workbook.", status=400)
+        return _quote_json_error("Thiếu tệp mẫu báo giá.", status=400)
 
     try:
         filename = _safe_uploaded_xlsx_filename(workbook.filename or "")
         activate_value = request.form.get("activate")
         activate = True if activate_value is None else _quote_bool_or_none(activate_value)
         if activate is None:
-            raise ValueError("activate phải là true hoặc false.")
+            raise ValueError("Tùy chọn đặt làm mẫu mặc định không hợp lệ.")
         raw = _read_bounded_workbook_upload(workbook)
-        mapping = _validate_bg_v1_template(raw)
+        mapping_raw = request.form.get("mapping")
+        if mapping_raw:
+            try:
+                mapping_value = json.loads(mapping_raw)
+            except json.JSONDecodeError as exc:
+                raise QuoteTemplateError("Ánh xạ phải là JSON hợp lệ.") from exc
+            mapping = _validate_quote_template_mapping(raw, mapping_value)
+        else:
+            mapping = _validate_bg_v1_template(raw)
     except OverflowError as e:
         return _quote_json_error(str(e), status=413)
     except (ValueError, WorkbookExportError, QuoteTemplateError) as e:
@@ -3789,7 +4088,72 @@ def admin_quote_templates_upload():
         )
         return jsonify({"template": template}), 201
     except IntegrityError:
-        return _quote_json_error("Không thể kích hoạt template do đã có phiên bản active khác. Vui lòng thử lại.", status=409)
+        return _quote_json_error("Không thể đặt mẫu mặc định do trạng thái vừa thay đổi. Vui lòng thử lại.", status=409)
+    finally:
+        conn.close()
+
+
+@app.route("/api/admin/quote-templates/inspect", methods=["POST"])
+def admin_quote_templates_inspect():
+    guard = _require_admin_api()
+    if guard is not None:
+        return guard
+    csrf_guard = _require_admin_api_csrf()
+    if csrf_guard is not None:
+        return csrf_guard
+    workbook = request.files.get("workbook")
+    if workbook is None:
+        return _quote_json_error("Thiếu file workbook.", 400)
+    try:
+        _safe_uploaded_xlsx_filename(workbook.filename or "")
+        raw = _read_bounded_workbook_upload(workbook)
+        sheet = str(request.form.get("sheet") or "BG")
+        header_row = int(request.form.get("header_row") or 16)
+        if not 1 <= header_row <= 500:
+            raise ValueError("Hàng tiêu đề phải từ 1 đến 500.")
+        return jsonify({"preview": _inspect_quote_template(raw, sheet, header_row)})
+    except OverflowError as e:
+        return _quote_json_error(str(e), 413)
+    except (ValueError, WorkbookExportError, QuoteTemplateError) as e:
+        return _quote_json_error(str(e), 400)
+
+
+@app.route("/api/admin/quote-template-contexts", methods=["GET"])
+def admin_quote_template_contexts():
+    guard = _require_admin_api()
+    if guard is not None:
+        return guard
+    conn = get_connection()
+    try:
+        teams, templates = _list_quote_template_assignments(conn)
+        return jsonify({"teams": teams, "templates": templates})
+    finally:
+        conn.close()
+
+
+@app.route("/api/admin/quote-template-assignments", methods=["POST"])
+def admin_quote_template_assignment_update():
+    guard = _require_admin_api()
+    if guard is not None:
+        return guard
+    csrf_guard = _require_admin_api_csrf()
+    if csrf_guard is not None:
+        return csrf_guard
+    payload = request.get_json(silent=True) or request.form
+    try:
+        team_id = int(payload.get("team_id"))
+        raw_template_id = payload.get("template_id")
+        template_id = None if raw_template_id in (None, "", "global") else int(raw_template_id)
+        if team_id <= 0 or (template_id is not None and template_id <= 0):
+            raise ValueError
+    except (TypeError, ValueError):
+        return _quote_json_error("Team hoặc mẫu báo giá không hợp lệ.", 400)
+    conn = get_connection()
+    try:
+        _assign_quote_template(conn, team_id, template_id)
+        return jsonify({"ok": True})
+    except QuoteTemplateError as e:
+        return _quote_json_error(str(e), 404)
     finally:
         conn.close()
 
@@ -3810,7 +4174,7 @@ def admin_quote_templates_activate(template_id: int):
     except QuoteTemplateError as e:
         return _quote_json_error(str(e), status=404)
     except IntegrityError:
-        return _quote_json_error("Không thể kích hoạt template do ràng buộc active duy nhất.", status=409)
+        return _quote_json_error("Không thể đặt mẫu mặc định do trạng thái vừa thay đổi.", status=409)
     finally:
         conn.close()
 
@@ -3827,6 +4191,28 @@ def admin_quote_templates_download(template_id: int):
         return _xlsx_bytes_response(raw, filename)
     except QuoteTemplateError as e:
         return _quote_json_error(str(e), status=404)
+    finally:
+        conn.close()
+
+
+@app.route("/api/admin/quote-templates/<int:template_id>/archive", methods=["POST"])
+def admin_quote_templates_archive(template_id: int):
+    guard = _require_admin_api()
+    if guard is not None:
+        return guard
+    csrf_guard = _require_admin_api_csrf()
+    if csrf_guard is not None:
+        return csrf_guard
+
+    conn = get_connection()
+    try:
+        template = _archive_quote_template(conn, template_id)
+        return jsonify({"template": template})
+    except QuoteTemplateError as e:
+        return _quote_json_error(str(e), status=409)
+    except Exception:
+        app.logger.exception("admin_quote_templates_archive failed")
+        return _quote_json_error("Không thể lưu trữ mẫu báo giá lúc này. Vui lòng thử lại.", status=500)
     finally:
         conn.close()
 
@@ -4492,11 +4878,12 @@ def admin_brand_compliance():
                 if not err:
                     conn.commit()
                     if action == "enable":
-                        msg = f"Đã bật ưu tiên manual compliance cho brand: {brand_norm}"
+                        msg = f"Đã bật ưu tiên tình trạng quản lý nhập tay cho hãng: {brand_norm}"
                     else:
-                        msg = f"Đã tắt ưu tiên manual compliance cho brand: {brand_norm}"
-        except Exception as e:
-            err = str(e)
+                        msg = f"Đã tắt ưu tiên tình trạng quản lý nhập tay cho hãng: {brand_norm}"
+        except Exception:
+            app.logger.exception("admin_brand_compliance update failed")
+            err = "Không thể cập nhật tình trạng quản lý lúc này. Vui lòng thử lại."
         finally:
             conn.close()
 
@@ -4505,8 +4892,9 @@ def admin_brand_compliance():
     try:
         with conn.cursor() as cur:
             rows = _fetch_brand_compliance_rows(cur)
-    except Exception as e:
-        err = err or f"Không đọc được brand compliance (đã chạy migration_011?): {e}"
+    except Exception:
+        app.logger.exception("admin_brand_compliance list failed")
+        err = err or "Không đọc được cấu hình tình trạng quản lý. Vui lòng thử lại."
     finally:
         conn.close()
 
@@ -4531,6 +4919,7 @@ def search_products():
         with conn.cursor() as cursor:
             query = f"""
                 SELECT
+                    p.id,
                     p.name,
                     p.code,
                     p.cas,
@@ -4580,6 +4969,7 @@ def search_products():
         results = []
         for product in products:
             (
+                product_id,
                 name,
                 code,
                 cas,
@@ -4608,6 +4998,7 @@ def search_products():
 
             results.append(
                 {
+                    "product_id": product_id,
                     "Name": name,
                     "Code": code,
                     "Cas": cas,
@@ -4760,6 +5151,7 @@ def find_code_batch():
                 )
                 SELECT
                     i.ord,
+                    p.id,
                     p.name,
                     p.code,
                     p.cas,
@@ -4828,6 +5220,7 @@ def find_code_batch():
         results = [
             {
                 "Name": "",
+                "product_id": None,
                 "Code": original,
                 "Cas": "",
                 "Brand": "",
@@ -4850,6 +5243,7 @@ def find_code_batch():
         for row in rows:
             (
                 ord_,
+                product_id,
                 name,
                 code,
                 cas,
@@ -4869,6 +5263,7 @@ def find_code_batch():
                 continue
 
             results[idx]["Name"] = name or ""
+            results[idx]["product_id"] = product_id
             # Code giữ nguyên theo input để đảm bảo copy dễ
             results[idx]["Cas"] = cas or ""
             results[idx]["Brand"] = brand or ""
@@ -5138,6 +5533,7 @@ def advanced_search():
                     brand_manual_enabled=brand_manual_enabled,
                     manual_compliance=manual_compliance,
                     manual_compliance_note=manual_compliance_note,
+                    product_id=product_id,
                 )
             )
 
@@ -5466,25 +5862,25 @@ def _quote_export_parse_selections(raw_text: str) -> list[dict]:
     try:
         payload = json.loads(raw_text or "")
     except json.JSONDecodeError as exc:
-        raise ValueError("selections phải là JSON hợp lệ.") from exc
+        raise ValueError("Danh sách dòng xuất phải là JSON hợp lệ.") from exc
     selections = payload.get("selections") if isinstance(payload, dict) else payload
     if not isinstance(selections, list):
-        raise ValueError("selections phải là danh sách JSON.")
+        raise ValueError("Dữ liệu xuất phải là một danh sách JSON.")
     if not selections:
-        raise ValueError("selections không được rỗng.")
+        raise ValueError("Danh sách dòng xuất không được rỗng.")
     if len(selections) > QUOTE_MAX_ROWS:
         raise OverflowError(f"Tối đa {QUOTE_MAX_ROWS} sản phẩm mỗi lần xuất.")
 
     parsed = []
     for index, item in enumerate(selections, start=1):
         if not isinstance(item, dict):
-            raise ValueError(f"Selection {index} không hợp lệ.")
+            raise ValueError(f"Dòng {index} không hợp lệ.")
         try:
             product_id = int(item.get("product_id"))
         except (TypeError, ValueError):
-            raise ValueError(f"Selection {index} thiếu product_id hợp lệ.")
+            raise ValueError(f"Dòng {index} thiếu mã sản phẩm hợp lệ.")
         if product_id <= 0:
-            raise ValueError(f"Selection {index} có product_id không hợp lệ.")
+            raise ValueError(f"Dòng {index} có mã sản phẩm không hợp lệ.")
         parsed.append({"ord": index, "product_id": product_id})
     return parsed
 
@@ -5603,15 +5999,66 @@ def _quote_export_parse_placeholder(placeholder_raw, index: int) -> dict:
 
     if classification == LIFECYCLE_BLOCKED:
         reason_vn = QUOTE_EXPORT_BLOCKED_REASON_VN.get(reason_code, QUOTE_EXPORT_BLOCKED_REASON_VN_DEFAULT)
-        note_text = f"Không thể báo giá: {reason_vn}"
+        note_text = f"Không thể xuất báo giá: {reason_vn}"
     else:
         note_text = QUOTE_EXPORT_PLACEHOLDER_NOTES[classification]
 
     return {"classification": classification, "reason_code": reason_code, "note_text": note_text}
 
 
-def _quote_export_products(conn, selections: list[dict]) -> list[dict]:
-    vis, vis_params = _visibility_sql("p")
+def _quote_context(conn):
+    is_admin = bool(session.get("is_admin"))
+    raw_team_id = request.values.get("team_id")
+    raw_template_id = request.values.get("template_id")
+    if not is_admin and (raw_team_id or raw_template_id):
+        raise QuoteTemplateError("Nhân viên không được đổi team hoặc mẫu báo giá.")
+    template_id = None
+    if raw_template_id:
+        try:
+            template_id = int(raw_template_id)
+            if template_id <= 0:
+                raise ValueError
+        except (TypeError, ValueError) as exc:
+            raise QuoteTemplateError("Mẫu quản trị viên chọn không hợp lệ.") from exc
+    team_id = session.get("team_id")
+    grants = team_permissions.current_permissions()
+    if is_admin and raw_team_id:
+        try:
+            team_id = int(raw_team_id)
+            if team_id <= 0:
+                raise ValueError
+        except (TypeError, ValueError) as exc:
+            raise QuoteTemplateError("Team quản trị viên chọn không hợp lệ.") from exc
+        with conn.cursor() as cur:
+            cur.execute("SELECT permission_keys FROM teams WHERE id=%s AND lifecycle_status='ACTIVE'", (team_id,))
+            row = cur.fetchone()
+        if row is None:
+            raise QuoteTemplateError("Team quản trị viên chọn không tồn tại hoặc không hoạt động.")
+        grants = frozenset(team_permissions.validate_permissions(row[0]))
+        if not team_permissions.allows("EXPORT", grants):
+            raise QuoteTemplateError("Team quản trị viên chọn chưa được cấp quyền xuất báo giá.")
+    elif is_admin:
+        team_id = None
+    return {"is_admin": is_admin, "team_id": team_id, "template_id": template_id, "grants": grants}
+
+
+def _quote_visibility_sql(alias: str, context: dict):
+    team_id = context["team_id"]
+    if team_id is None and context["is_admin"]:
+        return "", ()
+    if team_id is None:
+        return " AND FALSE", ()
+    return (
+        f" AND {alias}.brand IN (SELECT tb.brand FROM team_brands tb JOIN teams t ON t.id=tb.team_id "
+        f"WHERE tb.team_id=%s AND t.lifecycle_status='ACTIVE')", (team_id,)
+    )
+
+
+def _quote_export_products(conn, selections: list[dict], context: Optional[dict] = None) -> list[dict]:
+    context = context or {"is_admin": bool(session.get("is_admin")), "team_id": session.get("team_id"),
+                          "grants": team_permissions.current_permissions()}
+    grants = context["grants"]
+    vis, vis_params = _quote_visibility_sql("p", context)
     rate_map = _load_pricing_resolver(conn)
     query = f"""
         WITH input AS (
@@ -5700,17 +6147,28 @@ def _quote_export_products(conn, selections: list[dict]) -> list[dict]:
     for selection in selections:
         candidate = by_ord.get(selection["ord"])
         if not candidate:
-            raise ValueError(f"Selection {selection['ord']} không visible hoặc product_id không tồn tại.")
+            raise ValueError(f"Dòng {selection['ord']} không còn khả dụng hoặc sản phẩm không tồn tại.")
         if candidate.get("ineligible_reason") == "COMPLIANCE_BLOCKED":
-            if team_permissions.can('VIEW_COMPLIANCE'):
-                raise ValueError(f"Selection {selection['ord']} bị chặn compliance: {candidate.get('Compliance')}.")
-            raise ValueError(f"Selection {selection['ord']} không đủ điều kiện xuất báo giá.")
-        if candidate.get("currency_rate_status"):
-            raise QuotePricingUnavailableError(
-                selection["ord"], candidate["currency_rate_status"]
-            )
-        if not candidate.get("eligible") or float(candidate.get("Unit_Price_Value") or 0) <= 0:
-            raise ValueError(f"Selection {selection['ord']} không có Unit_Price hợp lệ.")
+            if 'VIEW_COMPLIANCE' in grants:
+                raise ValueError(
+                    f"Dòng {selection['ord']} không thể xuất báo giá: "
+                    "Sản phẩm thuộc diện CẤM NHẬP."
+                )
+            raise ValueError(f"Dòng {selection['ord']} không thể xuất báo giá.")
+        if 'VIEW_PRICE' in grants:
+            if candidate.get("currency_rate_status"):
+                raise QuotePricingUnavailableError(
+                    selection["ord"], candidate["currency_rate_status"]
+                )
+            if candidate.get("ineligible_reason") == "NO_VALID_PRICE" or float(candidate.get("Unit_Price_Value") or 0) <= 0:
+                raise ValueError(f"Dòng {selection['ord']} không có đơn giá hợp lệ.")
+        else:
+            # Missing/invalid pricing must neither block nor become an oracle
+            # for callers that are not allowed to view price state.
+            candidate["Unit_Price_Value"] = None
+            if candidate.get("ineligible_reason") == "NO_VALID_PRICE":
+                candidate["ineligible_reason"] = ""
+                candidate["eligible"] = True
         products.append(candidate)
     return products
 
@@ -5737,7 +6195,7 @@ def _quote_export_placeholder_product(line: dict) -> dict:
     }
 
 
-def _quote_export_items_to_products(conn, items: list[dict]) -> list[dict]:
+def _quote_export_items_to_products(conn, items: list[dict], context: Optional[dict] = None) -> list[dict]:
     """Re-fetch products for export_items v2 and emit ordered lines with STT labels.
 
     Preserves 100% of request_order: every request contributes exactly one
@@ -5795,7 +6253,7 @@ def _quote_export_items_to_products(conn, items: list[dict]) -> list[dict]:
     real_lines = [ln for ln in flat_lines if ln["product_id"] is not None]
     products_by_ord: dict[int, dict] = {}
     if real_lines:
-        fetched = _quote_export_products(conn, real_lines)
+        fetched = _quote_export_products(conn, real_lines, context)
         for product, line in zip(fetched, real_lines):
             products_by_ord[line["ord"]] = product
 
@@ -5826,6 +6284,40 @@ def _quote_export_download_name(filename: str) -> str:
     return f"{stem}_draft{ext}"
 
 
+def _create_quote_workbook(conn, *, selections=None, items=None, context=None):
+    context = context or _quote_context(conn)
+    template = _get_active_quote_template(
+        conn, include_content=True, team_id=context["team_id"],
+        template_id=context["template_id"], admin_override=context["is_admin"]
+    )
+    products = (_quote_export_items_to_products(conn, items, context)
+                if items is not None else _quote_export_products(conn, selections, context))
+    visible_products = team_permissions.redact(products, context["grants"])
+    if all(team_permissions.allows(key, context["grants"]) for key in team_permissions.FIELDS):
+        exported = export_quick_quote_workbook(
+            template["content"], visible_products, template.get("mapping")
+        )
+    else:
+        # A stored template is an opaque OOXML package. Clearing mapped cells
+        # cannot remove stale literals, hidden sheets or orphaned strings.
+        # Restricted exports therefore use a new package with allowed fields only.
+        wb = Workbook()
+        sheet = wb.active
+        sheet.title = "Báo giá"
+        columns = [
+            field for key, field in team_permissions.FIELDS.items()
+            if team_permissions.allows(key, context["grants"])
+        ]
+        sheet.append([label for _, label in columns])
+        for product in visible_products:
+            sheet.append([_safe_transfer_cell(product.get(key, "")) for key, _ in columns])
+        output = BytesIO()
+        wb.save(output)
+        wb.close()
+        exported = output.getvalue()
+    return exported, _quote_export_download_name(template["filename"]), template
+
+
 @app.route("/api/quote-assistant/workbook/template", methods=["GET"])
 def quote_assistant_workbook_template():
     guard = _require_authenticated_quote_api()
@@ -5834,7 +6326,11 @@ def quote_assistant_workbook_template():
 
     conn = get_connection()
     try:
-        return jsonify({"template": _get_active_quote_template(conn, include_content=False)})
+        context = _quote_context(conn)
+        return jsonify({"template": _get_active_quote_template(
+            conn, include_content=False, team_id=context["team_id"],
+            template_id=context["template_id"], admin_override=context["is_admin"]
+        )})
     except QuoteTemplateError as e:
         return _quote_json_error(str(e), status=409)
     except Exception as e:
@@ -5851,20 +6347,14 @@ def quote_assistant_workbook_export():
     guard = _require_authenticated_quote_api()
     if guard is not None:
         return guard
+    csrf_token = request.headers.get("X-CSRF-Token", "") or request.form.get("csrf_token", "")
+    if not session_security.verify_csrf_token(csrf_token):
+        return _quote_json_error("CSRF token không hợp lệ hoặc đã hết hạn.", 400)
 
-    workbook = request.files.get("workbook")
-    raw = None
-    filename = None
-    if workbook is not None:
-        try:
-            filename = _safe_uploaded_xlsx_filename(workbook.filename or "workbook.xlsx")
-            raw = _read_bounded_workbook_upload(workbook)
-        except OverflowError as e:
-            return _quote_json_error(str(e), status=413)
-        except ValueError as e:
-            return _quote_json_error(str(e), status=400)
-        if not _is_ooxml_xlsx(raw):
-            return _quote_json_error("File không phải .xlsx OOXML hợp lệ.", status=400)
+    # Templates are always resolved server-side. A client-supplied workbook is
+    # intentionally ignored/rejected at this trust boundary.
+    if request.files.get("workbook") is not None:
+        return _quote_json_error("Không nhận workbook từ client; hệ thống tự chọn mẫu đã được admin duyệt.", 400)
 
     export_items_raw = request.form.get("export_items") or ""
     try:
@@ -5881,28 +6371,10 @@ def quote_assistant_workbook_export():
 
     conn = get_connection()
     try:
-        if raw is None:
-            template = _get_active_quote_template(conn, include_content=True)
-            raw = template["content"]
-            filename = template["filename"]
-        if items is not None:
-            products = _quote_export_items_to_products(conn, items)
-        else:
-            products = _quote_export_products(conn, selections)
-        visible_products = team_permissions.redact(products)
-        if all(team_permissions.can(key) for key in team_permissions.FIELDS):
-            exported = export_quick_quote_workbook(raw, visible_products)
-        else:
-            wb = Workbook()
-            sheet = wb.active
-            sheet.title = "Báo giá"
-            columns = [field for key, field in team_permissions.FIELDS.items() if team_permissions.can(key)]
-            sheet.append([label for _, label in columns])
-            for product in visible_products:
-                sheet.append([_safe_transfer_cell(product.get(key, "")) for key, _ in columns])
-            output = BytesIO()
-            wb.save(output)
-            exported = output.getvalue()
+        context = _quote_context(conn)
+        exported, download_name, _template = _create_quote_workbook(
+            conn, selections=selections, items=items, context=context
+        )
     except QuoteTemplateError as e:
         return _quote_json_error(str(e), status=409)
     except QuotePricingUnavailableError as e:
@@ -5920,7 +6392,39 @@ def quote_assistant_workbook_export():
         raise
     finally:
         conn.close()
-    return _xlsx_bytes_response(exported, _quote_export_download_name(filename or "workbook.xlsx"))
+    return _xlsx_bytes_response(exported, download_name)
+
+
+@app.route("/api/results/quote-export", methods=["POST"])
+def results_quote_export():
+    if not session_security.verify_csrf_token(request.headers.get("X-CSRF-Token", "")):
+        return _quote_json_error("Yêu cầu không hợp lệ.", 400)
+    source = _quote_text(request.form.get("source"), max_len=32).upper()
+    if source not in RESULT_QUOTE_EXPORT_SOURCES:
+        return _quote_json_error("Nguồn kết quả không hợp lệ.", 400)
+    try:
+        selections = _quote_export_parse_selections(request.form.get("selections") or "")
+    except OverflowError as e:
+        return _quote_json_error(str(e), 413)
+    except ValueError as e:
+        return _quote_json_error(str(e), 400)
+    conn = get_connection()
+    try:
+        context = _quote_context(conn)
+        if not team_permissions.allows(source, context["grants"]):
+            return _quote_json_error("Team không có quyền với nguồn kết quả này.", 403)
+        exported, download_name, _template = _create_quote_workbook(
+            conn, selections=selections, context=context
+        )
+        return _xlsx_bytes_response(exported, download_name)
+    except QuoteTemplateError as e:
+        return _quote_json_error(str(e), 409)
+    except QuotePricingUnavailableError as e:
+        return _quote_json_error(str(e), 400)
+    except (WorkbookExportError, ValueError) as e:
+        return _quote_json_error(str(e), 400)
+    finally:
+        conn.close()
 
 
 def _safe_transfer_cell(value):

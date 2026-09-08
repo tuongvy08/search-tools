@@ -55,7 +55,15 @@ class TeamCapabilitiesPgTests(unittest.TestCase):
                 cur.execute("INSERT INTO products(name,code,cas,brand,source_brand,size,ship,price,note,manual_compliance,manual_compliance_note) "
                             "VALUES ('HiddenName','ITEM-X','123-45-6','TRC','TRC','100mg','1','100','SecretNote','Được bán','SecretCompliance') RETURNING id")
                 cls.product = cur.fetchone()[0]
+                cur.execute("INSERT INTO products(name,code,cas,brand,source_brand,size,ship,price,note,manual_compliance) "
+                            "VALUES ('NoPrice','ITEM-NO-PRICE','223-45-6','TRC','TRC','100mg','1',NULL,'','Được bán') RETURNING id")
+                cls.no_price_product = cur.fetchone()[0]
                 cur.execute("INSERT INTO brand_compliance_settings(brand_norm,manual_compliance_priority) VALUES ('TRC',true)")
+                template_raw = make_workbook()
+                cur.execute("""INSERT INTO quote_templates(filename,content,content_sha256,content_size,profile_version,mapping_json,is_active)
+                    VALUES ('team-test.xlsx',%s,%s,%s,'BG_V1',%s::jsonb,true)""",
+                    (psycopg2.Binary(template_raw), __import__('hashlib').sha256(template_raw).hexdigest(),
+                     len(template_raw), json.dumps(search._quote_template_mapping_snapshot())))
             conn.close()
         except Exception:
             cls.env.stop()
@@ -118,12 +126,18 @@ class TeamCapabilitiesPgTests(unittest.TestCase):
                 for forbidden in ('Unit_Price','Currency_Rate','123-45-6','SecretCompliance','compliance'):
                     self.assertNotIn(forbidden,raw)
             self.assertEqual(self.match(client).status_code,403)
-        for action in ('copy','export'):
-            response = self.client.post('/api/results/'+action, json={'source':'SEARCH','rows':[{
-                'Name':'Name', 'Cas':'123-45-6','Unit_Price':'987654321','Compliance':'CẤM NHẬP'}]}, headers={'X-CSRF-Token':'csrf-test'})
-            self.assertEqual(response.status_code,200)
-            self.assertNotIn('987654321',response.get_data(as_text=True))
-            self.assertNotIn('123-45-6',response.get_data(as_text=True))
+        payload = {'source':'SEARCH','rows':[{
+            'Name':'Name', 'Cas':'123-45-6','Unit_Price':'987654321','Compliance':'CẤM NHẬP'}]}
+        copied = self.client.post('/api/results/copy', json=payload,
+                                  headers={'X-CSRF-Token':'csrf-test'})
+        self.assertEqual(copied.status_code,200)
+        self.assertNotIn('987654321',copied.get_data(as_text=True))
+        self.assertNotIn('123-45-6',copied.get_data(as_text=True))
+        exported = self.client.post('/api/results/export', json=payload,
+                                    headers={'X-CSRF-Token':'csrf-test'})
+        self.assertEqual(exported.status_code,403)
+        self.assertNotIn('987654321',exported.get_data(as_text=True))
+        self.assertNotIn('123-45-6',exported.get_data(as_text=True))
 
     def test_feature_routes_fail_closed_and_source_cannot_bypass(self):
         self.set_grants([])
@@ -162,13 +176,36 @@ class TeamCapabilitiesPgTests(unittest.TestCase):
         self.assertEqual(response.status_code,200,response.data)
         self.assertNotIn('123-45-6',response.get_data(as_text=True))
         response=self.client.post('/api/quote-assistant/workbook/export',data={
-            'workbook':(io.BytesIO(make_workbook()),'template.xlsx'),'selections':json.dumps([{'product_id':self.product}])})
-        self.assertEqual(response.status_code,200,response.data[:200])
-        wb=load_workbook(io.BytesIO(response.data))
-        values=str(list(wb.active.values))
-        self.assertIn('ITEM-X',values)
+            'selections':json.dumps([{'product_id':self.product}])},headers={'X-CSRF-Token':'csrf-test'})
+        # Deny before product lookup: success/failure must not reveal hidden compliance.
+        self.assertEqual(response.status_code,403,response.data[:200])
+        values=response.get_data(as_text=True)
         for forbidden in ('HiddenName','123-45-6','SecretCompliance','SecretNote'):
             self.assertNotIn(forbidden,values)
+
+    def test_search_quote_export_without_view_price_uses_clean_allowed_columns(self):
+        self.set_grants(set(permissions.LEGACY_PERMISSIONS)-{'VIEW_PRICE','QUICK_QUOTE'})
+        response=self.client.post('/api/results/quote-export',data={'source':'SEARCH',
+            'selections':json.dumps([{'product_id':self.product}])},headers={'X-CSRF-Token':'csrf-test'})
+        self.assertEqual(response.status_code,200,response.data[:200])
+        check=load_workbook(io.BytesIO(response.data),data_only=False)
+        self.assertEqual(check.sheetnames,['Báo giá'])
+        headers=[cell.value for cell in check['Báo giá'][1]]
+        self.assertIn('Code',headers)
+        self.assertNotIn('Unit Price',headers)
+        self.assertEqual(check['Báo giá'].cell(2,headers.index('Code')+1).value,'ITEM-X')
+        check.close()
+
+        # Price validity is not an oracle: missing-price and valid-price rows
+        # both export successfully without a price column.
+        missing=self.client.post('/api/results/quote-export',data={'source':'SEARCH',
+            'selections':json.dumps([{'product_id':self.no_price_product}])},headers={'X-CSRF-Token':'csrf-test'})
+        self.assertEqual(missing.status_code,200,missing.data[:200])
+        missing_check=load_workbook(io.BytesIO(missing.data),data_only=False)
+        missing_headers=[cell.value for cell in missing_check['Báo giá'][1]]
+        self.assertNotIn('Unit Price',missing_headers)
+        self.assertEqual(missing_check['Báo giá'].cell(2,missing_headers.index('Code')+1).value,'ITEM-NO-PRICE')
+        missing_check.close()
 
     def test_hidden_compliance_reasons_and_fallback_counts_are_generic(self):
         self.set_grants(set(permissions.LEGACY_PERMISSIONS)-{'VIEW_COMPLIANCE','VIEW_COMPLIANCE_NOTE'})

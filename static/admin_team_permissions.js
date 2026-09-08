@@ -1,5 +1,5 @@
 document.querySelectorAll('.permission-picker').forEach((picker) => {
-    const labels = { VIEW_PRICE: 'Unit Price', SEARCH_BY_CAS: 'Tìm bằng CAS', VIEW_COMPLIANCE: 'Compliance' };
+    const labels = { VIEW_PRICE: 'Unit Price', SEARCH_BY_CAS: 'Tìm bằng CAS', VIEW_COMPLIANCE: 'Tình trạng quản lý' };
     function update() {
         picker.querySelectorAll('[data-dependencies]').forEach((input) => {
             const dependencies = JSON.parse(input.dataset.dependencies);

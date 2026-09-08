@@ -106,13 +106,14 @@ class AdminQuoteTemplatesStaticTests(unittest.TestCase):
     def test_html_has_required_sections(self):
         html = ADMIN_QUOTE_HTML.read_text(encoding="utf-8")
         for text in [
-            "Mẫu đang sử dụng",
+            "Mẫu mặc định toàn hệ thống",
             "Chưa có mẫu báo giá",
-            "Upload phiên bản mới",
-            "Kích hoạt ngay sau khi upload",
-            "Mapping được kiểm tra",
+            "Tải lên phiên bản mới",
+            "Đặt làm mẫu mặc định sau khi tải lên",
+            "Ánh xạ cột",
+            "Mẫu theo team",
             "Lịch sử phiên bản",
-            "Đang sử dụng",
+            "Lưu trữ",
         ]:
             self.assertIn(text, html)
         for ident in [
@@ -125,27 +126,14 @@ class AdminQuoteTemplatesStaticTests(unittest.TestCase):
         ]:
             self.assertIn(ident, html)
 
-    def test_mapping_read_only_and_fixed_bg_v1(self):
+    def test_mapping_preview_is_flexible_and_versioned(self):
         html = ADMIN_QUOTE_HTML.read_text(encoding="utf-8")
         for text in [
             "BG_V1",
-            "<code>BG</code>",
-            "<code>16</code>",
-            "<code>17</code>",
-            "<code>A</code></td><td>STT</td>",
-            "<code>B</code></td><td>Name</td>",
-            "<code>C</code></td><td>Code</td>",
-            "<code>D</code></td><td>CAS</td>",
-            "<code>E</code></td><td>Brand</td>",
-            "<code>F</code></td><td>Size</td>",
-            "<code>M</code></td><td>Note</td>",
-            "<code>N</code></td><td>Compliance + Compliance Note</td>",
-            "<code>P</code></td><td>Unit Price</td>",
-            "<code>Tổng giá</code>",
-            "chưa phải mapping tùy chỉnh",
+            'id="qtSheet"', 'id="qtHeaderRow"', 'id="qtDataStartRow"',
+            'id="qtTotalLabel"', 'id="qtMappingBody"', 'id="qtInspectBtn"',
         ]:
             self.assertIn(text, html)
-        self.assertNotIn('name="mapping"', html)
         self.assertNotIn('contenteditable="true"', html)
         self.assertNotIn("<textarea", html)
 
@@ -168,7 +156,8 @@ class AdminQuoteTemplatesStaticTests(unittest.TestCase):
         self.assertIn("new FormData()", js)
         self.assertIn("body.append('workbook', file)", js)
         self.assertIn("body.append('activate'", js)
-        self.assertNotIn("Content-Type", js)
+        self.assertNotIn("'Content-Type': 'multipart/form-data'", js)
+        self.assertIn("body.append('mapping'", js)
         self.assertIn("endsWith('.xlsx')", js)
         self.assertIn("10 MB", js)
 
@@ -195,7 +184,7 @@ class AdminQuoteTemplatesStaticTests(unittest.TestCase):
         html = ADMIN_QUOTE_HTML.read_text(encoding="utf-8")
         self.assertIn(".table-wrap", html)
         self.assertIn("overflow-x: auto", html)
-        self.assertIn(".history-table { min-width: 880px; }", html)
+        self.assertIn(".history-table { min-width: 1040px; }", html)
         self.assertIn("@media (max-width: 760px)", html)
         self.assertNotIn('class="card', html)
         self.assertNotIn("gradient", html.lower())

@@ -56,6 +56,16 @@ def _zip_entries(raw):
         return {name: zf.read(name) for name in zf.namelist()}
 
 
+def _with_zip_entries(raw, replacements):
+    entries = _zip_entries(raw)
+    entries.update(replacements)
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for name, data in entries.items():
+            zf.writestr(name, data)
+    return output.getvalue()
+
+
 def _root_start_tag(data):
     return re.search(rb"<[A-Za-z_][^>]*>", data).group(0).decode("utf-8")
 
@@ -317,7 +327,122 @@ class WorkbookOoxmlExportTests(unittest.TestCase):
         self.assertEqual(_text(_cell(root, "I27")), "Tổng giá")
         self.assertEqual(_text(_cell(root, "M31")), "Footer terms")
         self.assertEqual(_formula(_cell(root, "L31")), "J27")
-        self.assertEqual(_formula(_cell(root, "G26")), "")
+        self.assertEqual(_formula(_cell(root, "G26")), "A26+1")
+        self.assertEqual(_formula(_cell(root, "J26")), "P26*2")
+
+    def test_formula_translation_never_rewrites_a1_text_literals(self):
+        raw = make_workbook(vat_formula='IF(J26="P25",J26*0.08,0)')
+        entries = _zip_entries(raw)
+        sheet = entries["xl/worksheets/custom_bg.xml"].replace(
+            b"<f>A25+1</f>", b'<f>IF(A25="P25",A25+1,0)</f>'
+        )
+        raw = _with_zip_entries(raw, {"xl/worksheets/custom_bg.xml": sheet})
+        out = qwe.export_quick_quote_workbook(raw, [product(i) for i in range(1, 11)])
+        root = _sheet_xml(out)
+        self.assertEqual(_formula(_cell(root, "G26")), 'IF(A26="P25",A26+1,0)')
+        self.assertEqual(_formula(_cell(root, "J28")), 'IF(J27="P25",J27*0.08,0)')
+
+    def test_formula_above_inserted_rows_tracks_shifted_footer(self):
+        raw = make_workbook()
+        entries = _zip_entries(raw)
+        sheet = entries["xl/worksheets/custom_bg.xml"].replace(
+            b"</row><row r=\"16\">", b'<c r="Q1"><f>IF(J28="J28",J28+SUM(P17:P25)+SUM(17:25),0)</f><v>7</v></c></row><row r="16">', 1
+        )
+        out = qwe.export_quick_quote_workbook(
+            _with_zip_entries(raw, {"xl/worksheets/custom_bg.xml": sheet}),
+            [product(i) for i in range(1, 11)],
+        )
+        root = _sheet_xml(out)
+        self.assertEqual(_formula(_cell(root, "Q1")), 'IF(J29="J28",J29+SUM(P17:P26)+SUM(17:26),0)')
+
+    def test_over_capacity_rejects_array_formula_master_outside_template_row(self):
+        raw = make_workbook()
+        entries = _zip_entries(raw)
+        sheet = entries["xl/worksheets/custom_bg.xml"].replace(
+            b"<f>P17*2</f>", b'<f t="array" ref="J17:J25">P17*2</f>', 1
+        )
+        with self.assertRaisesRegex(qwe.WorkbookExportError, "shared/array/data-table"):
+            qwe.export_quick_quote_workbook(
+                _with_zip_entries(raw, {"xl/worksheets/custom_bg.xml": sheet}),
+                [product(i) for i in range(1, 11)],
+            )
+
+    def test_cumulative_template_row_formula_copies_without_off_by_one(self):
+        raw = make_workbook()
+        entries = _zip_entries(raw)
+        sheet = entries["xl/worksheets/custom_bg.xml"].replace(
+            b"<f>P25*2</f>", b"<f>SUM($P$17:P25)+$J$26</f>", 1
+        )
+        out = qwe.export_quick_quote_workbook(
+            _with_zip_entries(raw, {"xl/worksheets/custom_bg.xml": sheet}),
+            [product(i) for i in range(1, 11)],
+        )
+        root = _sheet_xml(out)
+        self.assertEqual(_formula(_cell(root, "J25")), "SUM($P$17:P25)+$J$27")
+        self.assertEqual(_formula(_cell(root, "J26")), "SUM($P$17:P26)+$J$27")
+
+    def test_formula_cached_values_are_removed(self):
+        raw = make_workbook()
+        entries = _zip_entries(raw)
+        sheet = entries["xl/worksheets/custom_bg.xml"].replace(b"<v>0</v>", b"<v>987654321</v>")
+        out = qwe.export_quick_quote_workbook(
+            _with_zip_entries(raw, {"xl/worksheets/custom_bg.xml": sheet}),
+            [product(1, Unit_Price_Value=None)],
+        )
+        root = _sheet_xml(out)
+        for cell in root.findall(".//m:c", NS):
+            if cell.find("m:f", NS) is not None:
+                self.assertIsNone(cell.find("m:v", NS), cell.attrib.get("r"))
+
+    def test_cross_sheet_and_chart_formula_caches_are_removed_within_capacity(self):
+        raw = make_workbook()
+        entries = _zip_entries(raw)
+        workbook = entries["xl/workbook.xml"].replace(
+            b"</sheets>", b'<sheet name="Other" sheetId="2" r:id="rIdOther"/></sheets>'
+        )
+        rels = entries["xl/_rels/workbook.xml.rels"].replace(
+            b"</Relationships>",
+            b'<Relationship Id="rIdOther" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/></Relationships>',
+        )
+        other = f'''<worksheet xmlns="{qwe.NS_MAIN}"><sheetData><row r="1">
+          <c r="A1"><f>'BG'!P17</f><v>123456</v></c></row></sheetData></worksheet>'''.encode()
+        chart_ns = "http://schemas.openxmlformats.org/drawingml/2006/chart"
+        chart = f'''<c:chartSpace xmlns:c="{chart_ns}"><c:chart><c:plotArea><c:barChart><c:ser>
+          <c:val><c:numRef><c:f>'BG'!$P$17:$P$20</c:f><c:numCache><c:ptCount val="1"/>
+          <c:pt idx="0"><c:v>123456</c:v></c:pt></c:numCache></c:numRef></c:val>
+          </c:ser></c:barChart></c:plotArea></c:chart></c:chartSpace>'''.encode()
+        out = qwe.export_quick_quote_workbook(_with_zip_entries(raw, {
+            "xl/workbook.xml": workbook, "xl/_rels/workbook.xml.rels": rels,
+            "xl/worksheets/sheet2.xml": other, "xl/charts/chart1.xml": chart,
+        }), [product(1, Unit_Price_Value=None)])
+        after = _zip_entries(out)
+        other_root = ET.fromstring(after["xl/worksheets/sheet2.xml"])
+        other_cell = other_root.find(f".//{{{qwe.NS_MAIN}}}c")
+        self.assertIsNone(other_cell.find(f"{{{qwe.NS_MAIN}}}v"))
+        chart_root = ET.fromstring(after["xl/charts/chart1.xml"])
+        self.assertFalse(any(node.tag.endswith("}numCache") for node in chart_root.iter()))
+
+    def test_over_capacity_shifts_print_area_and_drawing_anchor(self):
+        raw = make_workbook()
+        entries = _zip_entries(raw)
+        workbook = entries["xl/workbook.xml"].replace(
+            b"</sheets>",
+            b"</sheets><definedNames><definedName name=\"_xlnm.Print_Area\" localSheetId=\"0\">'BG'!$A$1:$P$30</definedName></definedNames>",
+        )
+        drawing = b'''<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing">
+          <xdr:twoCellAnchor><xdr:from><xdr:row>24</xdr:row></xdr:from>
+          <xdr:to><xdr:row>29</xdr:row></xdr:to></xdr:twoCellAnchor></xdr:wsDr>'''
+        out = qwe.export_quick_quote_workbook(
+            _with_zip_entries(raw, {"xl/workbook.xml": workbook, "xl/drawings/drawing1.xml": drawing}),
+            [product(i) for i in range(1, 11)],
+        )
+        after = _zip_entries(out)
+        workbook_root = ET.fromstring(after["xl/workbook.xml"])
+        defined = workbook_root.find(f".//{{{qwe.NS_MAIN}}}definedName")
+        self.assertEqual(defined.text, "'BG'!$A$1:$P$31")
+        drawing_root = ET.fromstring(after["xl/drawings/drawing1.xml"])
+        rows = [int(node.text) for node in drawing_root.iter() if node.tag.endswith("}row")]
+        self.assertEqual(rows, [24, 30])
 
     def test_formulas_update_after_shift(self):
         out = qwe.export_quick_quote_workbook(make_workbook(), [product(i) for i in range(1, 12)])
@@ -455,6 +580,10 @@ class WorkbookOoxmlExportTests(unittest.TestCase):
             qwe.inspect_bg_template(b"PK bad")
         with self.assertRaisesRegex(qwe.WorkbookExportError, "macro"):
             qwe.inspect_bg_template(make_workbook(macro=True))
+        with self.assertRaisesRegex(qwe.WorkbookExportError, "external link"):
+            qwe.inspect_bg_template(_with_zip_entries(
+                make_workbook(), {"xl/externalLinks/externalLink1.xml": b"<externalLink/>"}
+            ))
         with patch.object(qwe, "MAX_XLSX_BYTES", 64):
             with self.assertRaisesRegex(qwe.WorkbookExportError, "quá lớn"):
                 qwe.inspect_bg_template(make_workbook())
@@ -565,6 +694,7 @@ class RealTemplateExportTests(unittest.TestCase):
             sess["auth_version"] = 1
             sess["is_admin"] = False
             sess["team_id"] = 7
+            sess["csrf_token"] = "csrf-test"
         with patch.object(
             search,
             "_get_active_quote_template",
@@ -583,6 +713,7 @@ class RealTemplateExportTests(unittest.TestCase):
             response = client.post(
                 "/api/quote-assistant/workbook/export",
                 data={"selections": json.dumps([{"product_id": 42}, {"product_id": 43}])},
+                headers={"X-CSRF-Token": "csrf-test"},
                 content_type="multipart/form-data",
             )
         self.assertEqual(response.status_code, 200)
@@ -672,7 +803,10 @@ class QuoteWorkbookExportApiTests(unittest.TestCase):
         search.app.testing = True
         with patch("search.get_connection", return_value=fake_conn), patch(
             "search.export_quick_quote_workbook", return_value=b"exported-xlsx"
-        ) as export_mock:
+        ) as export_mock, patch("search._get_active_quote_template", return_value={
+            "id": 1, "filename": "quote.xlsx", "content": make_workbook(),
+            "mapping": search._quote_template_mapping_snapshot(),
+        }):
             with search.app.test_client() as client:
                 if authenticated:
                     with client.session_transaction() as sess:
@@ -680,14 +814,13 @@ class QuoteWorkbookExportApiTests(unittest.TestCase):
                         sess["user_id"] = 1
                         sess["auth_version"] = 1
                         sess["is_admin"] = is_admin
+                        sess["csrf_token"] = "csrf-test"
                         if team_id is not None:
                             sess["team_id"] = team_id
                 response = client.post(
                     "/api/quote-assistant/workbook/export",
-                    data={
-                        "workbook": (io.BytesIO(make_workbook()), "quote.xlsx"),
-                        "selections": json.dumps(selections, ensure_ascii=False),
-                    },
+                    data={"selections": json.dumps(selections, ensure_ascii=False)},
+                    headers={"X-CSRF-Token": "csrf-test"},
                     content_type="multipart/form-data",
                 )
         return response, fake_conn, export_mock
@@ -718,17 +851,20 @@ class QuoteWorkbookExportApiTests(unittest.TestCase):
 
         missing, _conn, _mock = self._post([], [{"product_id": 99}])
         self.assertEqual(missing.status_code, 400)
-        self.assertIn("không visible", missing.get_json()["error"])
+        self.assertIn("không còn khả dụng", missing.get_json()["error"])
 
         blocked_row = (1, 7, "Blocked", "B", "CAS", "Brand", "1g", "1", "100", "", "NEAT", "CẤM NHẬP", "", True, None, None)
         blocked, _conn, _mock = self._post([blocked_row], [{"product_id": 7}])
         self.assertEqual(blocked.status_code, 400)
-        self.assertIn("compliance", blocked.get_json()["error"])
+        self.assertEqual(
+            blocked.get_json()["error"],
+            "Dòng 1 không thể xuất báo giá: Sản phẩm thuộc diện CẤM NHẬP.",
+        )
 
         zero_row = (1, 8, "Zero", "Z", "CAS", "Brand", "1g", "1", "0", "", "NEAT", "Được bán", "", True, None, None)
         zero, _conn, _mock = self._post([zero_row], [{"product_id": 8}])
         self.assertEqual(zero.status_code, 400)
-        self.assertIn("Unit_Price", zero.get_json()["error"])
+        self.assertIn("đơn giá", zero.get_json()["error"])
 
     def test_export_returns_stable_missing_currency_reason_after_live_recheck(self):
         from currency_rates import CurrencyRateResolver
@@ -766,7 +902,10 @@ class QuoteWorkbookExportV2ApiTests(unittest.TestCase):
         search.app.testing = True
         with patch("search.get_connection", return_value=fake_conn), patch(
             "search.export_quick_quote_workbook", return_value=b"exported-xlsx"
-        ) as export_mock:
+        ) as export_mock, patch("search._get_active_quote_template", return_value={
+            "id": 1, "filename": "quote.xlsx", "content": make_workbook(),
+            "mapping": search._quote_template_mapping_snapshot(),
+        }):
             with search.app.test_client() as client:
                 if authenticated:
                     with client.session_transaction() as sess:
@@ -774,12 +913,10 @@ class QuoteWorkbookExportV2ApiTests(unittest.TestCase):
                         sess["user_id"] = 1
                         sess["auth_version"] = 1
                         sess["is_admin"] = is_admin
+                        sess["csrf_token"] = "csrf-test"
                         if team_id is not None:
                             sess["team_id"] = team_id
-                data = {
-                    "workbook": (io.BytesIO(make_workbook()), "quote.xlsx"),
-                    "export_items": json.dumps(items, ensure_ascii=False),
-                }
+                data = {"export_items": json.dumps(items, ensure_ascii=False)}
                 if include_selections:
                     data["selections"] = json.dumps(
                         [{"product_id": ln["product_id"] for it in items for ln in it["lines"]}],
@@ -788,6 +925,7 @@ class QuoteWorkbookExportV2ApiTests(unittest.TestCase):
                 response = client.post(
                     "/api/quote-assistant/workbook/export",
                     data=data,
+                    headers={"X-CSRF-Token": "csrf-test"},
                     content_type="multipart/form-data",
                 )
         return response, fake_conn, export_mock
@@ -1028,7 +1166,7 @@ class QuoteWorkbookExportV2ApiTests(unittest.TestCase):
         products = export_mock.call_args.args[1]
         self.assertEqual(
             products[0]["Compliance_Combined"],
-            "Không thể báo giá: tất cả sản phẩm bị chặn compliance",
+            "Không thể xuất báo giá: sản phẩm thuộc diện CẤM NHẬP",
         )
 
     def test_export_items_blocked_placeholder_without_reason_uses_default_text(self):
@@ -1042,7 +1180,7 @@ class QuoteWorkbookExportV2ApiTests(unittest.TestCase):
         products = export_mock.call_args.args[1]
         self.assertEqual(
             products[0]["Compliance_Combined"],
-            "Không thể báo giá: không đủ điều kiện báo giá",
+            "Không thể xuất báo giá: không đủ điều kiện báo giá",
         )
 
     def test_export_items_all_placeholders_zero_selected_succeeds(self):
@@ -1096,7 +1234,10 @@ class QuoteWorkbookExportV2ApiTests(unittest.TestCase):
         search.app.testing = True
         with patch("search.get_connection", return_value=fake_conn), patch(
             "search.export_quick_quote_workbook", return_value=b"exported-xlsx"
-        ) as export_mock:
+        ) as export_mock, patch("search._get_active_quote_template", return_value={
+            "id": 1, "filename": "quote.xlsx", "content": make_workbook(),
+            "mapping": search._quote_template_mapping_snapshot(),
+        }):
             with search.app.test_client() as client:
                 with client.session_transaction() as sess:
                     sess["authenticated"] = True
@@ -1104,12 +1245,11 @@ class QuoteWorkbookExportV2ApiTests(unittest.TestCase):
                     sess["auth_version"] = 1
                     sess["is_admin"] = True
                     sess["team_id"] = 1
+                    sess["csrf_token"] = "csrf-test"
                 response = client.post(
                     "/api/quote-assistant/workbook/export",
-                    data={
-                        "workbook": (io.BytesIO(make_workbook()), "quote.xlsx"),
-                        "selections": json.dumps([{"product_id": 42}]),
-                    },
+                    data={"selections": json.dumps([{"product_id": 42}])},
+                    headers={"X-CSRF-Token": "csrf-test"},
                     content_type="multipart/form-data",
                 )
         self.assertEqual(response.status_code, 200)
@@ -1130,7 +1270,10 @@ class QuoteWorkbookExportV2ApiTests(unittest.TestCase):
         legacy_selections = [{"product_id": 205}]
         with patch("search.get_connection", return_value=fake_conn), patch(
             "search.export_quick_quote_workbook", return_value=b"exported-xlsx"
-        ) as export_mock:
+        ) as export_mock, patch("search._get_active_quote_template", return_value={
+            "id": 1, "filename": "quote.xlsx", "content": make_workbook(),
+            "mapping": search._quote_template_mapping_snapshot(),
+        }):
             with search.app.test_client() as client:
                 with client.session_transaction() as sess:
                     sess["authenticated"] = True
@@ -1138,13 +1281,11 @@ class QuoteWorkbookExportV2ApiTests(unittest.TestCase):
                     sess["auth_version"] = 1
                     sess["is_admin"] = True
                     sess["team_id"] = 1
+                    sess["csrf_token"] = "csrf-test"
                 response = client.post(
                     "/api/quote-assistant/workbook/export",
-                    data={
-                        "workbook": (io.BytesIO(make_workbook()), "quote.xlsx"),
-                        "export_items": json.dumps(items),
-                        "selections": json.dumps(legacy_selections),
-                    },
+                    data={"export_items": json.dumps(items), "selections": json.dumps(legacy_selections)},
+                    headers={"X-CSRF-Token": "csrf-test"},
                     content_type="multipart/form-data",
                 )
         self.assertEqual(response.status_code, 200)

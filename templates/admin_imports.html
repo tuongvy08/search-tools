@@ -405,34 +405,10 @@
     </div>
 
     <div class="card">
-      <h2><span class="badge">1</span> Import sản phẩm (Products)</h2>
-      <p class="hint">Cột bắt buộc trên dòng 1: <code>brand</code>. Các cột còn lại (<code>name, code, cas, size, ship, price, note</code>) có thể thiếu nếu dữ liệu thực tế không có.</p>
-      <form method="post" action="/admin/imports/preview" enctype="multipart/form-data">
-        <input type="hidden" name="dataset" value="products" />
-        <div class="form-row">
-          <div class="field" style="flex:1; min-width:220px;">
-            <span class="lbl">Chọn file .xlsx</span>
-            <input type="file" name="file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" required />
-          </div>
-          <div class="field">
-            <span class="lbl">Chế độ</span>
-            <select name="mode" aria-label="Chế độ import products">
-              <option value="upsert" selected>Upsert (code + brand)</option>
-              <option value="replace_by_brand">Xóa theo brand trong file rồi nạp lại</option>
-              <option value="append">Chỉ thêm dòng mới</option>
-            </select>
-          </div>
-          <button type="submit" class="btn btn-primary">Xem trước — Products</button>
-        </div>
-        <div class="upload-status" data-upload-status>Chưa chọn file.</div>
-      </form>
-    </div>
-
-    <div class="card">
       <h2><span class="badge">1</span> Import quy tắc (Regulatory rules)</h2>
       <p class="hint">Cột bắt buộc: <code>rule_type, rule_label, match_field, match_value, priority, is_active, note</code></p>
       <form method="post" action="/admin/imports/preview" enctype="multipart/form-data">
-        <input type="hidden" name="dataset" value="regulatory_rules" />
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" /><input type="hidden" name="dataset" value="regulatory_rules" />
         <div class="form-row">
           <div class="field" style="flex:1; min-width:220px;">
             <span class="lbl">Chọn file .xlsx</span>
@@ -442,7 +418,7 @@
             <span class="lbl">Chế độ</span>
             <select name="mode" aria-label="Chế độ import rules">
               <option value="upsert" selected>Upsert</option>
-              <option value="replace_by_type">Xóa theo rule_type trong file rồi nạp lại</option>
+
             </select>
           </div>
           <button type="submit" class="btn btn-primary">Xem trước — Rules</button>
@@ -596,6 +572,21 @@
       }
     }
 
+    async function confirmQuickDelete(form, kind, button) {
+      button.disabled = true;
+      try {
+        const res = await fetch(`/admin/imports/quick-${kind}/delete-preview`, {method:'POST',body:new FormData(form),credentials:'same-origin'});
+        const scope = await res.json();
+        if (!res.ok || !scope.ok) { showToast(scope.message || 'Không lấy được phạm vi xóa.', false); return; }
+        if (!confirm(`Phạm vi: ${scope.label}\nChính xác ${scope.count} dòng sẽ bị xóa. Xác nhận xóa?`)) return;
+        let input = form.querySelector('[name="confirmation"]');
+        if (!input) { input = document.createElement('input'); input.type='hidden'; input.name='confirmation'; form.appendChild(input); }
+        input.value = scope.confirmation;
+        await submitQuickForm(form, `/admin/imports/quick-${kind}/delete`, button);
+      } catch (_) { showToast('Không lấy được phạm vi xóa. Hãy tải lại trang.', false); }
+      finally { button.disabled = false; }
+    }
+
     function validateQuickDeleteProduct() {
       const form = document.getElementById('formQuickProduct');
       const code = (form.querySelector('[name="code"]')?.value || '').trim();
@@ -660,9 +651,7 @@
     if (btnDeleteProduct && formProduct) {
       btnDeleteProduct.addEventListener('click', () => {
         if (!validateQuickDeleteProduct()) return;
-        const target = describeQuickDeleteProduct(formProduct);
-        if (!confirm(`Xóa sản phẩm "${target}" khỏi database? Thao tác không hoàn tác tự động.`)) return;
-        submitQuickForm(formProduct, '/admin/imports/quick-product/delete', btnDeleteProduct);
+        confirmQuickDelete(formProduct, 'product', btnDeleteProduct);
       });
     }
 
@@ -679,11 +668,7 @@
     if (btnDeleteRule && formRule) {
       btnDeleteRule.addEventListener('click', () => {
         if (!validateQuickDeleteRule()) return;
-        const ruleType = formRule.querySelector('[name="rule_type"]').value;
-        const matchField = formRule.querySelector('[name="match_field"]').value;
-        const matchValue = formRule.querySelector('[name="match_value"]').value.trim();
-        if (!confirm(`Xóa quy tắc ${ruleType} (${matchField}=${matchValue})? Thao tác không hoàn tác tự động.`)) return;
-        submitQuickForm(formRule, '/admin/imports/quick-rule/delete', btnDeleteRule);
+        confirmQuickDelete(formRule, 'rule', btnDeleteRule);
       });
     }
 
@@ -708,7 +693,7 @@
           return;
         }
         const kb = Math.max(1, Math.round(f.size / 1024));
-        setStatus(`Đã chọn: <strong>${f.name}</strong> (${kb} KB). Có thể bấm “Xem trước”.`, 'ok');
+        statusEl.textContent = `Đã chọn: ${f.name} (${kb} KB). Có thể bấm “Xem trước”.`;
         submitBtn.disabled = false;
       });
 

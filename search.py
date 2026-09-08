@@ -23,6 +23,9 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from werkzeug.middleware.proxy_fix import ProxyFix
 
+import import_quick_delete
+import import_jobs
+import admin_import_center
 import admin_google_users
 import admin_lifecycle
 import admin_login_history
@@ -68,6 +71,8 @@ from quote_workbook_export import MAX_XLSX_BYTES, WorkbookExportError, export_qu
 load_dotenv()
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = import_jobs.limit("MAX_BYTES", 128*1024**2) + 1024**2
+
 CORS(app)
 
 app.secret_key = os.environ.get("FLASK_SECRET_KEY")
@@ -145,7 +150,7 @@ if ENABLE_LEGACY_PASSWORD_LOGIN and not (MANAGER_PASSWORD and STAFF_PASSWORD):
         "APP_PASSWORD_STAFF to be set explicitly (no defaults)."
     )
 
-IMPORT_PREVIEWS = {}
+
 
 QUOTE_TEMPLATE_PROFILE_VERSION = "BG_V1"
 QUOTE_TEMPLATE_MAPPING_SNAPSHOT = {
@@ -3025,14 +3030,22 @@ def quick_quote():
     )
 
 
-@app.route("/admin/imports", methods=["GET"])
-def admin_imports():
+@app.route("/admin/imports/tools", methods=["GET"])
+def admin_import_tools():
     guard = _require_admin_page()
     if guard is not None:
         return guard
 
     token = request.args.get("preview")
-    preview = IMPORT_PREVIEWS.get(token) if token else None
+    preview = None
+    if token:
+        try:
+            with import_jobs.connection() as preview_conn, preview_conn.cursor() as preview_cur:
+                preview_cur.execute("SELECT payload FROM admin_rule_import_previews WHERE token=%s::uuid AND actor=%s AND expires_at>now()", (token, _current_actor()))
+                found = preview_cur.fetchone()
+                preview = found[0] if found else None
+        except Exception:
+            pass
 
     conn = get_connection()
     recent_jobs = []
@@ -3075,6 +3088,13 @@ def admin_imports_preview():
     if guard is not None:
         return guard
 
+    if not session_security.verify_csrf_token(request.form.get("csrf_token", "")):
+        return "CSRF token không hợp lệ hoặc đã hết hạn.", 400
+    if request.form.get("dataset") == "products":
+        return redirect(url_for("admin_imports", err="Hãy dùng Trung tâm nhập sản phẩm để tải workbook và xem trước."))
+    if request.content_length and request.content_length > 2 * 1024 * 1024:
+        return "File quy tắc tối đa 2 MB.", 413
+
     dataset = (request.form.get("dataset") or "").strip()
     mode = (request.form.get("mode") or "").strip()
     file = request.files.get("file")
@@ -3082,9 +3102,9 @@ def admin_imports_preview():
         return redirect(url_for("admin_imports", err="Thiếu file upload"))
 
     try:
-        rows, header_cols = _read_excel_dicts(file)
+        rows, header_cols = import_jobs.read_rules_upload(file)
     except Exception as e:
-        return redirect(url_for("admin_imports", err=f"Không đọc được Excel: {e}"))
+        return redirect(url_for("admin_imports", err="Không đọc được file quy tắc. Dùng workbook đơn giản, tối đa 10.000 dòng, không công thức."))
 
     if dataset not in {"products", "regulatory_rules"}:
         return redirect(url_for("admin_imports", err="Dataset không hợp lệ"))
@@ -3096,7 +3116,7 @@ def admin_imports_preview():
         valid_modes = {"upsert", "replace_by_brand", "append"}
     else:
         required = ["rule_type", "rule_label", "match_field", "match_value", "priority", "is_active", "note"]
-        valid_modes = {"upsert", "replace_by_type"}
+        valid_modes = {"upsert"}
 
     if mode not in valid_modes:
         return redirect(url_for("admin_imports", err="Mode không hợp lệ"))
@@ -3122,44 +3142,8 @@ def admin_imports_preview():
 
     deletable_count = None
     new_brands = []
-    if dataset == "products":
-        try:
-            validate_product_import_rows(rows, header_cols)
-        except ValueError as e:
-            return redirect(url_for("admin_imports", err=str(e)))
-
-        conn = get_connection()
-        ambiguous_preview_count = 0
-        try:
-            with conn.cursor() as cur:
-                gateway = load_brand_gateway(cur)
-                if gateway.table_exists:
-                    resolved_rows, brand_errors, new_brands = preview_import_rows_brands(rows, gateway)
-                    if brand_errors:
-                        sample_err = "; ".join(brand_errors[:3])
-                        if len(brand_errors) > 3:
-                            sample_err += f" (và {len(brand_errors) - 3} lỗi khác)"
-                        return redirect(url_for("admin_imports", err=f"Brand không hợp lệ: {sample_err}"))
-
-                    if mode == "replace_by_brand":
-                        _, scope_errors, deletable_count = inspect_replace_by_brand_scopes(cur, resolved_rows, gateway)
-                        if scope_errors:
-                            return redirect(url_for("admin_imports", err="; ".join(scope_errors)))
-                    elif mode == "upsert":
-                        for r in resolved_rows:
-                            c_code = _norm(r.get("code"))
-                            c_can = _norm(r.get("brand"))
-                            c_src = _norm(r.get("source_brand")) or c_can
-                            c_sz = _norm(r.get("size"))
-                            if c_code and c_can:
-                                cands = resolve_product_candidates(cur, c_code, c_can, source_brand=c_src, size=c_sz)
-                                if len(cands) > 1:
-                                    ambiguous_preview_count += 1
-        finally:
-            conn.close()
-
     token = str(uuid4())
-    IMPORT_PREVIEWS[token] = {
+    preview_payload = {
         "token": token,
         "dataset": dataset,
         "mode": mode,
@@ -3168,11 +3152,18 @@ def admin_imports_preview():
         "header_cols": sorted(header_cols),
         "row_count": len(rows),
         "sample_rows": rows[:10],
-        "hints": _preview_hints(dataset, mode, rows, deletable_count=deletable_count, ambiguous_count=ambiguous_preview_count),
+        "hints": _preview_hints(dataset, mode, rows, deletable_count=deletable_count, ambiguous_count=0),
         "new_brands": new_brands,
         "preview_deletable_count": deletable_count,
     }
-    return redirect(url_for("admin_imports", preview=token))
+    with import_jobs.connection() as preview_conn, preview_conn, preview_conn.cursor() as preview_cur:
+        preview_cur.execute("DELETE FROM admin_rule_import_previews WHERE expires_at<now()")
+        preview_cur.execute("SELECT pg_advisory_xact_lock(62402402)")
+        preview_cur.execute("SELECT count(*) FROM admin_rule_import_previews")
+        if preview_cur.fetchone()[0] >= 100:
+            return redirect(url_for("admin_import_tools", err="Hàng đợi quy tắc đã đầy. Thử lại sau 30 phút."))
+        preview_cur.execute("INSERT INTO admin_rule_import_previews(token,actor,payload) VALUES (%s,%s,%s::jsonb)", (token,_current_actor(),json.dumps(preview_payload)))
+    return redirect(url_for("admin_import_tools", preview=token))
 
 
 @app.route("/admin/imports/apply", methods=["GET", "POST"])
@@ -3186,7 +3177,13 @@ def admin_imports_apply():
         return "CSRF token không hợp lệ hoặc đã hết hạn.", 400
 
     token = request.form.get("preview_token")
-    data = IMPORT_PREVIEWS.pop(token, None)
+    try:
+        with import_jobs.connection() as preview_conn, preview_conn, preview_conn.cursor() as preview_cur:
+            preview_cur.execute("DELETE FROM admin_rule_import_previews WHERE token=%s::uuid AND actor=%s AND expires_at>now() RETURNING payload", (token,_current_actor()))
+            found = preview_cur.fetchone()
+            data = found[0] if found else None
+    except Exception:
+        data = None
     if not data:
         return redirect(url_for("admin_imports", err="Preview hết hạn, vui lòng upload lại"))
 
@@ -3203,224 +3200,68 @@ def admin_imports_apply():
     try:
         with conn:
             with conn.cursor() as cur:
+                acquire_products_import_lock(cur)
                 ambiguous_count = 0
                 created_brands = []
-                if dataset == "products":
-                    # MUST be first: serialize with every other product-mutating
-                    # import path (bulk apply + quick-product upsert/delete) before
-                    # any candidate scan, ambiguity check, or scope/count computation.
-                    acquire_products_import_lock(cur)
+                parsed = []
+                for r in rows:
+                    rule_type = _norm(r.get("rule_type")).upper()
+                    match_field = _norm(r.get("match_field")).lower()
+                    if rule_type not in {"CAM_NHAP", "PHU_LUC_II", "PHU_LUC_III", "TON_KHO"}:
+                        raise ValueError(f"rule_type không hợp lệ: {rule_type}")
+                    if match_field not in {"cas", "name", "code"}:
+                        raise ValueError(f"match_field không hợp lệ: {match_field}")
+                    priority_raw = _norm(r.get("priority")) or "100"
+                    is_active_raw = _norm(r.get("is_active")).lower()
+                    is_active = is_active_raw in {"1", "true", "yes", "y", "on"}
+                    parsed.append(
+                        {
+                            "rule_type": rule_type,
+                            "rule_label": _norm(r.get("rule_label")),
+                            "match_field": match_field,
+                            "match_value": _norm(r.get("match_value")),
+                            "priority": int(float(priority_raw)),
+                            "is_active": is_active,
+                            "note": _norm(r.get("note")),
+                        }
+                    )
 
-                    validate_product_import_rows(rows, header_cols)
-                    manual_header_mode = classify_manual_compliance_headers(header_cols)
-                    manual_snapshot = {}
-                    preparation_snapshot = {}
-                    has_source_brand = _check_table_has_column(cur, "products", "source_brand")
+                if mode == "replace_by_type":
+                    types_ = sorted({x["rule_type"] for x in parsed})
+                    cur.execute("DELETE FROM regulatory_rules WHERE rule_type = ANY(%s)", (types_,))
+                    deleted = cur.rowcount
 
-                    gateway = load_brand_gateway(cur)
-                    if gateway.table_exists:
-                        rows_to_process, created_brands = register_and_resolve_import_rows(cur, rows)
-                        gateway = load_brand_gateway(cur)
+                for r in parsed:
+                    if mode == "replace_by_type":
+                        cur.execute(
+                            """
+                            INSERT INTO regulatory_rules (rule_type, rule_label, match_field, match_value, priority, is_active, note)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            (r["rule_type"], r["rule_label"], r["match_field"], r["match_value"], r["priority"], r["is_active"], r["note"]),
+                        )
+                        inserted += 1
                     else:
-                        rows_to_process = rows
-
-                    if mode == "replace_by_brand":
-                        brands = sorted({_norm(r.get("brand")) for r in rows if _norm(r.get("brand"))})
-                        if not brands:
-                            raise ValueError("Mode replace_by_brand yêu cầu ít nhất 1 brand hợp lệ trong file.")
-
-                        if gateway.table_exists:
-                            brand_to_sources, scope_errors, _preview_count = inspect_replace_by_brand_scopes(cur, rows_to_process, gateway)
-                            if scope_errors:
-                                raise ValueError(scope_errors[0])
-
-                            # Resolve the EXACT row IDs to delete now, while still holding
-                            # the products-import lock, immediately before the DELETE. This
-                            # is the authoritative scope -- never widen the DELETE predicate
-                            # beyond this verified ID set.
-                            target_ids_map = resolve_replace_by_brand_target_ids(cur, brand_to_sources)
-                            current_deletable_count = sum(len(ids) for ids in target_ids_map.values())
-
-                            preview_deletable_count = data.get("preview_deletable_count")
-                            if preview_deletable_count is not None and current_deletable_count != preview_deletable_count:
-                                raise ValueError(
-                                    f"Phạm vi dữ liệu đã thay đổi kể từ khi xem trước (dự kiến xóa: {preview_deletable_count} dòng, "
-                                    f"hiện tại: {current_deletable_count} dòng). Thao tác bị hủy để đảm bảo an toàn."
-                                )
-
-                            brands_norm = sorted({b.strip().upper() for b in brand_to_sources.keys()})
-                            if manual_header_mode == HEADER_MODE_ABSENT:
-                                manual_snapshot = fetch_manual_compliance_snapshot(cur, brands_norm)
-                            if "preparation_type" not in header_cols:
-                                preparation_snapshot = fetch_preparation_type_snapshot(cur, brands_norm)
-
-                            for can_b, ids in target_ids_map.items():
-                                if not ids:
-                                    continue
-                                cur.execute(
-                                    "DELETE FROM products WHERE id = ANY(%s)",
-                                    (ids,),
-                                )
-                                deleted += cur.rowcount
-                        else:
-                            brands_norm = sorted({b.strip().upper() for b in brands if b.strip()})
-                            if manual_header_mode == HEADER_MODE_ABSENT:
-                                manual_snapshot = fetch_manual_compliance_snapshot(cur, brands_norm)
-                            if "preparation_type" not in header_cols:
-                                preparation_snapshot = fetch_preparation_type_snapshot(cur, brands_norm)
+                        cur.execute(
+                            """
+                            SELECT id FROM regulatory_rules
+                            WHERE rule_type=%s AND match_field=%s AND UPPER(TRIM(match_value))=UPPER(TRIM(%s))
+                            LIMIT 1
+                            """,
+                            (r["rule_type"], r["match_field"], r["match_value"]),
+                        )
+                        ex = cur.fetchone()
+                        if ex:
                             cur.execute(
                                 """
-                                DELETE FROM products
-                                WHERE UPPER(TRIM(COALESCE(brand, ''))) = ANY(%s)
+                                UPDATE regulatory_rules
+                                   SET rule_label=%s, match_value=%s, priority=%s, is_active=%s, note=%s, updated_at=NOW()
+                                 WHERE id=%s
                                 """,
-                                (brands_norm,),
+                                (r["rule_label"], r["match_value"], r["priority"], r["is_active"], r["note"], ex[0]),
                             )
-                            deleted = cur.rowcount
-
-                    if mode == "upsert" and gateway.table_exists:
-                        ambiguous_errors = []
-                        for idx, r in enumerate(rows_to_process, start=2):
-                            chk_code = _norm(r.get("code"))
-                            chk_brand = _norm(r.get("brand"))
-                            chk_source = _norm(r.get("source_brand")) or chk_brand
-                            chk_size = _norm(r.get("size"))
-                            if chk_code and chk_brand:
-                                cands = resolve_product_candidates(
-                                    cur, chk_code, chk_brand, source_brand=chk_source, size=chk_size
-                                )
-                                if len(cands) > 1:
-                                    ambiguous_errors.append(
-                                        f"dòng {idx} (code '{chk_code}', brand '{chk_brand}', {len(cands)} bản ghi)"
-                                    )
-                        if ambiguous_errors:
-                            sample_err = "; ".join(ambiguous_errors[:5])
-                            if len(ambiguous_errors) > 5:
-                                sample_err += f" (và {len(ambiguous_errors) - 5} dòng khác)"
-                            raise ValueError(
-                                f"Phát hiện {len(ambiguous_errors)} dòng trùng lặp mơ hồ (ambiguous) trong cơ sở dữ liệu: {sample_err}. "
-                                f"Vui lòng chỉ định rõ source_brand hoặc quy cách size để tránh cập nhật tùy ý. "
-                                f"Toàn bộ file bị hủy bỏ, 0 dòng nào được ghi."
-                            )
-
-                    for r in rows_to_process:
-                        canonical_brand = _norm(r.get("brand"))
-                        code = _norm(r.get("code"))
-                        source_brand = _norm(r.get("source_brand")) or canonical_brand
-                        size = _norm(r.get("size"))
-                        vals = (
-                            _norm(r.get("name")), code, _norm(r.get("cas")), canonical_brand,
-                            size, _norm(r.get("ship")), _norm(r.get("price")), _norm(r.get("note")),
-                        )
-                        include_manual, manual_c, manual_n = resolve_manual_fields_for_write(
-                            header_mode=manual_header_mode,
-                            row=r,
-                            code=code,
-                            brand=canonical_brand,
-                            snapshot=manual_snapshot,
-                        )
-                        include_preparation, preparation_type = resolve_preparation_type_for_write(
-                            header_cols=header_cols,
-                            row=r,
-                            code=code,
-                            brand=canonical_brand,
-                            snapshot=preparation_snapshot,
-                        )
-                        if mode == "append":
-                            _insert_product_row(
-                                cur,
-                                vals,
-                                include_manual,
-                                manual_c,
-                                manual_n,
-                                include_preparation,
-                                preparation_type,
-                                source_brand=source_brand,
-                                has_source_brand=has_source_brand,
-                            )
-                            inserted += 1
+                            updated += 1
                         else:
-                            if not code or not canonical_brand:
-                                _insert_product_row(
-                                    cur,
-                                    vals,
-                                    include_manual,
-                                    manual_c,
-                                    manual_n,
-                                    include_preparation,
-                                    preparation_type,
-                                    source_brand=source_brand,
-                                    has_source_brand=has_source_brand,
-                                )
-                                inserted += 1
-                                continue
-
-                            candidates = resolve_product_candidates(
-                                cur, code, canonical_brand, source_brand=source_brand, size=size
-                            )
-                            if len(candidates) == 0:
-                                _insert_product_row(
-                                    cur,
-                                    vals,
-                                    include_manual,
-                                    manual_c,
-                                    manual_n,
-                                    include_preparation,
-                                    preparation_type,
-                                    source_brand=source_brand,
-                                    has_source_brand=has_source_brand,
-                                )
-                                inserted += 1
-                            elif len(candidates) == 1:
-                                _update_product_row(
-                                    cur,
-                                    vals,
-                                    candidates[0][0],
-                                    include_manual,
-                                    manual_c,
-                                    manual_n,
-                                    include_preparation,
-                                    preparation_type,
-                                    source_brand=source_brand,
-                                    has_source_brand=has_source_brand,
-                                )
-                                updated += 1
-                            else:
-                                raise ValueError(
-                                    f"Phát hiện bản ghi trùng lặp mơ hồ cho code '{code}', brand '{canonical_brand}'. "
-                                    f"Hủy bỏ cập nhật để bảo toàn dữ liệu."
-                                )
-
-                else:
-                    parsed = []
-                    for r in rows:
-                        rule_type = _norm(r.get("rule_type")).upper()
-                        match_field = _norm(r.get("match_field")).lower()
-                        if rule_type not in {"CAM_NHAP", "PHU_LUC_II", "PHU_LUC_III", "TON_KHO"}:
-                            raise ValueError(f"rule_type không hợp lệ: {rule_type}")
-                        if match_field not in {"cas", "name", "code"}:
-                            raise ValueError(f"match_field không hợp lệ: {match_field}")
-                        priority_raw = _norm(r.get("priority")) or "100"
-                        is_active_raw = _norm(r.get("is_active")).lower()
-                        is_active = is_active_raw in {"1", "true", "yes", "y", "on"}
-                        parsed.append(
-                            {
-                                "rule_type": rule_type,
-                                "rule_label": _norm(r.get("rule_label")),
-                                "match_field": match_field,
-                                "match_value": _norm(r.get("match_value")),
-                                "priority": int(float(priority_raw)),
-                                "is_active": is_active,
-                                "note": _norm(r.get("note")),
-                            }
-                        )
-
-                    if mode == "replace_by_type":
-                        types_ = sorted({x["rule_type"] for x in parsed})
-                        cur.execute("DELETE FROM regulatory_rules WHERE rule_type = ANY(%s)", (types_,))
-                        deleted = cur.rowcount
-
-                    for r in parsed:
-                        if mode == "replace_by_type":
                             cur.execute(
                                 """
                                 INSERT INTO regulatory_rules (rule_type, rule_label, match_field, match_value, priority, is_active, note)
@@ -3429,35 +3270,6 @@ def admin_imports_apply():
                                 (r["rule_type"], r["rule_label"], r["match_field"], r["match_value"], r["priority"], r["is_active"], r["note"]),
                             )
                             inserted += 1
-                        else:
-                            cur.execute(
-                                """
-                                SELECT id FROM regulatory_rules
-                                WHERE rule_type=%s AND match_field=%s AND UPPER(TRIM(match_value))=UPPER(TRIM(%s))
-                                LIMIT 1
-                                """,
-                                (r["rule_type"], r["match_field"], r["match_value"]),
-                            )
-                            ex = cur.fetchone()
-                            if ex:
-                                cur.execute(
-                                    """
-                                    UPDATE regulatory_rules
-                                       SET rule_label=%s, match_value=%s, priority=%s, is_active=%s, note=%s, updated_at=NOW()
-                                     WHERE id=%s
-                                    """,
-                                    (r["rule_label"], r["match_value"], r["priority"], r["is_active"], r["note"], ex[0]),
-                                )
-                                updated += 1
-                            else:
-                                cur.execute(
-                                    """
-                                    INSERT INTO regulatory_rules (rule_type, rule_label, match_field, match_value, priority, is_active, note)
-                                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                                    """,
-                                    (r["rule_type"], r["rule_label"], r["match_field"], r["match_value"], r["priority"], r["is_active"], r["note"]),
-                                )
-                                inserted += 1
 
                 meta_payload = {"preview_token": token}
                 if ambiguous_count > 0:
@@ -3499,13 +3311,13 @@ def admin_imports_apply():
                         inserted_count=inserted,
                         updated_count=updated,
                         deleted_count=deleted,
-                        error_message=str(e),
+                        error_message="Import không thành công.",
                         created_by=actor,
                         meta={"preview_token": token},
                     )
         except Exception:
             pass
-        return redirect(url_for("admin_imports", err=f"Import failed: {e}"))
+        return redirect(url_for("admin_imports", err="Import không thành công. Kiểm tra dữ liệu quy tắc."))
     finally:
         conn.close()
 
@@ -3709,104 +3521,12 @@ def _upsert_single_regulatory_rule(cur, row: dict) -> tuple[str, str]:
     return "inserted", label
 
 
-def _delete_single_product(cur, row: dict) -> tuple[str, int]:
-    """Xóa sản phẩm theo brand + (code | cas | name); size tuỳ chọn để thu hẹp."""
-    raw_brand = _norm(row.get("brand"))
-    code = _norm(row.get("code"))
-    cas = _norm(row.get("cas"))
-    name = _norm(row.get("name"))
-    size = _norm(row.get("size"))
-
-    if not raw_brand:
-        raise ValueError("Trường brand là bắt buộc để xóa.")
-
-    gateway = load_brand_gateway(cur)
-    res = gateway.resolve(raw_brand)
-    brand = res.canonical_brand if res.is_valid and res.canonical_brand else raw_brand
-
-    if not code and not cas and not name:
-        raise ValueError(
-            "Cần điền brand và ít nhất một trong: code, CAS hoặc name. "
-            "Sản phẩm legacy (vd. CẤM NHẬP không có code) có thể xóa bằng brand + CAS."
-        )
-
-    size_clause = " AND UPPER(TRIM(COALESCE(size, ''))) = UPPER(TRIM(%s))" if size else ""
-    size_params = (size,) if size else ()
-
-    if code:
-        cur.execute(
-            f"""
-            DELETE FROM products
-            WHERE UPPER(TRIM(brand)) = UPPER(TRIM(%s))
-              AND UPPER(TRIM(code)) = UPPER(TRIM(%s))
-              {size_clause}
-            """,
-            (brand, code) + size_params,
-        )
-        label = f"{code} / {brand}" + (f" / {size}" if size else "")
-    elif cas:
-        name_clause = " AND UPPER(TRIM(name)) = UPPER(TRIM(%s))" if name else ""
-        name_params = (name,) if name else ()
-        cur.execute(
-            f"""
-            DELETE FROM products
-            WHERE UPPER(TRIM(brand)) = UPPER(TRIM(%s))
-              AND UPPER(TRIM(cas)) = UPPER(TRIM(%s))
-              {name_clause}
-              {size_clause}
-            """,
-            (brand, cas) + name_params + size_params,
-        )
-        label = f"{brand} / CAS {cas}" + (f" / {name}" if name else "") + (f" / {size}" if size else "")
-    else:
-        cur.execute(
-            f"""
-            DELETE FROM products
-            WHERE UPPER(TRIM(brand)) = UPPER(TRIM(%s))
-              AND UPPER(TRIM(name)) = UPPER(TRIM(%s))
-              {size_clause}
-            """,
-            (brand, name) + size_params,
-        )
-        label = f"{brand} / {name}" + (f" / {size}" if size else "")
-
-    deleted = cur.rowcount
-    if deleted <= 0:
-        raise ValueError(
-            "Không tìm thấy sản phẩm để xóa. Kiểm tra brand"
-            + (" + code" if code else " + CAS" if cas else " + name")
-            + (" + size" if size else "")
-            + ". Với dòng không có code, thử brand + CAS (vd. CẤM NHẬP + 634-90-2)."
-        )
-    return label, deleted
+def _delete_single_product(cur, row):
+    return import_quick_delete.apply(cur, 'product', row)
 
 
-def _delete_single_regulatory_rule(cur, row: dict) -> tuple[str, int]:
-    """Xóa quy tắc theo rule_type + match_field + match_value."""
-    rule_type = _norm(row.get("rule_type")).upper()
-    match_field = _norm(row.get("match_field")).lower()
-    match_value = _norm(row.get("match_value"))
-
-    if rule_type not in {"CAM_NHAP", "PHU_LUC_II", "PHU_LUC_III", "TON_KHO"}:
-        raise ValueError(f"rule_type không hợp lệ: {rule_type}")
-    if match_field not in {"cas", "name", "code"}:
-        raise ValueError(f"match_field không hợp lệ: {match_field}")
-    if not match_value:
-        raise ValueError("match_value là bắt buộc để xóa.")
-
-    cur.execute(
-        """
-        DELETE FROM regulatory_rules
-        WHERE rule_type=%s AND match_field=%s AND UPPER(TRIM(match_value))=UPPER(TRIM(%s))
-        """,
-        (rule_type, match_field, match_value),
-    )
-    deleted = cur.rowcount
-    if deleted <= 0:
-        raise ValueError("Không tìm thấy quy tắc để xóa. Kiểm tra rule_type, match_field và match_value.")
-
-    label = f"{rule_type} ({match_field}={match_value})"
-    return label, deleted
+def _delete_single_regulatory_rule(cur, row):
+    return import_quick_delete.apply(cur, 'rule', row)
 
 
 def _quick_edit_json_response(ok: bool, message: str, action: str = "", label: str = "", status: int = 200):
@@ -3869,7 +3589,7 @@ def admin_imports_quick_product():
     except ValueError as e:
         return _quick_edit_json_response(False, str(e), status=400)
     except Exception as e:
-        return _quick_edit_json_response(False, f"Lỗi: {e}", status=500)
+        return _quick_edit_json_response(False, "Lỗi xử lý dữ liệu. Hãy kiểm tra và thử lại.", status=500)
     finally:
         conn.close()
 
@@ -3888,6 +3608,7 @@ def admin_imports_quick_rule():
     try:
         with conn:
             with conn.cursor() as cur:
+                acquire_products_import_lock(cur)
                 action, label = _upsert_single_regulatory_rule(cur, request.values)
                 inserted = 1 if action == "inserted" else 0
                 updated = 1 if action == "updated" else 0
@@ -3914,7 +3635,7 @@ def admin_imports_quick_rule():
     except ValueError as e:
         return _quick_edit_json_response(False, str(e), status=400)
     except Exception as e:
-        return _quick_edit_json_response(False, f"Lỗi: {e}", status=500)
+        return _quick_edit_json_response(False, "Lỗi xử lý dữ liệu. Hãy kiểm tra và thử lại.", status=500)
     finally:
         conn.close()
 
@@ -3959,7 +3680,7 @@ def admin_imports_quick_product_delete():
     except ValueError as e:
         return _quick_edit_json_response(False, str(e), status=400)
     except Exception as e:
-        return _quick_edit_json_response(False, f"Lỗi: {e}", status=500)
+        return _quick_edit_json_response(False, "Lỗi xử lý dữ liệu. Hãy kiểm tra và thử lại.", status=500)
     finally:
         conn.close()
 
@@ -3978,6 +3699,7 @@ def admin_imports_quick_rule_delete():
     try:
         with conn:
             with conn.cursor() as cur:
+                acquire_products_import_lock(cur)
                 label, deleted = _delete_single_regulatory_rule(cur, request.values)
                 _insert_import_job(
                     cur,
@@ -4001,7 +3723,7 @@ def admin_imports_quick_rule_delete():
     except ValueError as e:
         return _quick_edit_json_response(False, str(e), status=400)
     except Exception as e:
-        return _quick_edit_json_response(False, f"Lỗi: {e}", status=500)
+        return _quick_edit_json_response(False, "Lỗi xử lý dữ liệu. Hãy kiểm tra và thử lại.", status=500)
     finally:
         conn.close()
 
@@ -6486,6 +6208,8 @@ def results_export():
     return app.response_class('\ufeff' + header + '\n' + content, mimetype='text/tab-separated-values',
                               headers={'Content-Disposition': 'attachment; filename="search-results.tsv"'})
 
+
+admin_import_center.register(app, _require_admin_page, _current_actor)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5001"))

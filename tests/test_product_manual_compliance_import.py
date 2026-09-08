@@ -782,7 +782,7 @@ class ManualComplianceImportIntegrationTests(unittest.TestCase):
         self.assertEqual(preparation_type, "MIXTURE")
         self.assertEqual(name, "Reloaded prep")
 
-    def test_preview_rejects_partial_headers(self):
+    def test_legacy_preview_requires_csrf(self):
         bio = _xlsx_bytes(
             ["brand", "code", "Compliance"],
             [[self.BRAND_A, "CURSOR-PARTIAL", "Được bán"]],
@@ -806,8 +806,7 @@ class ManualComplianceImportIntegrationTests(unittest.TestCase):
                     },
                     content_type="multipart/form-data",
                 )
-        self.assertEqual(response.status_code, 302)
-        self.assertIn("Compliance_Note", response.headers.get("Location", ""))
+        self.assertEqual(response.status_code, 400)
 
 
 if __name__ == "__main__":

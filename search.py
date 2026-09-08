@@ -177,10 +177,11 @@ QUOTE_MAPPING_FIELDS = {
     "Size": ("Quy cách", False),
     "Note": ("Ghi chú hàng hóa", False),
     "Compliance_Combined": ("Ghi chú quản lý", False),
-    # Always identify the price column so exports for teams without VIEW_PRICE
-    # can actively clear every product-row price cell in the uploaded template.
+    # Full-access exports still use the approved workbook mapping. Restricted
+    # exports are rebuilt as a clean package and never open the stored template.
     "Unit_Price_Value": ("Đơn giá", True),
 }
+RESULT_QUOTE_EXPORT_SOURCES = frozenset({"SEARCH", "FIND_CODE", "ADVANCED_SEARCH"})
 
 
 class QuoteTemplateError(ValueError):
@@ -6034,7 +6035,7 @@ def _quote_context(conn):
         if row is None:
             raise QuoteTemplateError("Team quản trị viên chọn không tồn tại hoặc không hoạt động.")
         grants = frozenset(team_permissions.validate_permissions(row[0]))
-        if "EXPORT" not in grants:
+        if not team_permissions.allows("EXPORT", grants):
             raise QuoteTemplateError("Team quản trị viên chọn chưa được cấp quyền xuất báo giá.")
     elif is_admin:
         team_id = None
@@ -6292,7 +6293,28 @@ def _create_quote_workbook(conn, *, selections=None, items=None, context=None):
     products = (_quote_export_items_to_products(conn, items, context)
                 if items is not None else _quote_export_products(conn, selections, context))
     visible_products = team_permissions.redact(products, context["grants"])
-    exported = export_quick_quote_workbook(template["content"], visible_products, template.get("mapping"))
+    if all(team_permissions.allows(key, context["grants"]) for key in team_permissions.FIELDS):
+        exported = export_quick_quote_workbook(
+            template["content"], visible_products, template.get("mapping")
+        )
+    else:
+        # A stored template is an opaque OOXML package. Clearing mapped cells
+        # cannot remove stale literals, hidden sheets or orphaned strings.
+        # Restricted exports therefore use a new package with allowed fields only.
+        wb = Workbook()
+        sheet = wb.active
+        sheet.title = "Báo giá"
+        columns = [
+            field for key, field in team_permissions.FIELDS.items()
+            if team_permissions.allows(key, context["grants"])
+        ]
+        sheet.append([label for _, label in columns])
+        for product in visible_products:
+            sheet.append([_safe_transfer_cell(product.get(key, "")) for key, _ in columns])
+        output = BytesIO()
+        wb.save(output)
+        wb.close()
+        exported = output.getvalue()
     return exported, _quote_export_download_name(template["filename"]), template
 
 
@@ -6377,6 +6399,9 @@ def quote_assistant_workbook_export():
 def results_quote_export():
     if not session_security.verify_csrf_token(request.headers.get("X-CSRF-Token", "")):
         return _quote_json_error("Yêu cầu không hợp lệ.", 400)
+    source = _quote_text(request.form.get("source"), max_len=32).upper()
+    if source not in RESULT_QUOTE_EXPORT_SOURCES:
+        return _quote_json_error("Nguồn kết quả không hợp lệ.", 400)
     try:
         selections = _quote_export_parse_selections(request.form.get("selections") or "")
     except OverflowError as e:
@@ -6386,6 +6411,8 @@ def results_quote_export():
     conn = get_connection()
     try:
         context = _quote_context(conn)
+        if not team_permissions.allows(source, context["grants"]):
+            return _quote_json_error("Team không có quyền với nguồn kết quả này.", 403)
         exported, download_name, _template = _create_quote_workbook(
             conn, selections=selections, context=context
         )

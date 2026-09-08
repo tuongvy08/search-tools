@@ -13,7 +13,6 @@ import team_permissions as permissions
 from pg_temp_db import (create_full_schema_temp_db, drop_temp_db, probe_postgres_reachable,
                         apply_brand_master_and_currency_migrations, apply_dynamic_brand_currency_migration)
 from test_quote_workbook_export import make_workbook
-import quote_workbook_export as qwe
 
 
 class RegistryTests(unittest.TestCase):
@@ -127,12 +126,18 @@ class TeamCapabilitiesPgTests(unittest.TestCase):
                 for forbidden in ('Unit_Price','Currency_Rate','123-45-6','SecretCompliance','compliance'):
                     self.assertNotIn(forbidden,raw)
             self.assertEqual(self.match(client).status_code,403)
-        for action in ('copy','export'):
-            response = self.client.post('/api/results/'+action, json={'source':'SEARCH','rows':[{
-                'Name':'Name', 'Cas':'123-45-6','Unit_Price':'987654321','Compliance':'CẤM NHẬP'}]}, headers={'X-CSRF-Token':'csrf-test'})
-            self.assertEqual(response.status_code,200)
-            self.assertNotIn('987654321',response.get_data(as_text=True))
-            self.assertNotIn('123-45-6',response.get_data(as_text=True))
+        payload = {'source':'SEARCH','rows':[{
+            'Name':'Name', 'Cas':'123-45-6','Unit_Price':'987654321','Compliance':'CẤM NHẬP'}]}
+        copied = self.client.post('/api/results/copy', json=payload,
+                                  headers={'X-CSRF-Token':'csrf-test'})
+        self.assertEqual(copied.status_code,200)
+        self.assertNotIn('987654321',copied.get_data(as_text=True))
+        self.assertNotIn('123-45-6',copied.get_data(as_text=True))
+        exported = self.client.post('/api/results/export', json=payload,
+                                    headers={'X-CSRF-Token':'csrf-test'})
+        self.assertEqual(exported.status_code,403)
+        self.assertNotIn('987654321',exported.get_data(as_text=True))
+        self.assertNotIn('123-45-6',exported.get_data(as_text=True))
 
     def test_feature_routes_fail_closed_and_source_cannot_bypass(self):
         self.set_grants([])
@@ -172,39 +177,35 @@ class TeamCapabilitiesPgTests(unittest.TestCase):
         self.assertNotIn('123-45-6',response.get_data(as_text=True))
         response=self.client.post('/api/quote-assistant/workbook/export',data={
             'selections':json.dumps([{'product_id':self.product}])},headers={'X-CSRF-Token':'csrf-test'})
-        self.assertEqual(response.status_code,200,response.data[:200])
-        entries=qwe._read_valid_xlsx_entries(response.data)
-        shared=qwe._read_shared_strings(entries)
-        _workbook_path,sheet_path=qwe._find_worksheet_path(entries,'BG')
-        sheet=qwe._parse_xml(entries[sheet_path])
-        values=' '.join(qwe._cell_text(cell,shared) for cell in sheet.iter() if cell.tag.endswith('}c'))
-        self.assertIn('ITEM-X',values)
+        # Deny before product lookup: success/failure must not reveal hidden compliance.
+        self.assertEqual(response.status_code,403,response.data[:200])
+        values=response.get_data(as_text=True)
         for forbidden in ('HiddenName','123-45-6','SecretCompliance','SecretNote'):
             self.assertNotIn(forbidden,values)
 
-    def test_search_quote_export_without_view_price_keeps_template_and_clears_price(self):
+    def test_search_quote_export_without_view_price_uses_clean_allowed_columns(self):
         self.set_grants(set(permissions.LEGACY_PERMISSIONS)-{'VIEW_PRICE','QUICK_QUOTE'})
-        response=self.client.post('/api/results/quote-export',data={
+        response=self.client.post('/api/results/quote-export',data={'source':'SEARCH',
             'selections':json.dumps([{'product_id':self.product}])},headers={'X-CSRF-Token':'csrf-test'})
         self.assertEqual(response.status_code,200,response.data[:200])
-        entries=qwe._read_valid_xlsx_entries(response.data)
-        shared=qwe._read_shared_strings(entries)
-        _workbook_path,sheet_path=qwe._find_worksheet_path(entries,'BG')
-        sheet=qwe._parse_xml(entries[sheet_path])
-        self.assertEqual(qwe._cell_text(qwe._get_cell(sheet,'P17'),shared),'')
-        self.assertEqual(qwe._cell_text(qwe._get_cell(sheet,'C17'),shared),'ITEM-X')
+        check=load_workbook(io.BytesIO(response.data),data_only=False)
+        self.assertEqual(check.sheetnames,['Báo giá'])
+        headers=[cell.value for cell in check['Báo giá'][1]]
+        self.assertIn('Code',headers)
+        self.assertNotIn('Unit Price',headers)
+        self.assertEqual(check['Báo giá'].cell(2,headers.index('Code')+1).value,'ITEM-X')
+        check.close()
 
         # Price validity is not an oracle: missing-price and valid-price rows
-        # both export successfully with the exact same blank price cell.
-        missing=self.client.post('/api/results/quote-export',data={
+        # both export successfully without a price column.
+        missing=self.client.post('/api/results/quote-export',data={'source':'SEARCH',
             'selections':json.dumps([{'product_id':self.no_price_product}])},headers={'X-CSRF-Token':'csrf-test'})
         self.assertEqual(missing.status_code,200,missing.data[:200])
-        missing_entries=qwe._read_valid_xlsx_entries(missing.data)
-        missing_shared=qwe._read_shared_strings(missing_entries)
-        _workbook_path,missing_sheet_path=qwe._find_worksheet_path(missing_entries,'BG')
-        missing_sheet=qwe._parse_xml(missing_entries[missing_sheet_path])
-        self.assertEqual(qwe._cell_text(qwe._get_cell(missing_sheet,'P17'),missing_shared),'')
-        self.assertEqual(qwe._cell_text(qwe._get_cell(missing_sheet,'C17'),missing_shared),'ITEM-NO-PRICE')
+        missing_check=load_workbook(io.BytesIO(missing.data),data_only=False)
+        missing_headers=[cell.value for cell in missing_check['Báo giá'][1]]
+        self.assertNotIn('Unit Price',missing_headers)
+        self.assertEqual(missing_check['Báo giá'].cell(2,missing_headers.index('Code')+1).value,'ITEM-NO-PRICE')
+        missing_check.close()
 
     def test_hidden_compliance_reasons_and_fallback_counts_are_generic(self):
         self.set_grants(set(permissions.LEGACY_PERMISSIONS)-{'VIEW_COMPLIANCE','VIEW_COMPLIANCE_NOTE'})

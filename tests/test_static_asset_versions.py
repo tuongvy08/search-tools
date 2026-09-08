@@ -7,14 +7,21 @@ from urllib.parse import parse_qs, urlsplit
 from jinja2 import Environment, nodes
 
 ROOT = Path(__file__).resolve().parents[1]
-RELEASE_VERSION = '20260908c1'
+RELEASE_VERSION = '20260908c2'
 CAPABILITY_ASSETS = {
     'script.js', 'quick_quote.js', 'styles.css',
     'team_permissions.js', 'admin_team_permissions.js', 'admin_teams.css',
+    'quote_export_context.js', 'admin_quote_templates.js',
 }
 
 
 class StaticAssetVersionTests(unittest.TestCase):
+    def test_quote_export_frontend_sends_the_active_result_source(self):
+        permissions_js = (ROOT / 'static' / 'team_permissions.js').read_text(encoding='utf-8')
+        search_js = (ROOT / 'static' / 'script.js').read_text(encoding='utf-8')
+        self.assertIn("body.append('source', String(source || ''))", permissions_js)
+        self.assertIn('resultSource,', search_js)
+
     def test_every_template_load_site_uses_current_release(self):
         references = {asset: [] for asset in CAPABILITY_ASSETS}
         env = Environment()

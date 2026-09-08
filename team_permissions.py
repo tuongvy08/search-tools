@@ -25,6 +25,9 @@ DEPENDENCIES = {
     'QUICK_QUOTE': ('VIEW_PRICE',),
     'CHECK_LICENSE': ('SEARCH_BY_CAS', 'VIEW_COMPLIANCE'),
     'ADVANCED_SEARCH': ('SEARCH_BY_CAS',),
+    # Export eligibility depends on live compliance state. Without this field
+    # grant, a product-specific success/failure becomes a compliance oracle.
+    'EXPORT': ('VIEW_COMPLIANCE',),
 }
 ROUTES = {
     'home': (), 'search_products': ('SEARCH',),
@@ -89,9 +92,12 @@ def current_permissions():
     return g.team_permissions
 
 
-def can(key):
-    grants = current_permissions()
+def allows(key, grants):
     return key in grants and all(dep in grants for dep in DEPENDENCIES.get(key, ()))
+
+
+def can(key):
+    return allows(key, current_permissions())
 
 
 def redact(value, grants=None):

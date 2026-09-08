@@ -898,7 +898,11 @@ document.getElementById('btnExportSelected')?.addEventListener('click', async ()
     setOperationStatus('Đang tạo báo giá…', 'loading');
     try {
         const context = window.QuoteExportContext ? window.QuoteExportContext.params() : {};
-        const result = await TeamPermissions.quoteExport(rows.map((row) => ({ product_id: Number(row.product_id) })), context);
+        const result = await TeamPermissions.quoteExport(
+            rows.map((row) => ({ product_id: Number(row.product_id) })),
+            resultSource,
+            context
+        );
         const link = document.createElement('a');
         const url = URL.createObjectURL(result.blob);
         const match = result.disposition.match(/filename="?([^";]+)"?/i);

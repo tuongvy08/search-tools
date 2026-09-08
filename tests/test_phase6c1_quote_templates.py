@@ -10,6 +10,7 @@ import psycopg2
 from openpyxl import load_workbook
 
 import search
+import quote_workbook_export as qwe
 from auth_test_helpers import start_auth_db_patch
 from pg_temp_db import create_full_schema_temp_db, drop_temp_db, probe_postgres_reachable
 from test_quote_workbook_export import make_workbook, product
@@ -142,9 +143,9 @@ class Phase6C1SharedBoundaryTests(unittest.TestCase):
         client = self._client()
         result = (b"PK-export", "quote.xlsx", {"id": 1})
         with mock.patch.object(search, "get_connection", return_value=mock.MagicMock()), \
-             mock.patch.object(search, "_quote_context", return_value={"is_admin": True, "team_id": None, "template_id": None, "grants": frozenset()}), \
+             mock.patch.object(search, "_quote_context", return_value={"is_admin": True, "team_id": None, "template_id": None, "grants": frozenset(search.team_permissions.REGISTRY)}), \
              mock.patch.object(search, "_create_quote_workbook", return_value=result) as builder:
-            a = client.post("/api/results/quote-export", data={"selections": json.dumps([
+            a = client.post("/api/results/quote-export", data={"source": "SEARCH", "selections": json.dumps([
                 {"product_id": 9}, {"product_id": 3}
             ])},
                             headers={"X-CSRF-Token": "csrf-test"})
@@ -156,6 +157,88 @@ class Phase6C1SharedBoundaryTests(unittest.TestCase):
         self.assertEqual(builder.call_args_list[0].kwargs["selections"], [
             {"ord": 1, "product_id": 9}, {"ord": 2, "product_id": 3}
         ])
+
+    def test_search_export_requires_the_claimed_source_capability(self):
+        client = self._client()
+        context = {"is_admin": False, "team_id": 7, "template_id": None,
+                   "grants": frozenset({"EXPORT", "VIEW_COMPLIANCE"})}
+        with mock.patch.object(search, "get_connection", return_value=mock.MagicMock()), \
+             mock.patch.object(search, "_quote_context", return_value=context), \
+             mock.patch.object(search, "_create_quote_workbook") as builder:
+            response = client.post("/api/results/quote-export", data={
+                "source": "SEARCH", "selections": json.dumps([{"product_id": 9}])
+            }, headers={"X-CSRF-Token": "csrf-test"})
+        self.assertEqual(response.status_code, 403)
+        builder.assert_not_called()
+
+    def test_search_export_rejects_missing_or_unknown_source_before_database_access(self):
+        client = self._client()
+        with mock.patch.object(search, "get_connection") as get_connection:
+            for source in (None, "", "QUICK_QUOTE", "NOT_A_SOURCE"):
+                data = {"selections": json.dumps([{"product_id": 9}])}
+                if source is not None:
+                    data["source"] = source
+                with self.subTest(source=source):
+                    response = client.post(
+                        "/api/results/quote-export", data=data,
+                        headers={"X-CSRF-Token": "csrf-test"},
+                    )
+                    self.assertEqual(response.status_code, 400)
+                    self.assertIn("Nguồn kết quả", response.get_json()["error"])
+        get_connection.assert_not_called()
+
+    def test_export_requires_visible_compliance_to_avoid_status_oracle(self):
+        self.assertFalse(search.team_permissions.allows("EXPORT", {"EXPORT"}))
+        self.assertTrue(search.team_permissions.allows(
+            "EXPORT", {"EXPORT", "VIEW_COMPLIANCE"}
+        ))
+
+    def test_restricted_export_uses_clean_workbook_without_template_stale_data(self):
+        template = {
+            "id": 1, "filename": "quote.xlsx", "content": b"PK-STALE-PRICE-SECRET",
+            "mapping": search._quote_template_mapping_snapshot(),
+        }
+        products = [{
+            "Name": "HIDDEN-NAME-SECRET", "Code": "ITEM-X", "Unit_Price": "999,000",
+            "Unit_Price_Value": 999000, "Compliance": "Được bán",
+        }]
+        context = {"is_admin": False, "team_id": 7, "template_id": None,
+                   "grants": frozenset({"EXPORT", "VIEW_CODE", "VIEW_COMPLIANCE"})}
+        with mock.patch.object(search, "_get_active_quote_template", return_value=template), \
+             mock.patch.object(search, "_quote_export_products", return_value=products):
+            exported, _name, _template = search._create_quote_workbook(
+                mock.MagicMock(), selections=[{"ord": 1, "product_id": 9}], context=context
+            )
+        check = load_workbook(io.BytesIO(exported), data_only=False)
+        self.assertEqual(check.sheetnames, ["Báo giá"])
+        self.assertEqual(
+            [cell.value for cell in check["Báo giá"][1]],
+            ["Code", "Tình trạng quản lý"],
+        )
+        self.assertEqual(
+            [cell.value for cell in check["Báo giá"][2]], ["ITEM-X", "Được bán"]
+        )
+        check.close()
+        package_text = b"\n".join(qwe._read_valid_xlsx_entries(exported).values())
+        self.assertNotIn(b"STALE-PRICE-SECRET", package_text)
+        self.assertNotIn(b"HIDDEN-NAME-SECRET", package_text)
+
+    def test_fully_authorized_export_keeps_the_approved_template(self):
+        template = {
+            "id": 1, "filename": "approved.xlsx", "content": b"PK-APPROVED-TEMPLATE",
+            "mapping": search._quote_template_mapping_snapshot(),
+        }
+        context = {"is_admin": True, "team_id": None, "template_id": None,
+                   "grants": frozenset(search.team_permissions.REGISTRY)}
+        products = [{"Code": "ITEM-X", "Compliance": "Được bán"}]
+        with mock.patch.object(search, "_get_active_quote_template", return_value=template), \
+             mock.patch.object(search, "_quote_export_products", return_value=products), \
+             mock.patch.object(search, "export_quick_quote_workbook", return_value=b"PK-OUT") as engine:
+            exported, _name, _template = search._create_quote_workbook(
+                mock.MagicMock(), selections=[{"ord": 1, "product_id": 9}], context=context
+            )
+        self.assertEqual(exported, b"PK-OUT")
+        engine.assert_called_once_with(template["content"], products, template["mapping"])
 
     def test_staff_context_spoofing_is_rejected(self):
         with search.app.test_request_context("/?team_id=999&template_id=999"):

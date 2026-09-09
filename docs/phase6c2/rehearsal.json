@@ -1,0 +1,16 @@
+{
+  "migration_twice_via_psql": true,
+  "rows": 200000,
+  "workbook_bytes": 5062266,
+  "preview_seconds": 16.42,
+  "apply_seconds": 3.47,
+  "inserted": 200000,
+  "upsert_preview_seconds": 19.67,
+  "upsert_apply_seconds": 6.59,
+  "updated": 200000,
+  "final_product_count": 200000,
+  "remaining_staged_rows": 0,
+  "remaining_uuid_uploads": 0,
+  "python_peak_rss_mb": 74.4,
+  "temporary_db_removed": true
+}

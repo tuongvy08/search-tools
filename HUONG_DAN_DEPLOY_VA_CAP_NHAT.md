@@ -266,3 +266,11 @@ psql "$DATABASE_URL" -c "SELECT 1;"
 - Chạy thử local + Docker Postgres: **`HUONG_DAN_LOCAL.md`**
 - RBAC, import, team: **`HUONG_DAN_CAP_NHAT_VA_RBAC.md`**
 - Biến môi trường mẫu: **`.env.example`**
+
+## Phase 6C2 — Import Center và worker
+
+Trước khi triển khai, đọc [runbook Import Center](docs/phase6c2/OPERATIONS.md).
+Migration mới: `sql/migration_024_admin_import_center.sql`. Cần worker systemd
+riêng và thư mục upload dùng chung với Gunicorn; xem `deploy/` và `.env.example`.
+Không suy ra DATABASE_URL đang chạy từ `/opt/search-tools-pg/.env` vì hai nguồn
+đã từng trỏ đến database khác nhau. Chỉ triển khai vào môi trường đã được duyệt.

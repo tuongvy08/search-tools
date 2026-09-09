@@ -1,0 +1,33 @@
+[Unit]
+Description=Search Tools product import worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=searchtools
+Group=searchtools
+WorkingDirectory=/opt/search-tools-pg
+# MUST be the same reviewed environment source as the web service.
+# Do not assume /opt/search-tools-pg/.env matches the running application's DB.
+EnvironmentFile=/etc/search-tools/runtime.env
+Environment=PGCONNECT_TIMEOUT=10
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/search-tools-pg/.venv/bin/python scripts/import_worker.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/search-tools/imports
+MemoryMax=1G
+CPUQuota=100%
+LogRateLimitIntervalSec=60
+LogRateLimitBurst=10
+
+[Install]
+WantedBy=multi-user.target

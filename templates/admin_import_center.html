@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Trung tâm nhập sản phẩm — Search Tools</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_import_center.css', v='20260908c2') }}">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous">
+<script defer src="{{ url_for('static',filename='admin_import_center.js',v='20260908c2') }}"></script>
+</head>
+<body>
+{% include '_user_nav.html' %}
+{% set labels={'queued':'Đang chờ','running':'Đang xử lý','completed':'Hoàn tất','failed':'Thất bại','cancelled':'Đã hủy'} %}
+{% set modes={'append':'Chỉ thêm mới','upsert':'Thêm / cập nhật','replace_by_brand':'Thay thế theo brand trong file'} %}
+<main class="import-main">
+<div class="heading"><div><p class="eyebrow">QUẢN TRỊ · DỮ LIỆU SẢN PHẨM</p><h1>Trung tâm nhập sản phẩm</h1><p class="muted">Tải workbook, kiểm tra phạm vi, rồi chủ động xác nhận ghi dữ liệu.</p></div>
+<a class="secondary" href="{{ url_for('admin_import_tools') }}">Dữ liệu lẻ & quy tắc ↗</a></div>
+{% if error %}<div class="alert error" role="alert">{{ error }}</div>{% endif %}
+{% if not job %}
+<section class="upload-section" aria-labelledby="upload-title">
+<div><span class="step">01</span><h2 id="upload-title">Bắt đầu với workbook</h2><p class="muted">Xem trước không thay đổi sản phẩm.<br>Worker xử lý nền; bạn có thể rời trang rồi quay lại.</p><a href="/admin/templates/products.xlsx">Tải file Excel mẫu ↓</a></div>
+<form method="post" action="{{ url_for('import_upload') }}" enctype="multipart/form-data" data-upload>
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="submission_key" value="{{ submission_key }}">
+<label class="file-zone" for="workbook"><strong>Chọn workbook sản phẩm</strong><span>Một trang tính · .xlsx · tối đa {{ max_mb }} MB</span><input id="workbook" type="file" name="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required></label>
+<label for="mode">Cách xử lý dữ liệu</label><select id="mode" name="mode"><option value="upsert">Thêm / cập nhật sản phẩm</option><option value="append">Chỉ thêm dòng mới</option><option value="replace_by_brand">Thay thế brand / nguồn brand có trong file</option></select>
+<p class="small muted">Giữ tên cột tiếng Anh trong mẫu. Thay công thức bằng giá trị; bỏ macro và liên kết ngoài. Brand mới được tạo khi áp dụng, chưa gán tiền tệ.</p>
+<button type="submit">Tải lên & chuẩn bị xem trước</button><p class="small muted" data-upload-status role="status"></p>
+</form></section>
+<section class="history" aria-labelledby="history-title"><div class="section-heading"><h2 id="history-title">Tác vụ gần đây</h2><a href="{{ url_for('admin_imports') }}">Làm mới ↻</a></div>
+{% if not jobs %}<div class="empty"><strong>Chưa có tác vụ nhập sản phẩm</strong><p class="muted">Workbook đầu tiên sẽ xuất hiện ở đây cùng tiến độ và kết quả xử lý.</p></div>{% else %}
+<div class="table-scroll" tabindex="0" aria-label="Danh sách tác vụ"><table><thead><tr><th>Workbook / người tải</th><th>Chế độ</th><th>Trạng thái</th><th>Số dòng</th><th>Thời gian</th></tr></thead><tbody>
+{% for j in jobs %}<tr><td><a href="{{ url_for('import_detail',job_id=j.id) }}">{{ j.filename }}</a><span class="small muted block">{{ j.actor }}</span></td><td>{{ modes[j.mode] }}</td><td><span class="status {{ j.status }}">{{ labels[j.status] }}</span><span class="small muted block">{{ 'Xem trước' if j.phase=='preview' else 'Ghi dữ liệu' }}</span></td><td>{{ '{:,}'.format(j.row_count) }}</td><td class="small">{{ j.created_at.strftime('%d/%m/%Y %H:%M UTC') }}</td></tr>{% endfor %}
+</tbody></table></div>{% endif %}</section>
+{% else %}
+<a class="back" href="{{ url_for('admin_imports') }}">← Tất cả tác vụ</a>
+<section class="job-summary" data-job-status="{{ job.status }}" data-poll-url="{{ url_for('import_status',job_id=job.id) }}">
+<div class="section-heading"><h2>{{ job.filename }}</h2><span class="status {{ job.status }}">{{ labels[job.status] }} · {{ 'Xem trước' if job.phase=='preview' else 'Ghi dữ liệu' }}</span></div>
+<p class="muted">{{ modes[job.mode] }} · {{ job.actor }} · {{ job.created_at.strftime('%d/%m/%Y %H:%M UTC') }}</p>
+{% if job.status in ['queued','running'] %}<p role="status" data-progress-text>{{ '{:,}'.format(job.processed_count) }} dòng đã xử lý. Trang tự cập nhật khi có kết quả.</p><progress aria-label="Tiến độ xử lý" {% if job.row_count %}max="{{ job.row_count }}" value="{{ job.processed_count }}"{% endif %}></progress><p class="small muted" data-poll-message>Nếu đang chờ lâu, kiểm tra dịch vụ import worker.</p>{% endif %}
+<dl class="metrics"><div><dt>Dòng hợp lệ</dt><dd>{{ '{:,}'.format(job.row_count) }}</dd></div><div><dt>Đã thêm</dt><dd>{{ '{:,}'.format(job.inserted_count) }}</dd></div><div><dt>Đã cập nhật</dt><dd>{{ '{:,}'.format(job.updated_count) }}</dd></div><div><dt>Đã xóa</dt><dd>{{ '{:,}'.format(job.deleted_count) }}</dd></div><div><dt>Dòng trống bỏ qua</dt><dd>{{ '{:,}'.format(job.skipped_count) }}</dd></div></dl>
+<p class="small muted">Bắt đầu: {{ job.started_at or '—' }} · Kết thúc: {{ job.finished_at or '—' }}<br>Tệp hết hạn: {{ job.expires_at }}{% if job.purged_at %} · Đã dọn tệp{% endif %}</p>
+{% for err in job.errors %}<p class="alert error" role="alert">{{ err }}</p>{% endfor %}
+{% if job.error_count %}<p class="small muted">{{ job.error_count }} lỗi được ghi nhận. Hệ thống dừng ở lỗi đầu tiên; không áp dụng một phần workbook.</p>{% endif %}
+{% if job.status in ['queued','running'] %}<form method="post" action="{{ url_for('import_control',job_id=job.id,action='cancel') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="secondary" {% if job.cancel_requested %}disabled{% endif %}>{{ 'Đang yêu cầu hủy…' if job.cancel_requested else 'Hủy tác vụ' }}</button></form>{% endif %}
+</section>
+{% if job.preview_ready and job.preview %}{% set p=job.preview %}
+<section class="preview" aria-labelledby="preview-title"><span class="step">02</span><h2 id="preview-title">Kiểm tra trước khi ghi</h2>
+<p><strong>{{ '{:,}'.format(p.inserted) }}</strong> dòng sẽ thêm · <strong>{{ '{:,}'.format(p.updated) }}</strong> dòng sẽ cập nhật · <strong>{{ '{:,}'.format(p.deleted) }}</strong> dòng sẽ xóa.</p>
+{% if p.new_brands %}<div class="alert notice"><strong>Brand mới: {{ p.new_brands|join(', ') }}</strong><p>Chỉ được tạo khi ghi dữ liệu. Chưa gán tiền tệ hoặc tỷ giá; chưa cấp quyền cho team. Sau khi hoàn tất, <a href="{{ url_for('admin_exchange_rates') }}">gán tiền tệ trong Tỷ giá</a>.</p></div>{% endif %}
+{% if p.scopes %}<h3>Phạm vi thay thế chính xác</h3><ul class="scopes">{% for scope in p.scopes %}<li><strong>{{ scope.brand }}</strong><span>Nguồn: {{ scope.sources|join(', ') }}</span><b>{{ '{:,}'.format(scope.count) }} dòng sẽ xóa</b></li>{% endfor %}</ul>{% endif %}
+<h3>Mẫu dữ liệu · tối đa 10 dòng</h3><div class="table-scroll" tabindex="0" aria-label="Mẫu sản phẩm"><table><thead><tr><th>Mã</th><th>Tên sản phẩm</th><th>Brand</th><th>Nguồn brand</th><th>Quy cách</th><th>Giá gốc</th></tr></thead><tbody>{% for r in p.sample %}<tr><td>{{ r.code or '—' }}</td><td>{{ r.name or '—' }}</td><td>{{ r.brand }}</td><td>{{ r.source_brand }}</td><td>{{ r.size or '—' }}</td><td>{{ r.price or '—' }}</td></tr>{% endfor %}</tbody></table></div>
+{% if job.mode=='replace_by_brand' %}<details class="confirmation"><summary>Bước 3 — Xác nhận phạm vi xóa & ghi dữ liệu</summary><p>Dữ liệu trong phạm vi trên sẽ bị xóa và nạp lại. Nhập <strong>{{ p.deleted }}</strong> để xác nhận chính xác số dòng xóa.</p>{% endif %}
+<form method="post" action="{{ url_for('import_control',job_id=job.id,action='apply') }}" class="apply-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="fingerprint" value="{{ p.fingerprint }}">
+{% if job.mode=='replace_by_brand' %}<label for="confirm-delete">Số dòng đồng ý xóa</label><input id="confirm-delete" name="confirm_delete" inputmode="numeric" pattern="[0-9]+" required autocomplete="off">{% endif %}
+<p class="small muted">Nếu catalog thay đổi sau lúc xem trước, hệ thống từ chối ghi và yêu cầu xem trước lại.</p><button type="submit">Xác nhận ghi dữ liệu</button></form>{% if job.mode=='replace_by_brand' %}</details>{% endif %}
+</section>{% endif %}
+{% if not job.purged_at and job.status in ['failed','cancelled','completed'] and not (job.status=='completed' and job.phase=='apply') %}<form class="retry" method="post" action="{{ url_for('import_control',job_id=job.id,action='retry') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="secondary">Xem trước lại từ tệp đã tải</button><span class="small muted">Luôn cần xác nhận mới để ghi dữ liệu.</span></form>{% endif %}
+{% if job.status=='completed' and job.phase=='apply' %}<div class="alert success"><strong>Đã ghi dữ liệu thành công.</strong> <a href="{{ url_for('admin_exchange_rates') }}">Kiểm tra tiền tệ cho brand mới →</a></div>{% endif %}
+<details class="audit"><summary>Nhật ký tác vụ</summary><ul>{% for e in events %}<li>{{ e.created_at }} · {{ e.actor }} · {{ e.event }}</li>{% endfor %}</ul></details>
+{% endif %}
+</main></body></html>

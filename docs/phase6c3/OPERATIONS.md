@@ -1,36 +1,57 @@
 # Phase 6C3 — Quản lý sản phẩm
 
-**RELEASE HOLD.** Chỉ triển khai local; chưa SSH, migrate, mutate UAT, deploy
-staging/production hoặc merge `main`. Staging gate phải hoàn tất và được duyệt
-trước khi soạn cutover production.
+**PRODUCTION HOLD.** Staging đã deploy application/SQL candidate
+`c3feee313c2ba1bc1ea50fe74819ee5af95ca97e`; chưa merge `main` và chưa thực
+hiện backup/stop/migrate/deploy/delete nào trên production.
 
-## Read-only staging preflight
+## Staging execution record — 2026-09-09
+
+- Backup trước migration: `/srv/backups/search-tools/phase6c3-pre.mrnAam`.
+- Migration 025 hoàn tất: bốn bảng Phase 6C3 hiện diện và index
+  `idx_products_admin_brand_id` valid.
+- `search-tools-staging.service` và `search-tools-import-worker.service` active;
+  worker có hai process.
+- UAT do operator xác nhận: search, filter, pagination, detail, form và mobile
+  access đạt.
+- Không ghi nhận như đã chạy: single/brand delete/restore trên dữ liệu staging
+  thật hoặc kiểm tra bằng staff account. Các case này chỉ có automated coverage
+  trên PostgreSQL database tạm; không được diễn giải thành staging UAT.
+
+## Read-only staging preflight reference
 
 Chạy nguyên khối dưới đây trên staging. Khối nằm trong subshell nên lỗi không
 đóng SSH hiện tại. Nó không in DSN, không bật tracing, tắt pager, lấy database từ
 môi trường của **cả web lẫn worker đang chạy**, và không dùng `.env` hay một
 release cũ làm nguồn sự thật.
 
-Operator phải đặt hai service, candidate release, commit và database mong đợi.
-Staging/candidate phải nằm dưới `/srv/search-tools/`, tách khỏi thư mục immutable
-production.
+Live staging đã được xác nhận là repository `/srv/search-tools` (chính xác, không
+phải `/srv/search-tools/releases/*`), web `search-tools-staging.service`, worker
+`search-tools-import-worker.service`, user `deploy` và database
+`search_tools_staging`. `CANDIDATE_RELEASE` là checkout candidate được review;
+không đồng nhất nó với live repository hoặc thư mục immutable production chỉ vì
+tên đường dẫn trông giống nhau.
 
 ```bash
 (
   set -euo pipefail
   set +x
   export SYSTEMD_PAGER=cat GIT_PAGER=cat PAGER=cat
-  : "${WEB_SERVICE:?Đặt WEB_SERVICE staging}"
-  : "${WORKER_SERVICE:?Đặt WORKER_SERVICE staging}"
-  : "${CANDIDATE_RELEASE:?Đặt candidate dưới /srv/search-tools/releases}"
+  WEB_SERVICE='search-tools-staging.service'
+  WORKER_SERVICE='search-tools-import-worker.service'
+  LIVE_REPO='/srv/search-tools'
+  EXPECTED_USER='deploy'
+  EXPECTED_DB='search_tools_staging'
+  : "${CANDIDATE_RELEASE:?Đặt đường dẫn checkout candidate đã review}"
   : "${EXPECTED_COMMIT:?Đặt full commit SHA đã review}"
-  : "${EXPECTED_DB:?Đặt đúng tên database staging}"
 
   case "$CANDIDATE_RELEASE" in
-    /srv/search-tools/releases/*) ;;
-    *) echo "Candidate không thuộc staging release root" >&2; exit 1 ;;
+    /*) ;;
+    *) echo "Candidate phải là đường dẫn tuyệt đối" >&2; exit 1 ;;
   esac
-  test -f "$CANDIDATE_RELEASE/sql/migration_025_admin_product_management.sql"
+  CANDIDATE_REAL="$(sudo readlink -f "$CANDIDATE_RELEASE")"
+  test "$CANDIDATE_REAL" != "$LIVE_REPO"
+  test "$CANDIDATE_REAL" != '/opt/search-tools-pg'
+  test -f "$CANDIDATE_REAL/sql/migration_025_admin_product_management.sql"
 
   WEB_PID="$(sudo systemctl show "$WEB_SERVICE" -p MainPID --value)"
   WORKER_PID="$(sudo systemctl show "$WORKER_SERVICE" -p MainPID --value)"
@@ -39,15 +60,14 @@ production.
 
   WEB_CWD="$(sudo readlink -f "/proc/$WEB_PID/cwd")"
   WORKER_CWD="$(sudo readlink -f "/proc/$WORKER_PID/cwd")"
-  case "$WEB_CWD" in /srv/search-tools/*) ;; *) echo "Web không chạy từ staging root" >&2; exit 1;; esac
-  case "$WORKER_CWD" in /srv/search-tools/*) ;; *) echo "Worker không chạy từ staging root" >&2; exit 1;; esac
-  test "$WEB_CWD" = "$WORKER_CWD"
+  test "$WEB_CWD" = "$LIVE_REPO"
+  test "$WORKER_CWD" = "$LIVE_REPO"
 
   WEB_USER="$(sudo systemctl show "$WEB_SERVICE" -p User --value)"
   WORKER_USER="$(sudo systemctl show "$WORKER_SERVICE" -p User --value)"
-  test -n "$WEB_USER" && test "$WEB_USER" = "$WORKER_USER"
-  test "$(stat -c %U "$CANDIDATE_RELEASE")" = "$WEB_USER"
-  CANDIDATE_COMMIT="$(sudo -u "$WEB_USER" env GIT_PAGER=cat git -C "$CANDIDATE_RELEASE" rev-parse HEAD)"
+  test "$WEB_USER" = "$EXPECTED_USER" && test "$WORKER_USER" = "$EXPECTED_USER"
+  test "$(stat -c %U "$CANDIDATE_REAL")" = "$EXPECTED_USER"
+  CANDIDATE_COMMIT="$(sudo -u "$WEB_USER" env GIT_PAGER=cat git -C "$CANDIDATE_REAL" rev-parse HEAD)"
   test "$CANDIDATE_COMMIT" = "$EXPECTED_COMMIT"
   sudo systemctl cat "$WEB_SERVICE" "$WORKER_SERVICE" >/dev/null
 
@@ -71,7 +91,61 @@ Không tiếp tục nếu PID, cwd, owner, commit, DSN web/worker hoặc tên da
 không khớp chính xác. Điều tra effective unit/environment thay vì sửa lệnh để bỏ
 qua assertion.
 
-## Migration sau khi staging preflight được duyệt
+## Read-only production preflight — chưa chạy
+
+Lần quan sát gần nhất cho thấy production live tại
+`/opt/search-tools-pg-release-20260909T032032Z-24ac6d4-clean`, nhưng lệnh dưới
+đây cố ý không hardcode release đó. Nó lấy working directory và `DATABASE_URL`
+từ PID web/worker đang chạy, không đọc `.env`, không in DSN và không mutate.
+
+```bash
+(
+  set -euo pipefail
+  set +x
+  export SYSTEMD_PAGER=cat GIT_PAGER=cat PAGER=cat
+  WEB_SERVICE='search-tools-pg.service'
+  WORKER_SERVICE='search-tools-import-worker.service'
+  EXPECTED_LIVE_COMMIT='24ac6d4860e401efb2ba9c8e490ac204dad770dc'
+  EXPECTED_DB='searchtools_pg_r1_rollback_20260906_153842'
+
+  sudo systemctl is-active --quiet "$WEB_SERVICE"
+  sudo systemctl is-active --quiet "$WORKER_SERVICE"
+  WEB_PID="$(sudo systemctl show "$WEB_SERVICE" -p MainPID --value)"
+  WORKER_PID="$(sudo systemctl show "$WORKER_SERVICE" -p MainPID --value)"
+  case "$WEB_PID" in ''|*[!0-9]*|0) echo "Web MainPID không hợp lệ" >&2; exit 1;; esac
+  case "$WORKER_PID" in ''|*[!0-9]*|0) echo "Worker MainPID không hợp lệ" >&2; exit 1;; esac
+
+  WEB_CWD="$(sudo readlink -f "/proc/$WEB_PID/cwd")"
+  WORKER_CWD="$(sudo readlink -f "/proc/$WORKER_PID/cwd")"
+  test "$WEB_CWD" = "$WORKER_CWD"
+  case "$WEB_CWD" in
+    /opt/search-tools-pg-release-*) ;;
+    *) echo "Live cwd không thuộc immutable production release root" >&2; exit 1 ;;
+  esac
+  LIVE_COMMIT="$(sudo env GIT_PAGER=cat git -c safe.directory="$WEB_CWD" -C "$WEB_CWD" rev-parse HEAD)"
+  test "$LIVE_COMMIT" = "$EXPECTED_LIVE_COMMIT"
+  sudo systemctl cat "$WEB_SERVICE" "$WORKER_SERVICE" >/dev/null
+
+  WEB_DATABASE_URL="$(sudo sh -c 'tr "\0" "\n" < "/proc/$1/environ"' sh "$WEB_PID" | sed -n 's/^DATABASE_URL=//p')"
+  WORKER_DATABASE_URL="$(sudo sh -c 'tr "\0" "\n" < "/proc/$1/environ"' sh "$WORKER_PID" | sed -n 's/^DATABASE_URL=//p')"
+  test -n "$WEB_DATABASE_URL" && test -n "$WORKER_DATABASE_URL"
+  test "$WEB_DATABASE_URL" = "$WORKER_DATABASE_URL"
+
+  WEB_DB="$(psql --dbname="$WEB_DATABASE_URL" -X -v ON_ERROR_STOP=1 -Atqc 'SELECT current_database()')"
+  WORKER_DB="$(psql --dbname="$WORKER_DATABASE_URL" -X -v ON_ERROR_STOP=1 -Atqc 'SELECT current_database()')"
+  test "$WEB_DB" = "$EXPECTED_DB" && test "$WORKER_DB" = "$EXPECTED_DB"
+  READY="$(psql --dbname="$WEB_DATABASE_URL" -X -v ON_ERROR_STOP=1 -Atqc "SELECT to_regclass('products') IS NOT NULL AND to_regclass('app_users') IS NOT NULL AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='products' AND column_name='source_brand')")"
+  test "$READY" = t
+
+  unset WEB_DATABASE_URL WORKER_DATABASE_URL
+  printf 'Production read-only preflight passed: live commit %s, database %s\n' "$LIVE_COMMIT" "$WEB_DB"
+)
+```
+
+Output chỉ xác nhận commit và tên database. Nếu service/PID/cwd/commit/DSN hoặc
+database không khớp, dừng; không sửa assertion và không chuyển sang `.env`.
+
+## Staging migration/recovery procedure — execution complete
 
 1. Backup đúng database staging theo quy trình hiện có. Chuẩn bị dung lượng cho
    backup, index và WAL.

@@ -1,7 +1,8 @@
 # Phase 6C3 validation — 2026-09-09
 
-**RELEASE HOLD — READY FOR CODE REVIEW.** Không deploy/migrate/mutate staging
-hoặc production trước khi read-only staging preflight được duyệt.
+**PRODUCTION HOLD — READY FOR PR REVIEW.** Staging đã deploy candidate
+`c3feee313c2ba1bc1ea50fe74819ee5af95ca97e`; chưa merge `main` và chưa thực
+hiện thao tác nào trên production.
 
 ## Phạm vi và cô lập
 
@@ -12,7 +13,8 @@ hoặc production trước khi read-only staging preflight được duyệt.
   tồn tại, nên entrypoint nào không tự chuyển sang DB test sẽ fail thay vì chạm
   `products_local`.
 - Browser UAT dùng một DB giả riêng, sau đó server dừng và DB được drop. Kiểm tra
-  cuối: `0` database test còn lại. Không truy cập VPS/staging/production.
+  cuối: `0` database test còn lại. Riêng lần local validation này không truy cập
+  VPS/staging/production; staging execution được operator báo cáo riêng bên dưới.
 
 ## Kết quả
 
@@ -31,7 +33,7 @@ hoặc production trước khi read-only staging preflight được duyệt.
   còn tạo deterministic invalid concurrent index, xác nhận migration fail closed,
   rồi explicit drop/rerun phục hồi index `(brand,id)` valid: pass.
 - JavaScript syntax, Python compile, `git diff --check` và `bash -n` cho staging
-  command block: pass.
+  lẫn production preflight blocks: pass.
 - Full suite chạy đúng một lần với `DISABLE_IP_ALLOWLIST=1` và DB guard:
   **944 pass + 3 optional-fixture skips (947 total), 0 failure**, 62.893 giây.
   Các sửa sau full suite chỉ giới hạn ở lifecycle connection, identity/restore,
@@ -59,6 +61,20 @@ minh đúng prefix, drop thủ công và kiểm tra lại còn `0` DB test.
 - `phase6c3-products-mobile-390.png`
 - `phase6c3-product-detail-mobile-390.png`
 - `phase6c3-products-delete-preview.png`
+
+## Staging gate — 2026-09-09
+
+- Backup trước migration:
+  `/srv/backups/search-tools/phase6c3-pre.mrnAam`.
+- Migration 025: bốn bảng Phase 6C3 hiện diện; index
+  `idx_products_admin_brand_id` valid.
+- Web `search-tools-staging.service` và worker
+  `search-tools-import-worker.service` active; worker có hai process.
+- Operator xác nhận UAT search, filter, pagination, detail, form và mobile access
+  đạt trên staging.
+- Chưa có bằng chứng rằng delete/restore trên dữ liệu staging thật hoặc staff
+  authorization UAT đã chạy. Coverage cho các case đó ở mục **Kết quả** là
+  automated PostgreSQL regression trên database tạm, không phải staging UAT.
 
 ## Ghi chú thiết kế/review
 

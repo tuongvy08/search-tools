@@ -270,8 +270,9 @@
       .filename-cell { max-width: 180px; }
     }
   </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260909c4') }}">
 </head>
-<body>
+<body class="admin-page">
   {% include "_user_nav.html" %}
   <div class="wrap">
     <header>
@@ -405,5 +406,6 @@
   </dialog>
 
   <script src="{{ url_for('static', filename='admin_quote_templates.js', v='20260908c2') }}"></script>
+  <script src="{{ url_for('static', filename='admin_ux.js', v='20260909c4') }}"></script>
 </body>
 </html>

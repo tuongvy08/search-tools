@@ -6,11 +6,12 @@
   <title>Quản lý sản phẩm — Search Tools</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_products.css', v='20260909a') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260909c4') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous">
   <style>html{overflow-x:hidden}</style>
   <script defer src="{{ url_for('static', filename='admin_products.js', v='20260909a') }}"></script>
 </head>
-<body data-delete-preview-url="{{ url_for('admin_product_delete_preview') }}"
+<body class="admin-page" data-delete-preview-url="{{ url_for('admin_product_delete_preview') }}"
       data-delete-apply-url="{{ url_for('admin_product_delete_apply') }}"
       data-products-url="{{ url_for('admin_products') }}">
 {% include '_user_nav.html' %}
@@ -115,5 +116,6 @@
   <div class="dialog-actions"><button type="button" class="button secondary" data-dialog-cancel>Hủy</button><button type="button" class="button danger" data-delete-apply disabled>Xóa đúng phạm vi này</button></div>
   <p class="dialog-status" role="status" aria-live="polite"></p>
 </dialog>
+<script src="{{ url_for('static', filename='admin_ux.js', v='20260909c4') }}"></script>
 </body>
 </html>

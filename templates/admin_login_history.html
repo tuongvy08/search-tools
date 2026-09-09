@@ -33,8 +33,9 @@
     .lh-pagination a { color: #2563eb; text-decoration: none; }
     .lh-pagination .disabled { color: #aaa; pointer-events: none; }
   </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260909c4') }}">
 </head>
-<body>
+<body class="admin-page">
   {% include "_user_nav.html" %}
 
   <h1 style="margin-top:0;">Lịch sử đăng nhập</h1>

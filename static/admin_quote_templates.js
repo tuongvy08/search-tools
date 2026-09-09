@@ -54,6 +54,7 @@
   let pendingArchiveId = null;
   let preview = null;
   let teams = [];
+  let dialogOpener = null;
 
   function setText(el, value) {
     if (el) el.textContent = value == null || value === '' ? '-' : String(value);
@@ -187,7 +188,7 @@
     const label = document.createElement('span');
     setText(label, 'Đặt làm mẫu mặc định');
     button.appendChild(label);
-    button.addEventListener('click', () => openActivateDialog(item));
+    button.addEventListener('click', () => openActivateDialog(item, button));
     return button;
   }
 
@@ -200,7 +201,7 @@
     const label = document.createElement('span');
     setText(label, 'Lưu trữ');
     button.appendChild(label);
-    button.addEventListener('click', () => openArchiveDialog(item));
+    button.addEventListener('click', () => openArchiveDialog(item, button));
     return button;
   }
 
@@ -464,8 +465,9 @@
     } catch (err) { setText(els.assignments, err.message || 'Không tải được thông tin gán mẫu.'); }
   }
 
-  function openActivateDialog(item) {
+  function openActivateDialog(item, opener) {
     pendingActivateId = item.id;
+    dialogOpener = opener || null;
     setText(els.activateDialogText, `Đặt phiên bản #${item.id} (${item.filename}) làm mẫu mặc định toàn hệ thống?`);
     if (els.activateDialog && typeof els.activateDialog.showModal === 'function') {
       els.activateDialog.showModal();
@@ -502,7 +504,8 @@
     }
   }
 
-  function openArchiveDialog(item) {
+  function openArchiveDialog(item, opener) {
+    dialogOpener = opener || null;
     pendingArchiveId = item.id;
     setText(els.archiveDialogText, `Lưu trữ phiên bản #${item.id} (${item.filename})? Mẫu vẫn có thể tải lại để đối soát.`);
     if (els.archiveDialog && typeof els.archiveDialog.showModal === 'function') {
@@ -545,14 +548,14 @@
   if (els.activateConfirm) els.activateConfirm.addEventListener('click', activateTemplate);
   if (els.archiveCancel) els.archiveCancel.addEventListener('click', closeArchiveDialog);
   if (els.archiveConfirm) els.archiveConfirm.addEventListener('click', archiveTemplate);
-  if (els.activateDialog) {
-    els.activateDialog.addEventListener('cancel', () => {
-      pendingActivateId = null;
+  [els.activateDialog, els.archiveDialog].filter(Boolean).forEach((dialog) => {
+    dialog.addEventListener('close', () => {
+      if (dialogOpener) dialogOpener.focus();
+      dialogOpener = null;
     });
-  }
-  if (els.archiveDialog) {
-    els.archiveDialog.addEventListener('cancel', () => { pendingArchiveId = null; });
-  }
+  });
+  if (els.activateDialog) els.activateDialog.addEventListener('cancel', () => { pendingActivateId = null; });
+  if (els.archiveDialog) els.archiveDialog.addEventListener('cancel', () => { pendingArchiveId = null; });
 
   if (els.sheet) els.sheet.addEventListener('change', () => { preview = null; if (els.uploadBtn) els.uploadBtn.disabled = true; });
   if (els.headerRow) els.headerRow.addEventListener('change', () => { preview = null; if (els.uploadBtn) els.uploadBtn.disabled = true; });

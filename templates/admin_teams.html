@@ -7,8 +7,9 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_teams.css', v='20260908c2') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260909c4') }}">
 </head>
-<body>
+<body class="admin-page">
   {% include "_user_nav.html" %}
 
   {% macro brand_picker(picker_id, checked_brands) %}
@@ -276,6 +277,7 @@
     </div>
   </section>
   <script src="{{ url_for('static', filename='admin_team_permissions.js', v='20260908c2') }}"></script>
+  <script src="{{ url_for('static', filename='admin_ux.js', v='20260909c4') }}"></script>
 
   <script>
     document.querySelectorAll('.archive-confirm-form').forEach(function (form) {

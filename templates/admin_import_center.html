@@ -5,10 +5,11 @@
 <title>Trung tâm nhập sản phẩm — Search Tools</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='admin_import_center.css', v='20260908c2') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260909c4') }}">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous">
 <script defer src="{{ url_for('static',filename='admin_import_center.js',v='20260908c2') }}"></script>
 </head>
-<body>
+<body class="admin-page">
 {% include '_user_nav.html' %}
 {% set labels={'queued':'Đang chờ','running':'Đang xử lý','completed':'Hoàn tất','failed':'Thất bại','cancelled':'Đã hủy'} %}
 {% set modes={'append':'Chỉ thêm mới','upsert':'Thêm / cập nhật','replace_by_brand':'Thay thế theo brand trong file'} %}
@@ -58,4 +59,4 @@
 {% if job.status=='completed' and job.phase=='apply' %}<div class="alert success"><strong>Đã ghi dữ liệu thành công.</strong> <a href="{{ url_for('admin_exchange_rates') }}">Kiểm tra tiền tệ cho brand mới →</a></div>{% endif %}
 <details class="audit"><summary>Nhật ký tác vụ</summary><ul>{% for e in events %}<li>{{ e.created_at }} · {{ e.actor }} · {{ e.event }}</li>{% endfor %}</ul></details>
 {% endif %}
-</main></body></html>
+</main><script src="{{ url_for('static', filename='admin_ux.js', v='20260909c4') }}"></script></body></html>

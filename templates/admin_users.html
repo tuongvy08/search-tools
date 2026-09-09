@@ -46,8 +46,9 @@
       .card, input, select, button { max-width:100%; box-sizing:border-box; }
     }
   </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260909c4') }}">
 </head>
-<body>
+<body class="admin-page">
   {% include "_user_nav.html" %}
 
   <h1 style="margin-top:0;">Quản lý Users</h1>
@@ -358,6 +359,7 @@
     </div>
   </div>
 
+  <script src="{{ url_for('static', filename='admin_ux.js', v='20260909c4') }}"></script>
   <script>
     document.querySelectorAll('.local-archive-form').forEach(function (form) {
       form.addEventListener('submit', function (event) {

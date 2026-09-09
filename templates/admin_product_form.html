@@ -5,11 +5,12 @@
   <title>{{ 'Sửa sản phẩm #' ~ product.id if product else 'Thêm sản phẩm' }} — Search Tools</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_products.css', v='20260909a') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260909c4') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous">
   <style>html{overflow-x:hidden}</style>
   {% if product %}<script defer src="{{ url_for('static', filename='admin_products.js', v='20260909a') }}"></script>{% endif %}
 </head>
-<body{% if product %} data-delete-preview-url="{{ url_for('admin_product_delete_preview') }}" data-delete-apply-url="{{ url_for('admin_product_delete_apply') }}" data-products-url="{{ url_for('admin_products') }}"{% endif %}>
+<body class="admin-page"{% if product %} data-delete-preview-url="{{ url_for('admin_product_delete_preview') }}" data-delete-apply-url="{{ url_for('admin_product_delete_apply') }}" data-products-url="{{ url_for('admin_products') }}"{% endif %}>
 {% include '_user_nav.html' %}
 {% set p = product or {} %}
 <main class="product-form-main">
@@ -45,5 +46,6 @@
   <dialog id="delete-dialog" class="delete-dialog" aria-labelledby="delete-title"><form method="dialog"><button class="dialog-close" aria-label="Đóng hộp xác nhận">×</button></form><p class="eyebrow">THAO TÁC PHÁ HỦY</p><h2 id="delete-title">Xác nhận phạm vi xóa</h2><p id="delete-summary" class="delete-summary"></p><p class="muted small">Preview có hiệu lực 5 phút và chỉ dùng một lần. Nếu dữ liệu đổi, hệ thống sẽ từ chối.</p><label for="delete-confirmation">Nhập <strong id="delete-phrase"></strong> để tiếp tục</label><input id="delete-confirmation" autocomplete="off"><input id="delete-token" type="hidden"><div class="dialog-actions"><button type="button" class="button secondary" data-dialog-cancel>Hủy</button><button type="button" class="button danger" data-delete-apply disabled>Xóa đúng phạm vi này</button></div><p class="dialog-status" role="status" aria-live="polite"></p></dialog>
   {% endif %}
 </main>
+<script src="{{ url_for('static', filename='admin_ux.js', v='20260909c4') }}"></script>
 </body>
 </html>

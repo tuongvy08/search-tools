@@ -8,6 +8,7 @@ from jinja2 import Environment, nodes
 
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE_VERSION = '20260908c2'
+ASSET_VERSIONS = {'admin_quote_templates.js': '20260909c4'}
 CAPABILITY_ASSETS = {
     'script.js', 'quick_quote.js', 'styles.css',
     'team_permissions.js', 'admin_team_permissions.js', 'admin_teams.css',
@@ -41,7 +42,7 @@ class StaticAssetVersionTests(unittest.TestCase):
                 version = kwargs.get('v')
                 with self.subTest(template=path.name, asset=asset, line=call.lineno):
                     self.assertIsInstance(version, nodes.Const, 'Static asset needs an explicit release version')
-                    self.assertEqual(version.value, RELEASE_VERSION)
+                    self.assertEqual(version.value, ASSET_VERSIONS.get(asset, RELEASE_VERSION))
 
             # Also cover literal /static URLs, so switching away from url_for
             # cannot silently evade the release-version check.
@@ -51,7 +52,7 @@ class StaticAssetVersionTests(unittest.TestCase):
                 if asset in CAPABILITY_ASSETS:
                     references[asset].append(path.name)
                     with self.subTest(template=path.name, asset=asset):
-                        self.assertEqual(parse_qs(url.query).get('v'), [RELEASE_VERSION])
+                        self.assertEqual(parse_qs(url.query).get('v'), [ASSET_VERSIONS.get(asset, RELEASE_VERSION)])
 
         for asset, sites in references.items():
             with self.subTest(asset=asset):

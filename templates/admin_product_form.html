@@ -7,8 +7,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_products.css', v='20260909a') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260909c4') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous">
-  <style>html{overflow-x:hidden}</style>
-  {% if product %}<script defer src="{{ url_for('static', filename='admin_products.js', v='20260909a') }}"></script>{% endif %}
+  {% if product %}<script defer src="{{ url_for('static', filename='admin_products.js', v='20260909c4') }}"></script>{% endif %}
 </head>
 <body class="admin-page"{% if product %} data-delete-preview-url="{{ url_for('admin_product_delete_preview') }}" data-delete-apply-url="{{ url_for('admin_product_delete_apply') }}" data-products-url="{{ url_for('admin_products') }}"{% endif %}>
 {% include '_user_nav.html' %}

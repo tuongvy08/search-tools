@@ -1,17 +1,88 @@
-/* Phase 6C4 shared presentation layer. Restricted to admin pages. */
-body.admin-page { --admin-ink:#17253c; --admin-muted:#607087; --admin-line:#d9e2ec; --admin-surface:#fff; --admin-canvas:#f5f7fa; --admin-primary:#215fc5; --admin-danger:#b4233d; color:var(--admin-ink); background:var(--admin-canvas); max-width:1200px; margin:0 auto; padding:28px 24px 56px; font-family:system-ui,-apple-system,"Segoe UI",sans-serif; line-height:1.5; }
-body.admin-page .sq-shell-header { margin:-28px -24px 28px; }
-body.admin-page h1 { font-size:clamp(1.55rem,2.5vw,2rem); line-height:1.18; letter-spacing:-.035em; color:var(--admin-ink); }
-body.admin-page h2 { color:var(--admin-ink); letter-spacing:-.015em; } body.admin-page .muted,body.admin-page .small { color:var(--admin-muted); }
-body.admin-page .card,body.admin-page .panel,body.admin-page .job-summary,body.admin-page .preview { background:var(--admin-surface); border:1px solid var(--admin-line); border-radius:10px; box-shadow:0 1px 2px rgb(23 37 60 / 4%); }
-body.admin-page .card,body.admin-page .panel { padding:20px; margin-bottom:18px; }
-body.admin-page .toolbar,body.admin-page .row,body.admin-page .panel-head,body.admin-page .page-header,body.admin-page .page-heading { gap:12px; }
-body.admin-page input:not([type=checkbox]):not([type=radio]),body.admin-page select,body.admin-page textarea { border-color:#bac8d8; border-radius:7px; min-height:40px; color:var(--admin-ink); }
-body.admin-page button,body.admin-page .btn,body.admin-page .secondary { min-height:38px; border-radius:7px; border-color:#c4d0dd; color:var(--admin-ink); background:#fff; }
-body.admin-page button.primary,body.admin-page .btn-primary { background:var(--admin-primary); border-color:var(--admin-primary); color:#fff; } body.admin-page button.danger,body.admin-page .btn-danger { background:var(--admin-danger); border-color:var(--admin-danger); color:#fff; }
-body.admin-page button:disabled,body.admin-page [aria-busy="true"] { cursor:wait; opacity:.65; } body.admin-page :focus-visible { outline:3px solid #8db8ff; outline-offset:2px; }
-body.admin-page .table-wrap,body.admin-page .table-scroll,body.admin-page .gu-table-scroll,body.admin-page .lh-table-scroll { max-width:100%; overflow:auto; overscroll-behavior-inline:contain; border:1px solid var(--admin-line); border-radius:8px; }
-body.admin-page table { margin:0; background:#fff; } body.admin-page th { background:#f1f5f9; color:#42546a; font-size:.75rem; letter-spacing:.025em; } body.admin-page th,body.admin-page td { border-color:var(--admin-line); padding:11px 12px; } body.admin-page tbody tr:hover { background:#f8fafc; }
-body.admin-page .ok,body.admin-page .success,body.admin-page .alert-success { color:#17633f; } body.admin-page .err,body.admin-page .error,body.admin-page .alert-danger { color:#a51d34; } body.admin-page .empty,body.admin-page .empty-state { color:var(--admin-muted); }
-body.admin-page dialog { border:1px solid var(--admin-line); border-radius:12px; box-shadow:0 18px 60px rgb(15 23 42 / 25%); max-width:min(520px,calc(100vw - 32px)); } body.admin-page dialog::backdrop { background:rgb(15 23 42 / 45%); }
-@media (max-width:700px) { body.admin-page { padding:18px 14px 38px; } body.admin-page .sq-shell-header { margin:-18px -14px 22px; } body.admin-page .card,body.admin-page .panel { padding:16px; border-radius:9px; } body.admin-page .page-heading,body.admin-page .heading { margin-bottom:22px; } body.admin-page .toolbar > input,body.admin-page .toolbar > select,body.admin-page .row > .field { flex:1 1 100%; min-width:0; } body.admin-page .table-wrap,body.admin-page .table-scroll,body.admin-page .gu-table-scroll,body.admin-page .lh-table-scroll { border-radius:6px; } }
+/* Phase 6C4: shared presentation details, limited to opt-in admin pages. */
+body.admin-page {
+  --admin-ink: #17253c;
+  --admin-muted: #607087;
+  --admin-line: #d9e2ec;
+  --admin-surface: #fff;
+  --admin-canvas: #f5f7fa;
+  --admin-primary: #215fc5;
+  --admin-danger: #b4233d;
+  color: var(--admin-ink);
+  background: var(--admin-canvas);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+
+body.admin-page h1 { color: var(--admin-ink); font-size: 30px; letter-spacing: 0; line-height: 1.2; }
+body.admin-page h2 { color: var(--admin-ink); letter-spacing: 0; }
+body.admin-page .muted, body.admin-page .small { color: var(--admin-muted); }
+
+/* Normalise existing panels only; operational bands remain unframed. */
+body.admin-page .card,
+body.admin-page .panel {
+  background: var(--admin-surface);
+  border-color: var(--admin-line);
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgb(23 37 60 / 4%);
+}
+
+body.admin-page .toolbar,
+body.admin-page .row,
+body.admin-page .panel-head,
+body.admin-page .page-header,
+body.admin-page .page-heading { gap: 12px; }
+
+body.admin-page input:not([type=checkbox]):not([type=radio]),
+body.admin-page select,
+body.admin-page textarea { border-color: #bac8d8; border-radius: 7px; color: var(--admin-ink); }
+
+/* Shell controls and legacy success controls retain their page-owned semantics. */
+body.admin-page :not(.sq-shell-header) > .button,
+body.admin-page :not(.sq-shell-header) > .btn,
+body.admin-page .apply-form > button,
+body.admin-page [data-upload] > button { min-height: 38px; border-radius: 7px; }
+
+body.admin-page .button.primary,
+body.admin-page .btn-primary,
+body.admin-page .apply-form > button[type=submit],
+body.admin-page [data-upload] > button[type=submit] { background: var(--admin-primary); border-color: var(--admin-primary); color: #fff; }
+
+body.admin-page .button.danger,
+body.admin-page .btn-danger { background: var(--admin-danger); border-color: var(--admin-danger); color: #fff; }
+
+body.admin-page button:disabled,
+body.admin-page [aria-busy="true"] { cursor: wait; opacity: .65; }
+body.admin-page :focus-visible { outline: 3px solid #8db8ff; outline-offset: 2px; }
+
+body.admin-page .table-wrap,
+body.admin-page .table-scroll,
+body.admin-page .gu-table-scroll,
+body.admin-page .lh-table-scroll {
+  max-width: 100%;
+  overflow: auto;
+  contain: inline-size paint;
+  overscroll-behavior-inline: contain;
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+}
+
+body.admin-page table { margin: 0; background: #fff; }
+body.admin-page th { background: #f1f5f9; color: #42546a; font-size: .75rem; letter-spacing: .025em; }
+body.admin-page th, body.admin-page td { border-color: var(--admin-line); padding: 11px 12px; }
+body.admin-page tbody tr:hover { background: #f8fafc; }
+body.admin-page .ok, body.admin-page .success, body.admin-page .alert-success { color: #17633f; }
+body.admin-page .err, body.admin-page .error, body.admin-page .alert-danger { color: #a51d34; }
+body.admin-page .empty, body.admin-page .empty-state { color: var(--admin-muted); }
+body.admin-page dialog { border: 1px solid var(--admin-line); border-radius: 8px; box-shadow: 0 18px 60px rgb(15 23 42 / 25%); max-width: min(520px, calc(100vw - 32px)); }
+body.admin-page dialog::backdrop { background: rgb(15 23 42 / 45%); }
+
+@media (max-width: 700px) {
+  body.admin-page h1 { font-size: 26px; }
+  body.admin-page .toolbar > input,
+  body.admin-page .toolbar > select,
+  body.admin-page .row > .field { flex: 1 1 100%; min-width: 0; }
+  body.admin-page .table-wrap,
+  body.admin-page .table-scroll,
+  body.admin-page .gu-table-scroll,
+  body.admin-page .lh-table-scroll { border-radius: 6px; }
+}

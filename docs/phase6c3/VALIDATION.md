@@ -1,6 +1,7 @@
 # Phase 6C3 validation — 2026-09-09
 
-**READY FOR REVIEW.** Không deploy/migrate/mutate staging hoặc production.
+**RELEASE HOLD — READY FOR CODE REVIEW.** Không deploy/migrate/mutate staging
+hoặc production trước khi read-only staging preflight được duyệt.
 
 ## Phạm vi và cô lập
 
@@ -15,22 +16,27 @@
 
 ## Kết quả
 
-- Focused product-management: **8/8 pass** trên PostgreSQL thật. Bao phủ keyset
+- Focused product-management cuối: **10/10 pass** trên PostgreSQL thật. Bao phủ keyset
   pagination/search/canonical filter, create/update, validation, optimistic
-  revision, admin/staff/CSRF, actor revoke sau khi chờ advisory lock, durable
+  revision, chỉnh note/price theo selected ID giữa same-code variants, từ chối
+  identity collision/ambiguous create, admin/staff/CSRF, actor revoke sau khi chờ advisory lock, durable
   cross-worker preview, stale/replay/TTL, single/brand delete, audit, backup đầy
-  đủ compliance/preparation/source, restore sạch và fail-closed khi chồng import.
-- Regression gần scope cuối: **49/49 pass** (`admin_products`, admin nav, Import
+  đủ compliance/preparation/source, positive restore và fail-closed sau real
+  Import Center quick upsert cùng logical identity; backup vẫn nguyên.
+- Regression gần scope cuối: **51/51 pass** (`admin_products`, admin nav, Import
   Center, import concurrency). Lần chạy này diễn ra sau self-review sửa lifecycle
-  để mọi connection GET/guard được đóng tường minh.
+  và independent-review fixes.
 - Migration 025 chạy **hai lần** bằng production-style
-  `psql -X -v ON_ERROR_STOP=1 -f`, không `--single-transaction`: pass.
+  `psql -X -v ON_ERROR_STOP=1 -f`, không `--single-transaction`: pass. Regression
+  còn tạo deterministic invalid concurrent index, xác nhận migration fail closed,
+  rồi explicit drop/rerun phục hồi index `(brand,id)` valid: pass.
 - JavaScript syntax, Python compile, `git diff --check` và `bash -n` cho staging
   command block: pass.
 - Full suite chạy đúng một lần với `DISABLE_IP_ALLOWLIST=1` và DB guard:
-  **947 tests pass, 3 optional-fixture skips, 0 failure**, 62.893 giây.
-  Self-review sau đó chỉ sửa việc đóng connection ở bốn read paths; focused
-  49-test gate ở trên được chạy lại sau sửa, không lặp full suite.
+  **944 pass + 3 optional-fixture skips (947 total), 0 failure**, 62.893 giây.
+  Các sửa sau full suite chỉ giới hạn ở lifecycle connection, identity/restore,
+  migration 025 và runbook; focused regression liên quan đã chạy lại sau tất cả
+  blocker fix. Không lặp full suite theo yêu cầu.
 
 Ba skip là fixture tùy chọn có sẵn của quote template, không liên quan Phase 6C3.
 Suite để lại một DB test 8.7 MB không có active connection từ test legacy; đã xác
@@ -68,3 +74,7 @@ minh đúng prefix, drop thủ công và kiểm tra lại còn `0` DB test.
 - Form giữ đúng manual compliance/preparation semantics; blank manual status bỏ
   override để resolver tự động tiếp tục hoạt động. Không tự tạo brand, đổi currency,
   dedup policy hay regulatory rules từ trang này.
+- Migration kiểm tra `pg_index` trước/sau concurrent build. Index cùng tên invalid
+  hoặc sai definition không bị `IF NOT EXISTS` che khuất; operator phải inspect và
+  recovery tường minh. Runbook dùng `psql --dbname="$LIVE_DATABASE_URL"`, xác minh
+  database thực của PID web/worker và không in DSN.

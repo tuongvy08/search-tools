@@ -38,6 +38,7 @@ PRODUCT_COLUMNS = (
     "name", "code", "cas", "brand", "size", "ship", "price", "note",
     "manual_compliance", "manual_compliance_note", "preparation_type", "source_brand",
 )
+IDENTITY_COLUMNS = ("code", "brand", "source_brand", "size")
 
 
 @dataclass(frozen=True)
@@ -195,6 +196,78 @@ def _identity_conflicts(cur, product: dict, *, exclude_id: int | None = None) ->
         params,
     )
     return [row[0] for row in cur.fetchall()]
+
+
+def _identity_value(value: Any) -> str:
+    return ("" if value is None else str(value)).strip().upper()
+
+
+def _identity_changed(current: dict, proposed: dict) -> bool:
+    return any(
+        _identity_value(current.get(name)) != _identity_value(proposed.get(name))
+        for name in IDENTITY_COLUMNS
+    )
+
+
+def _hypothetical_identity_resolution(cur, product: dict, target_id: int) -> list[int]:
+    """Resolve a selected row as if its proposed identity were already stored.
+
+    This mirrors ``brand_gateway.resolve_product_candidates``: code + canonical
+    brand establish the candidate set; only when multiple candidates exist does
+    source_brand, then size, disambiguate. The selected target is injected with
+    its proposed values so identity-changing edits and restores are checked
+    without mutating first.
+    """
+    code = _identity_value(product.get("code"))
+    brand = _identity_value(product.get("brand"))
+    if not code or not brand:
+        return [target_id]
+    cur.execute(
+        """
+        SELECT id,source_brand,size
+        FROM products
+        WHERE UPPER(TRIM(code))=%s AND UPPER(TRIM(brand))=%s
+        ORDER BY id
+        """,
+        (code, brand),
+    )
+    candidates = [
+        {"id": row[0], "source_brand": row[1], "size": row[2]}
+        for row in cur.fetchall() if row[0] != target_id
+    ]
+    candidates.append(
+        {"id": target_id, "source_brand": product.get("source_brand"), "size": product.get("size")}
+    )
+    if len(candidates) <= 1:
+        return [item["id"] for item in candidates]
+
+    source = _identity_value(product.get("source_brand"))
+    if source:
+        by_source = [item for item in candidates if _identity_value(item["source_brand"]) == source]
+        if len(by_source) == 1:
+            return [by_source[0]["id"]]
+        if len(by_source) > 1:
+            candidates = by_source
+
+    size = _identity_value(product.get("size"))
+    if size:
+        by_size = [item for item in candidates if _identity_value(item["size"]) == size]
+        if len(by_size) == 1:
+            return [by_size[0]["id"]]
+        if len(by_size) > 1:
+            candidates = by_size
+    return [item["id"] for item in candidates]
+
+
+def _require_selected_identity(cur, product: dict, target_id: int) -> None:
+    resolved = _hypothetical_identity_resolution(cur, product, target_id)
+    if len(resolved) != 1 or resolved[0] != target_id:
+        others = [str(item) for item in resolved if item != target_id]
+        detail = f" (ID {', '.join(others[:3])})" if others else ""
+        raise ValueError(
+            "Identity code + canonical brand + source brand + quy cách đang trùng hoặc mơ hồ"
+            f"{detail}. Không ghi đè tùy ý."
+        )
 
 
 def _scope_where(scope: Scope, alias: str = "p") -> tuple[str, tuple[Any, ...]]:
@@ -483,11 +556,8 @@ def register(app, require_admin, actor):
                 if revision != current["revision"]:
                     raise ValueError("Sản phẩm đã thay đổi từ lúc bạn mở form. Tải lại rồi kiểm tra trước khi lưu.")
                 product = _validated_product(cur, request.form, current_source_brand=current["source_brand"])
-                conflicts = _identity_conflicts(cur, product, exclude_id=product_id)
-                if conflicts:
-                    raise ValueError(
-                        f"Code + canonical brand trùng sản phẩm khác (ID {conflicts[0]}). Không ghi đè tùy ý."
-                    )
+                if _identity_changed(current, product):
+                    _require_selected_identity(cur, product, product_id)
                 changed = [name for name in PRODUCT_COLUMNS if current[name] != product[name]]
                 cur.execute(
                     """
@@ -684,6 +754,19 @@ def register(app, require_admin, actor):
                     cur.execute("SELECT 1 FROM products WHERE id=%s", (batch["product_id"],))
                     if cur.fetchone():
                         raise ValueError("ID sản phẩm đã được dùng lại. Không thể khôi phục tự động.")
+                    cur.execute(
+                        """
+                        SELECT original_product_id AS id,name,code,cas,brand,size,ship,price,note,
+                               manual_compliance,manual_compliance_note,preparation_type,source_brand
+                        FROM product_deleted_rows
+                        WHERE batch_id=%s AND original_product_id=%s
+                        """,
+                        (str(batch_id), batch["product_id"]),
+                    )
+                    restore_row = _row_dict(cur, cur.fetchone())
+                    if not restore_row:
+                        raise ValueError("Bản khôi phục không còn đủ dữ liệu.")
+                    _require_selected_identity(cur, restore_row, batch["product_id"])
                 cur.execute(
                     """
                     INSERT INTO products

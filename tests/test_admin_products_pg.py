@@ -44,9 +44,13 @@ class AdminProductsPgTests(unittest.TestCase):
                 cur.execute((ROOT / "sql/migration_004_import_jobs.sql").read_text())
                 migration = (ROOT / "sql/migration_025_admin_product_management.sql").read_text()
                 transactional, concurrent = migration.split("CREATE INDEX CONCURRENTLY", 1)
+                concurrent, postcheck = ("CREATE INDEX CONCURRENTLY" + concurrent).split(
+                    ";\n\nDO $$", 1
+                )
                 for _ in range(2):  # additive/idempotent rehearsal
                     cur.execute(transactional)
-                    cur.execute("CREATE INDEX CONCURRENTLY" + concurrent)
+                    cur.execute(concurrent + ";")
+                    cur.execute("DO $$" + postcheck)
                 cur.execute("INSERT INTO teams(name,lifecycle_status) VALUES ('Products staff','ACTIVE') RETURNING id")
                 cls.team_id = cur.fetchone()[0]
                 cur.execute(
@@ -216,6 +220,45 @@ class AdminProductsPgTests(unittest.TestCase):
             403,
         )
 
+    def test_same_code_variants_allow_selected_edit_but_reject_identity_collision(self):
+        first = self._seed(code="DUP", source="Catalog A", size="1 g")
+        second = self._seed(code="DUP", source="Catalog B", size="2 g", name="Variant B")
+
+        edited = self.client.post(
+            f"/admin/products/{first}/update",
+            data=self._product_form(
+                first, code="DUP", source_brand="Catalog A", size="1 g", note="selected row edited",
+            ),
+        )
+        self.assertEqual(edited.status_code, 302)
+        self.assertNotIn("error=", edited.location)
+
+        collided = self.client.post(
+            f"/admin/products/{first}/update",
+            data=self._product_form(
+                first, code="DUP", source_brand="Catalog B", size="2 g", note="must not write",
+            ),
+        )
+        self.assertEqual(collided.status_code, 302)
+        self.assertIn("error=", collided.location)
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT source_brand,size,note FROM products WHERE id=%s", (first,))
+            self.assertEqual(cur.fetchone(), ("Catalog A", "1 g", "selected row edited"))
+            cur.execute("SELECT source_brand,size,name FROM products WHERE id=%s", (second,))
+            self.assertEqual(cur.fetchone(), ("Catalog B", "2 g", "Variant B"))
+
+        create_variant = self.client.post(
+            "/admin/products/create",
+            data={
+                "csrf_token": "qa-csrf", "name": "Variant C", "code": "DUP",
+                "brand": "TRC", "source_brand": "Catalog C", "size": "3 g",
+            },
+        )
+        self.assertIn("error=", create_variant.location)
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM products WHERE code='DUP'")
+            self.assertEqual(cur.fetchone()[0], 2)
+
     def test_brand_delete_is_durable_one_time_audited_and_fully_restorable(self):
         expected = []
         for index in range(3):
@@ -349,23 +392,99 @@ class AdminProductsPgTests(unittest.TestCase):
 
         fresh = self.client.post(
             "/admin/products/delete-preview",
-            data={"csrf_token": "qa-csrf", "scope_type": "brand", "brand": "TRC"},
+            data={"csrf_token": "qa-csrf", "scope_type": "product", "product_id": product_id},
         ).get_json()
         deleted = self.client.post(
             "/admin/products/delete-apply",
             data={"csrf_token": "qa-csrf", "token": fresh["token"], "confirmation": "XOA 1"},
         ).get_json()
-        replacement = self._seed(code="REPLACEMENT")
-        refused = self.client.post(
+        restored = self.client.post(
             f"/admin/products/delete-batches/{deleted['batch_id']}/restore",
+            data={"csrf_token": "qa-csrf"},
+        )
+        self.assertNotIn("error=", restored.location)
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT code,source_brand,size FROM products WHERE id=%s", (product_id,))
+            self.assertEqual(cur.fetchone(), ("ONE", "TRC", "1 g"))
+
+        conflicting_preview = self.client.post(
+            "/admin/products/delete-preview",
+            data={"csrf_token": "qa-csrf", "scope_type": "product", "product_id": product_id},
+        ).get_json()
+        conflicting_delete = self.client.post(
+            "/admin/products/delete-apply",
+            data={
+                "csrf_token": "qa-csrf", "token": conflicting_preview["token"],
+                "confirmation": "XOA 1",
+            },
+        ).get_json()
+        imported = self.client.post(
+            "/admin/imports/quick-product",
+            data={
+                "csrf_token": "qa-csrf", "name": "Imported replacement", "code": "ONE",
+                "brand": "TRC", "source_brand": "TRC", "size": "1 g",
+            },
+        )
+        self.assertEqual(imported.status_code, 200, imported.get_data(as_text=True))
+        self.assertEqual(imported.get_json()["action"], "inserted")
+        refused = self.client.post(
+            f"/admin/products/delete-batches/{conflicting_delete['batch_id']}/restore",
             data={"csrf_token": "qa-csrf"},
         )
         self.assertIn("error=", refused.location)
         with self.conn.cursor() as cur:
-            cur.execute("SELECT id FROM products WHERE brand='TRC'")
-            self.assertEqual(cur.fetchall(), [(replacement,)])
-            cur.execute("SELECT count(*) FROM product_deleted_rows WHERE batch_id=%s", (deleted["batch_id"],))
+            cur.execute("SELECT id,name FROM products WHERE brand='TRC'")
+            rows = cur.fetchall()
+            self.assertEqual(len(rows), 1)
+            self.assertNotEqual(rows[0][0], product_id)
+            self.assertEqual(rows[0][1], "Imported replacement")
+            cur.execute(
+                "SELECT count(*) FROM product_deleted_rows WHERE batch_id=%s",
+                (conflicting_delete["batch_id"],),
+            )
             self.assertEqual(cur.fetchone()[0], 1)
+
+    @unittest.skipUnless(psql_runner_available(), "psql or local docker PostgreSQL required")
+    def test_invalid_concurrent_index_fails_closed_then_recovers_explicitly(self):
+        self._seed(code="IDX-A")
+        self._seed(code="IDX-B")
+        path = ROOT / "sql/migration_025_admin_product_management.sql"
+        with self.conn.cursor() as cur:
+            cur.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_products_admin_brand_id")
+            with self.assertRaises(psycopg2.errors.UniqueViolation):
+                # Duplicate TRC values make this concurrent build fail after it
+                # has created the named index relation, reproducing PostgreSQL's
+                # interrupted/failed-build INVALID-index state deterministically.
+                cur.execute(
+                    "CREATE UNIQUE INDEX CONCURRENTLY idx_products_admin_brand_id ON products(brand)"
+                )
+            cur.execute(
+                """
+                SELECT indisvalid FROM pg_index
+                WHERE indexrelid='idx_products_admin_brand_id'::regclass
+                """
+            )
+            self.assertFalse(cur.fetchone()[0])
+
+        code, output = run_migration_via_psql(self.dsn, path)
+        self.assertNotEqual(code, 0, output)
+        self.assertIn("invalid or has the wrong definition", output)
+
+        with self.conn.cursor() as cur:
+            cur.execute("DROP INDEX CONCURRENTLY idx_products_admin_brand_id")
+        code, output = run_migration_via_psql(self.dsn, path)
+        self.assertEqual(code, 0, output)
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT i.indisvalid,pg_get_indexdef(i.indexrelid)
+                FROM pg_index i
+                WHERE i.indexrelid='idx_products_admin_brand_id'::regclass
+                """
+            )
+            valid, definition = cur.fetchone()
+            self.assertTrue(valid)
+            self.assertIn("(brand, id)", definition)
 
     @unittest.skipUnless(psql_runner_available(), "psql or local docker PostgreSQL required")
     def test_migration_runs_via_production_style_psql_and_is_rerunnable(self):

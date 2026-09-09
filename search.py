@@ -26,6 +26,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 import import_quick_delete
 import import_jobs
 import admin_import_center
+import admin_products
 import admin_google_users
 import admin_lifecycle
 import admin_login_history
@@ -6210,6 +6211,7 @@ def results_export():
 
 
 admin_import_center.register(app, _require_admin_page, _current_actor)
+admin_products.register(app, _require_admin_page, _current_actor)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5001"))

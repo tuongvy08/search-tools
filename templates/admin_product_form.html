@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ 'Sửa sản phẩm #' ~ product.id if product else 'Thêm sản phẩm' }} — Search Tools</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_products.css', v='20260909a') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous">
+  <style>html{overflow-x:hidden}</style>
+  {% if product %}<script defer src="{{ url_for('static', filename='admin_products.js', v='20260909a') }}"></script>{% endif %}
+</head>
+<body{% if product %} data-delete-preview-url="{{ url_for('admin_product_delete_preview') }}" data-delete-apply-url="{{ url_for('admin_product_delete_apply') }}" data-products-url="{{ url_for('admin_products') }}"{% endif %}>
+{% include '_user_nav.html' %}
+{% set p = product or {} %}
+<main class="product-form-main">
+  <a class="back-link" href="{{ url_for('admin_products') }}">← Danh sách sản phẩm</a>
+  <header class="page-heading form-heading"><div><p class="eyebrow">{{ 'CHI TIẾT SẢN PHẨM' if product else 'SẢN PHẨM MỚI' }}</p><h1>{{ p.name or ('Sản phẩm #' ~ p.id if product else 'Thêm sản phẩm') }}</h1><p class="muted">Canonical brand là định danh chuẩn. Source brand ghi nguồn catalog và không tự suy diễn.</p></div>{% if product %}<span class="id-chip">ID {{ p.id }} · rev {{ p.revision }}</span>{% endif %}</header>
+  {% if message %}<div class="alert success" role="status">{{ message }}</div>{% endif %}
+  {% if error %}<div class="alert error" role="alert">{{ error }}</div>{% endif %}
+  <form class="product-form" method="post" action="{{ url_for('admin_product_update', product_id=p.id) if product else url_for('admin_product_create') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% if product %}<input type="hidden" name="revision" value="{{ p.revision }}">{% endif %}
+    <fieldset><legend>Nhận diện</legend><div class="form-grid">
+      <div class="field span-2"><label for="name">Tên sản phẩm</label><input id="name" name="name" maxlength="4000" value="{{ p.name or '' }}"></div>
+      <div class="field"><label for="code">Code <span aria-hidden="true">*</span></label><input id="code" name="code" maxlength="500" required value="{{ p.code or '' }}"></div>
+      <div class="field"><label for="cas">CAS</label><input id="cas" name="cas" maxlength="500" value="{{ p.cas or '' }}"></div>
+      <div class="field"><label for="brand">Canonical brand <span aria-hidden="true">*</span></label><select id="brand" name="brand" required><option value="">Chọn brand</option>{% for brand in brands %}<option value="{{ brand }}"{{ ' selected' if brand == p.brand else '' }}>{{ brand }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="source-brand">Source brand</label><input id="source-brand" name="source_brand" maxlength="500" value="{{ p.source_brand or '' }}" placeholder="Mặc định theo canonical brand"><span class="help">Giữ nguyên tên nguồn/alias catalog nếu có.</span></div>
+    </div></fieldset>
+    <fieldset><legend>Thương mại</legend><div class="form-grid">
+      <div class="field"><label for="size">Quy cách</label><input id="size" name="size" maxlength="500" value="{{ p.size or '' }}"></div>
+      <div class="field"><label for="preparation">Dạng sản phẩm</label><select id="preparation" name="preparation_type"><option value="">Chưa phân loại</option>{% for value,label in [('NEAT','NEAT · nguyên chất'),('SOLUTION','SOLUTION · dung dịch'),('MIXTURE','MIXTURE · hỗn hợp'),('OTHER','OTHER · khác')] %}<option value="{{ value }}"{{ ' selected' if value == p.preparation_type else '' }}>{{ label }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="price">Giá</label><input id="price" name="price" maxlength="500" value="{{ p.price or '' }}"></div>
+      <div class="field"><label for="ship">Ship</label><input id="ship" name="ship" maxlength="500" value="{{ p.ship or '' }}"></div>
+      <div class="field span-2"><label for="note">Ghi chú sản phẩm</label><textarea id="note" name="note" maxlength="4000">{{ p.note or '' }}</textarea></div>
+    </div></fieldset>
+    <fieldset><legend>Tình trạng quản lý thủ công</legend><p class="fieldset-note">Để trống để tiếp tục dùng regulatory resolver tự động. Form này không sửa quy tắc regulatory.</p><div class="form-grid">
+      <div class="field"><label for="compliance">Tình trạng</label><select id="compliance" name="manual_compliance"><option value="">Không ghi đè</option>{% for value in ['Được bán','Phụ lục II','Phụ lục III','Cần giấy phép','Cấm nhập','Chưa xác định'] %}<option value="{{ value }}"{{ ' selected' if value == p.manual_compliance else '' }}>{{ value }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="compliance-note">Ghi chú quản lý</label><textarea id="compliance-note" name="manual_compliance_note" maxlength="4000">{{ p.manual_compliance_note or '' }}</textarea></div>
+    </div></fieldset>
+    <div class="form-actions"><button class="button primary" type="submit"><i class="fas fa-save" aria-hidden="true"></i> {{ 'Lưu thay đổi' if product else 'Thêm sản phẩm' }}</button><a class="button secondary" href="{{ url_for('admin_products') }}">Hủy</a></div>
+  </form>
+  {% if product %}
+  <section class="detail-delete"><div><h2>Xóa sản phẩm này</h2><p class="muted">Hệ thống sẽ đếm, khóa phiên bản và tạo bản khôi phục trước khi xóa.</p></div><button type="button" class="button danger" data-delete-preview data-scope="product" data-product-id="{{ p.id }}" data-brand="{{ p.brand }}"><i class="fas fa-trash-alt" aria-hidden="true"></i> Xem trước xóa</button></section>
+  {% if events %}<section class="detail-audit"><h2>Thay đổi gần đây</h2><ol>{% for e in events %}<li><strong>{{ e.action }}</strong> · {{ e.actor }} · {{ e.created_at.strftime('%d/%m/%Y %H:%M') }}</li>{% endfor %}</ol></section>{% endif %}
+  <dialog id="delete-dialog" class="delete-dialog" aria-labelledby="delete-title"><form method="dialog"><button class="dialog-close" aria-label="Đóng hộp xác nhận">×</button></form><p class="eyebrow">THAO TÁC PHÁ HỦY</p><h2 id="delete-title">Xác nhận phạm vi xóa</h2><p id="delete-summary" class="delete-summary"></p><p class="muted small">Preview có hiệu lực 5 phút và chỉ dùng một lần. Nếu dữ liệu đổi, hệ thống sẽ từ chối.</p><label for="delete-confirmation">Nhập <strong id="delete-phrase"></strong> để tiếp tục</label><input id="delete-confirmation" autocomplete="off"><input id="delete-token" type="hidden"><div class="dialog-actions"><button type="button" class="button secondary" data-dialog-cancel>Hủy</button><button type="button" class="button danger" data-delete-apply disabled>Xóa đúng phạm vi này</button></div><p class="dialog-status" role="status" aria-live="polite"></p></dialog>
+  {% endif %}
+</main>
+</body>
+</html>

@@ -51,7 +51,7 @@ NAV_CSS = (ROOT / "static" / "admin_nav.css").read_text(encoding="utf-8")
 VERIFIED_FA5_ICONS = {
     "fa-flask", "fa-bars", "fa-search", "fa-bolt", "fa-cog",
     "fa-chevron-down", "fa-sign-out-alt",
-    "fa-file-import", "fa-users", "fa-user-cog", "fa-network-wired",
+    "fa-box", "fa-file-import", "fa-users", "fa-user-cog", "fa-network-wired",
     "fa-file-invoice", "fa-money-bill-alt", "fa-shield-alt", "fa-history",
 }
 
@@ -73,17 +73,17 @@ class NavShellStaticTests(unittest.TestCase):
         self.assertIn('aria-expanded="false"', tag)  # closed by default on page load
         self.assertIn('aria-controls="sqAdminMenu"', tag)
 
-    def test_panel_contains_all_eight_admin_endpoints_exactly_once(self):
+    def test_panel_contains_all_nine_admin_endpoints_exactly_once(self):
         # `_sq_admin_links` is the single source of truth the panel's
         # `{% for %}` loop iterates over (`url_for(endpoint)` per row, not
-        # a literal call per endpoint) -- so "the panel renders all 8
+        # a literal call per endpoint) -- so "the panel renders all 9
         # exactly once" reduces to "this list has each endpoint exactly
         # once", which is what actually drives the loop below it.
         list_start = NAV_HTML.index("_sq_admin_links = [")
         list_end = NAV_HTML.index("] %}", list_start)
         links_list = NAV_HTML[list_start:list_end]
         for endpoint in [
-            "admin_imports", "admin_teams.index", "admin_users",
+            "admin_products", "admin_imports", "admin_teams.index", "admin_users",
             "admin_network", "admin_quote_templates_page",
             "admin_exchange_rates", "admin_brand_compliance",
             "admin_login_history.index",
@@ -168,7 +168,7 @@ class NavShellStaticTests(unittest.TestCase):
         # rendered output. `NavShellRouteRenderTests` below separately
         # confirms real rendered pages show only the human labels.
         for label in [
-            "Nhập dữ liệu", "Team & quyền truy cập", "Người dùng",
+            "Sản phẩm", "Nhập dữ liệu", "Team & quyền truy cập", "Người dùng",
             "Mạng / IP", "Mẫu báo giá", "Tỷ giá", "Tình trạng quản lý",
             "Lịch sử đăng nhập",
         ]:
@@ -218,7 +218,7 @@ class NavShellRouteRenderTests(unittest.TestCase):
                 sess, is_admin=is_admin, username="polish_test_user", **extra
             )
 
-    def test_admin_sees_trigger_closed_by_default_and_all_eight_links(self):
+    def test_admin_sees_trigger_closed_by_default_and_all_nine_links(self):
         self._login(is_admin=True)
         resp = self.client.get("/")
         self.assertEqual(resp.status_code, 200)
@@ -226,6 +226,7 @@ class NavShellRouteRenderTests(unittest.TestCase):
         self.assertIn('id="sqAdminTrigger"', body)
         self.assertIn('aria-expanded="false"', body)
         self.assertEqual(body.count('href="/admin/teams"'), 1)
+        self.assertEqual(body.count('href="/admin/products"'), 1)
         self.assertEqual(body.count('href="/admin/users"'), 1)
 
     def test_staff_sees_no_admin_trigger_or_panel_at_all(self):

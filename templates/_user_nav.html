@@ -21,7 +21,7 @@
   compared against each link's own `url_for(...)` result -- no new
   context variable, no route/endpoint change required anywhere.
 
-  Phase 6B1-Polish: the 8 admin links used to render as a flat row of
+  Phase 6B1-Polish: the admin links used to render as a flat row of
   links inline in the top bar, which wrapped to a second line well before
   1024px (too many items for one row). They're now grouped behind a single
   "Quản trị" disclosure button (WAI-ARIA "disclosure" pattern -- a button
@@ -44,6 +44,7 @@
    verified (via computed ::before content in a real FA5.15.2 page) to
    resolve to a real glyph, not a blank one. #}
 {% set _sq_admin_links = [
+  ('admin_products', 'fa-box', 'Sản phẩm'),
   ('admin_imports', 'fa-file-import', 'Nhập dữ liệu'),
   ('admin_teams.index', 'fa-users', 'Team & quyền truy cập'),
   ('admin_users', 'fa-user-cog', 'Người dùng'),
@@ -57,7 +58,8 @@
 {% for endpoint, _sq_icon, _sq_label in _sq_admin_links %}
   {% set _ = _sq_admin_paths.append(url_for(endpoint)) %}
 {% endfor %}
-{% set _sq_admin_active = request.path in _sq_admin_paths %}
+{% set _sq_products_path = url_for('admin_products') %}
+{% set _sq_admin_active = request.path in _sq_admin_paths or request.path.startswith(_sq_products_path + '/') %}
 <header class="sq-shell-header sq-user-nav">
   <div class="sq-shell-bar">
     <a class="sq-shell-brand" href="{{ _sq_home_path }}">
@@ -90,7 +92,7 @@
       <div class="sq-shell-admin" id="sqAdminWrap">
         {# Desktop-only trigger: hidden on mobile (see admin_nav.css) so the
            mobile hamburger panel below never shows a second, redundant
-           "tap to open" control for the same 8 links. #}
+           "tap to open" control for the same admin links. #}
         <button type="button"
                 class="sq-shell-link sq-shell-admin-trigger{{ ' is-active' if _sq_admin_active else '' }}"
                 id="sqAdminTrigger"
@@ -107,8 +109,9 @@
         <div class="sq-shell-admin-menu" id="sqAdminMenu">
           {% for endpoint, icon, label in _sq_admin_links %}
             {% set _sq_link_path = url_for(endpoint) %}
-            <a class="sq-shell-link{{ ' is-active' if request.path == _sq_link_path else '' }}"
-               href="{{ _sq_link_path }}"{% if request.path == _sq_link_path %} aria-current="page"{% endif %}>
+            {% set _sq_link_active = request.path == _sq_link_path or (endpoint == 'admin_products' and request.path.startswith(_sq_link_path + '/')) %}
+            <a class="sq-shell-link{{ ' is-active' if _sq_link_active else '' }}"
+               href="{{ _sq_link_path }}"{% if _sq_link_active %} aria-current="page"{% endif %}>
               <i class="fas {{ icon }}" aria-hidden="true"></i> {{ label }}
             </a>
           {% endfor %}

@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Quản lý sản phẩm — Search Tools</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_products.css', v='20260909a') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous">
+  <style>html{overflow-x:hidden}</style>
+  <script defer src="{{ url_for('static', filename='admin_products.js', v='20260909a') }}"></script>
+</head>
+<body data-delete-preview-url="{{ url_for('admin_product_delete_preview') }}"
+      data-delete-apply-url="{{ url_for('admin_product_delete_apply') }}"
+      data-products-url="{{ url_for('admin_products') }}">
+{% include '_user_nav.html' %}
+<main class="products-main">
+  <header class="page-heading">
+    <div>
+      <p class="eyebrow">QUẢN TRỊ · CATALOG</p>
+      <h1>Quản lý sản phẩm</h1>
+      <p class="muted">Tìm, kiểm tra và sửa từng dòng. Nhập số lượng lớn vẫn thực hiện tại Import Center.</p>
+    </div>
+    <div class="heading-actions">
+      <a class="button secondary" href="{{ url_for('admin_imports') }}"><i class="fas fa-file-import" aria-hidden="true"></i> Import Center</a>
+      <a class="button primary" href="{{ url_for('admin_product_new') }}"><i class="fas fa-plus" aria-hidden="true"></i> Thêm sản phẩm</a>
+    </div>
+  </header>
+
+  {% if message %}<div class="alert success" role="status">{{ message }}</div>{% endif %}
+  {% if error %}<div class="alert error" role="alert">{{ error }}</div>{% endif %}
+
+  <form class="filters" method="get" action="{{ url_for('admin_products') }}">
+    <div class="field search-field">
+      <label for="product-q">Tên, code hoặc CAS</label>
+      <div class="input-icon"><i class="fas fa-search" aria-hidden="true"></i><input id="product-q" name="q" value="{{ q }}" maxlength="200" placeholder="Ví dụ: 50-00-0 hoặc CRM123"></div>
+    </div>
+    <div class="field">
+      <label for="product-brand">Canonical brand</label>
+      <select id="product-brand" name="brand">
+        <option value="">Tất cả brand</option>
+        {% for brand in brands %}<option value="{{ brand }}"{{ ' selected' if brand == selected_brand else '' }}>{{ brand }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field page-size-field">
+      <label for="page-size">Số dòng</label>
+      <select id="page-size" name="page_size">
+        {% for size in [25,50,100] %}<option value="{{ size }}"{{ ' selected' if size == page_size else '' }}>{{ size }}</option>{% endfor %}
+      </select>
+    </div>
+    <button class="button primary" type="submit">Lọc</button>
+    {% if q or selected_brand %}<a class="clear-link" href="{{ url_for('admin_products') }}">Xóa bộ lọc</a>{% endif %}
+  </form>
+
+  <section aria-labelledby="result-title">
+    <div class="section-heading">
+      <div><h2 id="result-title">Danh sách sản phẩm</h2><p class="muted small">Sắp xếp theo ID; dùng con trỏ server-side, không quét bằng offset.</p></div>
+      <span class="result-count">{{ products|length }} dòng trên trang</span>
+    </div>
+    {% if products %}
+    <div class="table-scroll" tabindex="0" aria-label="Danh sách sản phẩm">
+      <table>
+        <thead><tr><th>ID</th><th>Sản phẩm</th><th>Canonical brand / nguồn</th><th>Quy cách</th><th>Giá / ship</th><th>Quản lý</th><th><span class="sr-only">Thao tác</span></th></tr></thead>
+        <tbody>
+        {% for p in products %}
+          <tr>
+            <td class="mono">{{ p.id }}</td>
+            <td><a class="product-link" href="{{ url_for('admin_product_detail', product_id=p.id) }}">{{ p.name or 'Chưa có tên' }}</a><span class="cell-meta">Code: {{ p.code or '—' }} · CAS: {{ p.cas or '—' }}</span></td>
+            <td><strong>{{ p.brand }}</strong><span class="cell-meta">Nguồn: {{ p.source_brand }}</span></td>
+            <td>{{ p.size or '—' }}<span class="cell-meta">{{ p.preparation_type or 'Chưa phân loại' }}</span></td>
+            <td>{{ p.price or '—' }}<span class="cell-meta">Ship: {{ p.ship or '—' }}</span></td>
+            <td>{{ p.manual_compliance or 'Tự động' }}{% if p.manual_compliance_note %}<span class="cell-meta" title="{{ p.manual_compliance_note }}">Có ghi chú thủ công</span>{% endif %}</td>
+            <td><a class="icon-link" href="{{ url_for('admin_product_detail', product_id=p.id) }}" title="Xem và sửa sản phẩm {{ p.id }}" aria-label="Xem và sửa sản phẩm {{ p.id }}"><i class="fas fa-pen" aria-hidden="true"></i></a></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <nav class="pagination" aria-label="Phân trang sản phẩm">
+      {% if prev_cursor %}<a class="button secondary" rel="prev" href="{{ url_for('admin_products', q=q, brand=selected_brand, page_size=page_size, cursor=prev_cursor) }}">← Trang trước</a>{% else %}<span></span>{% endif %}
+      {% if next_cursor %}<a class="button secondary" rel="next" href="{{ url_for('admin_products', q=q, brand=selected_brand, page_size=page_size, cursor=next_cursor) }}">Trang sau →</a>{% endif %}
+    </nav>
+    {% else %}
+    <div class="empty"><i class="fas fa-search" aria-hidden="true"></i><strong>Không có sản phẩm phù hợp</strong><p class="muted">Thử rút gọn từ khóa hoặc chọn brand khác.</p></div>
+    {% endif %}
+  </section>
+
+  {% if selected_brand %}
+  <section class="danger-zone" aria-labelledby="brand-delete-title">
+    <div><h2 id="brand-delete-title">Xóa toàn bộ sản phẩm của {{ selected_brand }}</h2><p class="muted">Chỉ xóa dòng sản phẩm. Brand Master, aliases, quyền team, quy tắc và lịch sử import được giữ nguyên.</p></div>
+    <button type="button" class="button danger" data-delete-preview data-scope="brand" data-brand="{{ selected_brand }}"><i class="fas fa-trash-alt" aria-hidden="true"></i> Đếm & xem trước</button>
+  </section>
+  {% endif %}
+
+  <section class="recovery" aria-labelledby="recovery-title">
+    <div class="section-heading"><div><h2 id="recovery-title">Xóa gần đây & khôi phục</h2><p class="muted small">Khôi phục tự động chỉ chạy khi phạm vi chưa có dữ liệu mới chồng lấp.</p></div></div>
+    {% if batches %}
+    <div class="table-scroll" tabindex="0" aria-label="Lịch sử xóa sản phẩm">
+      <table><thead><tr><th>Thời gian</th><th>Phạm vi</th><th>Số dòng</th><th>Người thực hiện</th><th>Trạng thái</th><th><span class="sr-only">Khôi phục</span></th></tr></thead><tbody>
+      {% for b in batches %}<tr><td>{{ b.deleted_at.strftime('%d/%m/%Y %H:%M') }}</td><td>{{ 'Sản phẩm #' ~ b.product_id if b.scope_type == 'product' else 'Brand ' ~ b.canonical_brand }}</td><td>{{ '{:,}'.format(b.row_count) }}</td><td>{{ b.actor }}</td><td>{{ 'Đã khôi phục' if b.restored_at else 'Có bản khôi phục' }}</td><td>{% if not b.restored_at %}<form method="post" action="{{ url_for('admin_product_restore', batch_id=b.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="text-button" type="submit" title="Khôi phục bản xóa này">Khôi phục</button></form>{% endif %}</td></tr>{% endfor %}
+      </tbody></table>
+    </div>
+    {% else %}<p class="muted">Chưa có lần xóa nào từ trang quản lý sản phẩm.</p>{% endif %}
+  </section>
+</main>
+
+<dialog id="delete-dialog" class="delete-dialog" aria-labelledby="delete-title">
+  <form method="dialog"><button class="dialog-close" aria-label="Đóng hộp xác nhận">×</button></form>
+  <p class="eyebrow">THAO TÁC PHÁ HỦY</p><h2 id="delete-title">Xác nhận phạm vi xóa</h2>
+  <p id="delete-summary" class="delete-summary"></p>
+  <p class="muted small">Preview có hiệu lực 5 phút và chỉ dùng một lần. Nếu dữ liệu đổi, hệ thống sẽ từ chối.</p>
+  <label for="delete-confirmation">Nhập <strong id="delete-phrase"></strong> để tiếp tục</label>
+  <input id="delete-confirmation" autocomplete="off">
+  <input id="delete-token" type="hidden">
+  <div class="dialog-actions"><button type="button" class="button secondary" data-dialog-cancel>Hủy</button><button type="button" class="button danger" data-delete-apply disabled>Xóa đúng phạm vi này</button></div>
+  <p class="dialog-status" role="status" aria-live="polite"></p>
+</dialog>
+</body>
+</html>

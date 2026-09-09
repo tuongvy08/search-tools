@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nhập dữ liệu — Admin</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260909c4') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
   <style>
     :root {
@@ -307,7 +308,7 @@
     }
   </style>
 </head>
-<body>
+<body class="admin-page">
   {% include "_user_nav.html" %}
   <div class="wrap">
     <header>
@@ -717,5 +718,6 @@
     });
   })();
 </script>
+<script src="{{ url_for('static', filename='admin_ux.js', v='20260909c4') }}"></script>
 </body>
 </html>

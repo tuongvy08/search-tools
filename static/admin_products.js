@@ -12,6 +12,7 @@
   const token = document.getElementById('delete-token');
   const applyButton = dialog.querySelector('[data-delete-apply]');
   const status = dialog.querySelector('.dialog-status');
+  let dialogOpener = null;
 
   const setBusy = (button, busy, text) => {
     button.disabled = busy;
@@ -32,6 +33,7 @@
       if (button.dataset.productId) data.set('product_id', button.dataset.productId);
       if (button.dataset.brand) data.set('brand', button.dataset.brand);
       try {
+        dialogOpener = button;
         const response = await fetch(previewUrl, { method: 'POST', body: data, credentials: 'same-origin' });
         if (!response.ok) throw new Error(await messageFrom(response));
         const result = await response.json();
@@ -58,6 +60,10 @@
     applyButton.disabled = confirmation.value.trim() !== phrase.textContent;
   });
   dialog.querySelector('[data-dialog-cancel]').addEventListener('click', () => dialog.close());
+  dialog.addEventListener('close', () => {
+    if (dialogOpener) dialogOpener.focus();
+    dialogOpener = null;
+  });
   applyButton.addEventListener('click', async () => {
     const data = new FormData();
     data.set('csrf_token', csrf || '');

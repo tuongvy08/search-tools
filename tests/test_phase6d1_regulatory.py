@@ -19,6 +19,7 @@ from werkzeug.datastructures import FileStorage
 os.environ.setdefault("FLASK_SECRET_KEY", "phase6d1-test-only")
 
 import regulatory_import_jobs
+import admin_regulatory
 from import_engine import ImportProblem
 from regulatory import normalize_cas, normalized_identity, product_resolver_lateral
 import search
@@ -28,6 +29,7 @@ import pg_temp_db
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION_026 = (ROOT / "sql" / "migration_026_regulatory_management.sql").read_text(encoding="utf-8")
+MIGRATION_027 = (ROOT / "sql" / "migration_027_regulatory_status_colors.sql").read_text(encoding="utf-8")
 
 
 def _workbook_bytes(headers, rows):
@@ -71,13 +73,18 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
 
     def setUp(self):
         with self.conn.cursor() as cur:
+            cur.execute("""UPDATE app_users SET is_admin=true,account_status='ACTIVE',auth_version=1
+                           WHERE id=%s""", (self.admin_id,))
             cur.execute("DELETE FROM regulatory_import_jobs")
             cur.execute("DELETE FROM regulatory_status_events")
             cur.execute("DELETE FROM products")
             cur.execute("DELETE FROM brand_compliance_settings")
             cur.execute("DELETE FROM regulatory_rules")
             cur.execute("DELETE FROM regulatory_statuses WHERE stable_key LIKE 'CUSTOM_%'")
-            cur.execute("UPDATE regulatory_statuses SET label=CASE stable_key WHEN 'CAM_NHAP' THEN 'CẤM NHẬP' WHEN 'PHU_LUC_II' THEN 'Phụ lục II' WHEN 'PHU_LUC_III' THEN 'Phụ lục III' WHEN 'DUOC_BAN' THEN 'Được bán' WHEN 'CAN_GIAY_PHEP' THEN 'Cần giấy phép' ELSE 'Chưa xác định' END, priority=CASE stable_key WHEN 'CAM_NHAP' THEN 10 WHEN 'PHU_LUC_II' THEN 20 WHEN 'PHU_LUC_III' THEN 30 WHEN 'DUOC_BAN' THEN 40 WHEN 'CAN_GIAY_PHEP' THEN 50 ELSE 60 END")
+            cur.execute("""UPDATE regulatory_statuses SET
+                           label=CASE stable_key WHEN 'CAM_NHAP' THEN 'CẤM NHẬP' WHEN 'PHU_LUC_II' THEN 'Phụ lục II' WHEN 'PHU_LUC_III' THEN 'Phụ lục III' WHEN 'DUOC_BAN' THEN 'Được bán' WHEN 'CAN_GIAY_PHEP' THEN 'Cần giấy phép' ELSE 'Chưa xác định' END,
+                           priority=CASE stable_key WHEN 'CAM_NHAP' THEN 10 WHEN 'PHU_LUC_II' THEN 20 WHEN 'PHU_LUC_III' THEN 30 WHEN 'DUOC_BAN' THEN 40 WHEN 'CAN_GIAY_PHEP' THEN 50 ELSE 60 END,
+                           color_key=CASE stable_key WHEN 'CAM_NHAP' THEN 'red' WHEN 'PHU_LUC_II' THEN 'amber' WHEN 'PHU_LUC_III' THEN 'teal' WHEN 'DUOC_BAN' THEN 'green' WHEN 'CAN_GIAY_PHEP' THEN 'blue' ELSE 'gray' END""")
 
     def _status(self, key):
         with self.conn.cursor() as cur:
@@ -93,6 +100,14 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
 
     def _admin_client(self):
         start_auth_db_patch(self)
+        search.app.testing = True
+        client = search.app.test_client()
+        with client.session_transaction() as sess:
+            sess.update(authenticated=True,user_id=self.admin_id,auth_version=1,is_admin=True,
+                        username="phase6d1_admin",csrf_token="phase6d1-csrf")
+        return client
+
+    def _real_admin_client(self):
         search.app.testing = True
         client = search.app.test_client()
         with client.session_transaction() as sess:
@@ -263,8 +278,8 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
                 plan = regulatory_import_jobs.build_plan(cur, rows, "upsert")
                 regulatory_import_jobs.apply_plan(cur, rows, "upsert", plan)
         with self.conn.cursor() as cur:
-            cur.execute("SELECT export_policy,priority=(SELECT max(priority) FROM regulatory_statuses) FROM regulatory_statuses WHERE label='Theo dõi nội bộ'")
-            self.assertEqual(cur.fetchone(), ("ALLOW", True))
+            cur.execute("SELECT export_policy,priority=(SELECT max(priority) FROM regulatory_statuses),color_key FROM regulatory_statuses WHERE label='Theo dõi nội bộ'")
+            self.assertEqual(cur.fetchone(), ("ALLOW", True, "gray"))
 
     def test_admin_ui_status_create_rename_and_templates(self):
         client = self._admin_client()
@@ -274,6 +289,8 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
         self.assertIn("Quy tắc quản lý", html)
         self.assertIn("Thay đúng nhóm trường + tình trạng", html)
         self.assertIn("Nhập dữ liệu an toàn", html)
+        self.assertIn("Đổi màu", html)
+        self.assertIn("Bảng màu cho", html)
         for raw in ("Phase 6D1", "Policy cho/chặn", "Background import", "format/checksum", "giữ rule"):
             self.assertNotIn(raw, html)
         self.assertIn('meta name="viewport"', html)
@@ -283,19 +300,29 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertNotIn("err=", response.location, response.location)
         with self.conn.cursor() as cur:
-            cur.execute("SELECT id,stable_key,export_policy,updated_at FROM regulatory_statuses WHERE label='Theo dõi UI'")
-            status_id, stable_key, policy, revision = cur.fetchone()
+            cur.execute("SELECT id,stable_key,export_policy,color_key,updated_at FROM regulatory_statuses WHERE label='Theo dõi UI'")
+            status_id, stable_key, policy, color_key, revision = cur.fetchone()
         self.assertEqual(policy, "ALLOW")
+        self.assertEqual(color_key, "gray")
+        response = client.post("/admin/regulatory/statuses", data={
+            "csrf_token": "phase6d1-csrf", "action": "set_color", "status_id": status_id,
+            "revision": str(revision), "color_key": "purple",
+        })
+        self.assertEqual(response.status_code, 302)
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT color_key,updated_at FROM regulatory_statuses WHERE id=%s", (status_id,))
+            self.assertEqual((color_key := cur.fetchone())[0], "purple")
+            revision = color_key[1]
         response = client.post("/admin/regulatory/statuses", data={
             "csrf_token": "phase6d1-csrf", "action": "rename", "status_id": status_id,
             "revision": str(revision), "label": "Theo dõi UI mới",
         })
         self.assertEqual(response.status_code, 302)
         with self.conn.cursor() as cur:
-            cur.execute("SELECT stable_key,label,export_policy FROM regulatory_statuses WHERE id=%s", (status_id,))
-            self.assertEqual(cur.fetchone(), (stable_key, "Theo dõi UI mới", "ALLOW"))
+            cur.execute("SELECT stable_key,label,export_policy,color_key FROM regulatory_statuses WHERE id=%s", (status_id,))
+            self.assertEqual(cur.fetchone(), (stable_key, "Theo dõi UI mới", "ALLOW", "purple"))
             cur.execute("SELECT event FROM regulatory_status_events WHERE status_id=%s ORDER BY id", (status_id,))
-            self.assertEqual([row[0] for row in cur.fetchall()], ["created", "renamed"])
+            self.assertEqual([row[0] for row in cur.fetchall()], ["created", "color_changed", "renamed"])
         template = client.get("/admin/regulatory/templates/cas")
         self.assertEqual(template.status_code, 200)
         wb = load_workbook(BytesIO(template.data), read_only=True)
@@ -304,6 +331,214 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
                              ["CAS", "Tình trạng quản lý", "Ghi chú quản lý"])
         finally:
             wb.close()
+
+    def test_color_validation_stale_guard_policy_independence_and_no_product_write(self):
+        client = self._admin_client()
+        self._rule("CAM_NHAP", "code", "COLOR-BLOCK", "Vẫn chặn theo chính sách")
+        self._rule("CAM_NHAP", "cas", "50-00-0", "Màu chung cho tra cứu CAS")
+        self._rule("DUOC_BAN", "code", "COLOR-ALLOW", "Vẫn cho xuất theo chính sách")
+        with self.conn.cursor() as cur:
+            cur.execute("""INSERT INTO products(name,code,brand,size,ship,price)
+                           VALUES ('Blocked green','COLOR-BLOCK','Brand A','1g','1','100'),
+                                  ('Allowed red','COLOR-ALLOW','Brand A','1g','1','100')""")
+            cur.execute("INSERT INTO brand_compliance_settings VALUES ('BRAND A',true,now())")
+            cur.execute("""INSERT INTO products(name,code,cas,brand,size,ship,price,manual_compliance)
+                           VALUES ('Manual final colour','COLOR-MANUAL','50-00-0','Brand A','1g','1','100','Được bán')""")
+            cur.execute("SELECT xmin::text FROM products ORDER BY code")
+            product_versions = cur.fetchall()
+            cur.execute("SELECT id,updated_at FROM regulatory_statuses WHERE stable_key='CAM_NHAP'")
+            blocked_id, blocked_revision = cur.fetchone()
+            cur.execute("SELECT id,updated_at FROM regulatory_statuses WHERE stable_key='DUOC_BAN'")
+            allowed_id, allowed_revision = cur.fetchone()
+
+        invalid = client.post("/admin/regulatory/statuses", data={
+            "csrf_token": "phase6d1-csrf", "action": "set_color", "status_id": blocked_id,
+            "revision": str(blocked_revision), "color_key": "url(javascript:bad)",
+        })
+        self.assertIn("err=", invalid.location)
+        changed = client.post("/admin/regulatory/statuses", data={
+            "csrf_token": "phase6d1-csrf", "action": "set_color", "status_id": blocked_id,
+            "revision": str(blocked_revision), "color_key": "green",
+        })
+        self.assertNotIn("err=", changed.location)
+        stale = client.post("/admin/regulatory/statuses", data={
+            "csrf_token": "phase6d1-csrf", "action": "set_color", "status_id": blocked_id,
+            "revision": str(blocked_revision), "color_key": "purple",
+        })
+        self.assertIn("err=", stale.location)
+        allowed = client.post("/admin/regulatory/statuses", data={
+            "csrf_token": "phase6d1-csrf", "action": "set_color", "status_id": allowed_id,
+            "revision": str(allowed_revision), "color_key": "red",
+        })
+        self.assertNotIn("err=", allowed.location)
+
+        rows = client.get("/search", query_string={"query": "COLOR-"}).get_json()["results"]
+        by_code = {row["Code"]: row for row in rows}
+        self.assertEqual(by_code["COLOR-BLOCK"]["Compliance_Css"], "regulatory-color-green")
+        self.assertEqual(by_code["COLOR-BLOCK"]["Compliance_Export_Policy"], "BLOCK")
+        self.assertEqual(by_code["COLOR-ALLOW"]["Compliance_Css"], "regulatory-color-red")
+        self.assertEqual(by_code["COLOR-ALLOW"]["Compliance_Export_Policy"], "ALLOW")
+        manual = client.get("/search", query_string={"query": "COLOR-MANUAL"}).get_json()["results"][0]
+        self.assertEqual((manual["Compliance_Status"], manual["Compliance_Css"],
+                          manual["Compliance_Export_Policy"]),
+                         ("Được bán", "regulatory-color-red", "ALLOW"))
+        found = client.post("/find_code_batch", data={"codes": "COLOR-BLOCK"}).get_json()["results"][0]
+        self.assertEqual(found["Compliance_Css"], "regulatory-color-green")
+        checked = client.post("/check_cas_batch", data={"cas": "50-00-0"}).get_json()["results"][0]
+        self.assertEqual(checked["Compliance_Css"], "regulatory-color-green")
+        quote = client.post("/api/quote-assistant/match", json={
+            "rows": [{"code": "COLOR-BLOCK"}, {"code": "COLOR-ALLOW"}],
+            "selection_strategy": "LOWEST_UNIT_PRICE",
+        }).get_json()["results"]
+        self.assertEqual(quote[0]["candidates"][0]["ineligible_reason"], "COMPLIANCE_BLOCKED")
+        self.assertNotEqual(quote[1]["candidates"][0]["ineligible_reason"], "COMPLIANCE_BLOCKED")
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT xmin::text FROM products ORDER BY code")
+            self.assertEqual(cur.fetchall(), product_versions)
+
+    def test_set_color_revalidates_and_locks_actor_after_regulatory_wait(self):
+        cases = {
+            "auth_version": "UPDATE app_users SET auth_version=2 WHERE id=%s",
+            "demoted": "UPDATE app_users SET is_admin=false WHERE id=%s",
+            "suspended": "UPDATE app_users SET account_status='SUSPENDED' WHERE id=%s",
+        }
+        for label, revoke_sql in cases.items():
+            with self.subTest(label=label):
+                with self.conn.cursor() as cur:
+                    cur.execute("""UPDATE app_users
+                                   SET is_admin=true,account_status='ACTIVE',auth_version=1
+                                   WHERE id=%s""", (self.admin_id,))
+                    cur.execute("""UPDATE regulatory_statuses
+                                   SET color_key='red',updated_at=clock_timestamp()
+                                   WHERE stable_key='CAM_NHAP' RETURNING id,updated_at""")
+                    status_id, revision = cur.fetchone()
+                    cur.execute("DELETE FROM regulatory_status_events WHERE status_id=%s", (status_id,))
+
+                locker = psycopg2.connect(self.dsn)
+                locker.autocommit = False
+                with locker.cursor() as cur:
+                    cur.execute("SELECT pg_advisory_xact_lock(%s)",
+                                (regulatory_import_jobs.REGULATORY_LOCK_KEY,))
+                reached_lock = threading.Event()
+                real_acquire = admin_regulatory.acquire_regulatory_lock
+                result = {}
+
+                def marked_acquire(cur):
+                    reached_lock.set()
+                    return real_acquire(cur)
+
+                def request_color_change():
+                    result["response"] = self._real_admin_client().post(
+                        "/admin/regulatory/statuses",
+                        data={"csrf_token": "phase6d1-csrf", "action": "set_color",
+                              "status_id": status_id, "revision": str(revision),
+                              "color_key": "purple"},
+                    )
+
+                thread = threading.Thread(target=request_color_change)
+                try:
+                    with mock.patch.object(admin_regulatory, "acquire_regulatory_lock",
+                                           side_effect=marked_acquire):
+                        thread.start()
+                        self.assertTrue(reached_lock.wait(5), "request never reached regulatory lock")
+                        self.assertTrue(thread.is_alive(), "request did not block on regulatory lock")
+                        updater = psycopg2.connect(self.dsn)
+                        try:
+                            with updater, updater.cursor() as cur:
+                                cur.execute(revoke_sql, (self.admin_id,))
+                        finally:
+                            updater.close()
+                        locker.rollback()
+                        thread.join(10)
+                finally:
+                    locker.close()
+                    if thread.is_alive():
+                        thread.join(5)
+
+                self.assertFalse(thread.is_alive(), "request hung after regulatory lock release")
+                self.assertEqual(result["response"].status_code, 403)
+                with self.conn.cursor() as cur:
+                    cur.execute("SELECT color_key FROM regulatory_statuses WHERE id=%s", (status_id,))
+                    self.assertEqual(cur.fetchone()[0], "red")
+                    cur.execute("SELECT count(*) FROM regulatory_status_events WHERE status_id=%s",
+                                (status_id,))
+                    self.assertEqual(cur.fetchone()[0], 0)
+
+        with self.conn.cursor() as cur:
+            cur.execute("""UPDATE app_users SET is_admin=true,account_status='ACTIVE',auth_version=1
+                           WHERE id=%s""", (self.admin_id,))
+            cur.execute("SELECT id,updated_at FROM regulatory_statuses WHERE stable_key='CAM_NHAP'")
+            status_id, revision = cur.fetchone()
+        response = self._real_admin_client().post("/admin/regulatory/statuses", data={
+            "csrf_token": "phase6d1-csrf", "action": "set_color", "status_id": status_id,
+            "revision": str(revision), "color_key": "purple",
+        })
+        self.assertEqual(response.status_code, 302)
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT color_key FROM regulatory_statuses WHERE id=%s", (status_id,))
+            self.assertEqual(cur.fetchone()[0], "purple")
+            cur.execute("""SELECT count(*) FROM regulatory_status_events
+                           WHERE status_id=%s AND event='color_changed'""", (status_id,))
+            self.assertEqual(cur.fetchone()[0], 1)
+
+    def test_set_color_requires_csrf_and_admin_session(self):
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT id,color_key,updated_at FROM regulatory_statuses WHERE stable_key='CAM_NHAP'")
+            status_id, original_color, revision = cur.fetchone()
+        admin = self._real_admin_client()
+        missing_csrf = admin.post("/admin/regulatory/statuses", data={
+            "action": "set_color", "status_id": status_id,
+            "revision": str(revision), "color_key": "purple",
+        })
+        self.assertEqual(missing_csrf.status_code, 400)
+        marker = secrets.token_hex(4)
+        with self.conn.cursor() as cur:
+            cur.execute("INSERT INTO teams(name,lifecycle_status) VALUES (%s,'ACTIVE') RETURNING id",
+                        (f"Color guard {marker}",))
+            team_id = cur.fetchone()[0]
+            cur.execute("""INSERT INTO app_users
+                               (username,password_hash,team_id,is_admin,account_status,auth_version)
+                           VALUES (%s,'x',%s,false,'ACTIVE',1) RETURNING id""",
+                        (f"color_guard_{marker}", team_id))
+            staff_id = cur.fetchone()[0]
+        staff = search.app.test_client()
+        with staff.session_transaction() as sess:
+            sess.update(authenticated=True,user_id=staff_id,auth_version=1,is_admin=False,
+                        team_id=team_id,username=f"color_guard_{marker}",csrf_token="staff-csrf")
+        nonadmin = staff.post("/admin/regulatory/statuses", data={
+            "csrf_token": "staff-csrf", "action": "set_color", "status_id": status_id,
+            "revision": str(revision), "color_key": "purple",
+        })
+        self.assertEqual(nonadmin.status_code, 403)
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT color_key FROM regulatory_statuses WHERE id=%s", (status_id,))
+            self.assertEqual(cur.fetchone()[0], original_color)
+
+    def test_color_metadata_is_redacted_without_compliance_permission(self):
+        self._rule("PHU_LUC_II", "code", "HIDDEN-COLOR", "regulatory note")
+        with self.conn.cursor() as cur:
+            cur.execute("""INSERT INTO products(name,code,brand,size,ship,price,note)
+                           VALUES ('Visible product','HIDDEN-COLOR','Brand A','1g','1','100','Visible product note')""")
+        grants = {"SEARCH", "FIND_CODE", "QUICK_QUOTE", "VIEW_NAME", "VIEW_CODE",
+                  "VIEW_PRICE", "VIEW_NOTE"}
+        client = self._team_client(grants)
+        with client.session_transaction() as sess:
+            team_id = sess["team_id"]
+        with self.conn.cursor() as cur:
+            cur.execute("INSERT INTO team_brands(team_id,brand) VALUES (%s,'Brand A')", (team_id,))
+        responses = [
+            client.get("/search", query_string={"query": "HIDDEN-COLOR"}),
+            client.post("/find_code_batch", data={"codes": "HIDDEN-COLOR"}),
+            client.post("/api/quote-assistant/match", json={"rows": [{"code": "HIDDEN-COLOR"}]}),
+        ]
+        for response in responses:
+            self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+            raw = response.get_data(as_text=True)
+            self.assertIn("Visible product note", raw)
+            for forbidden in ("Compliance_Color", "compliance_color", "Compliance_Css",
+                              "compliance_css", "regulatory-color-amber", "PHU_LUC_II"):
+                self.assertNotIn(forbidden, raw)
+        self.assertEqual(client.get("/check_cas", query_string={"cas": "50-00-0"}).status_code, 403)
 
     def test_background_preview_confirm_apply_and_audit(self):
         upload = _workbook_bytes(
@@ -468,6 +703,17 @@ class Phase6D1PureTests(unittest.TestCase):
     def test_text_identity_preserves_accents(self):
         self.assertNotEqual(normalized_identity("Hóa chất"), normalized_identity("Hoa chat"))
 
+    def test_frontend_uses_api_palette_and_workbook_mapping_excludes_color(self):
+        search_js = (ROOT / "static" / "script.js").read_text(encoding="utf-8")
+        quote_js = (ROOT / "static" / "quick_quote.js").read_text(encoding="utf-8")
+        css = (ROOT / "static" / "styles.css").read_text(encoding="utf-8")
+        self.assertNotIn("COMPLIANCE_CLASS", search_js)
+        self.assertNotIn("qqComplianceClass(compLabel)", quote_js)
+        self.assertIn("td:not(.qq-cell-lifecycle)", css)
+        mapping = search._quote_template_mapping_snapshot()["mapping"]
+        self.assertNotIn("Compliance_Color", mapping)
+        self.assertNotIn("Compliance_Css", mapping)
+
 
 class Phase6D1LegacyMigrationRehearsal(unittest.TestCase):
     @unittest.skipUnless(pg_temp_db.probe_postgres_reachable(), "isolated local PostgreSQL required")
@@ -485,7 +731,8 @@ class Phase6D1LegacyMigrationRehearsal(unittest.TestCase):
                 with conn.cursor() as cur:
                     cur.execute(pg_temp_db._MINIMAL_BASE_SCHEMA_SQL)
                     for name in pg_temp_db._FULL_SCHEMA_SQL_FILES:
-                        if name == "migration_026_regulatory_management.sql":
+                        if name in {"migration_026_regulatory_management.sql",
+                                  "migration_027_regulatory_status_colors.sql"}:
                             continue
                         cur.execute(pg_temp_db._read_sql(name))
                     cur.execute("INSERT INTO regulatory_rules(rule_type,rule_label,match_field,match_value,priority,is_active,note) VALUES ('CAM_NHAP','old label','cas','50-00-0',999,true,'keep'),('TON_KHO','TỒN KHO','code','STOCK',1,true,'remove')")
@@ -502,6 +749,90 @@ class Phase6D1LegacyMigrationRehearsal(unittest.TestCase):
                     self.assertEqual(cur.fetchall(), [("CAM_NHAP",)])
                     cur.execute("SELECT manual_compliance_status_id IS NOT NULL FROM products WHERE code='P1'")
                     self.assertTrue(cur.fetchone()[0])
+            conn.close()
+        finally:
+            pg_temp_db.drop_temp_db(db_name)
+
+    @unittest.skipUnless(pg_temp_db.probe_postgres_reachable(), "isolated local PostgreSQL required")
+    def test_027_runs_twice_from_exact_026_schema_without_product_writes(self):
+        db_name = pg_temp_db._TEST_DB_PREFIX + "phase6d11_migration_" + secrets.token_hex(4)
+        dsn = pg_temp_db.dsn_for(db_name)
+        maint = psycopg2.connect(pg_temp_db.maintenance_dsn())
+        maint.autocommit = True
+        with maint.cursor() as cur:
+            cur.execute(f'CREATE DATABASE "{db_name}"')
+        maint.close()
+        try:
+            conn = psycopg2.connect(dsn)
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute(pg_temp_db._MINIMAL_BASE_SCHEMA_SQL)
+                    for name in pg_temp_db._FULL_SCHEMA_SQL_FILES:
+                        if name in {"migration_026_regulatory_management.sql",
+                                  "migration_027_regulatory_status_colors.sql"}:
+                            continue
+                        cur.execute(pg_temp_db._read_sql(name))
+                    cur.execute("INSERT INTO products(name,code,brand) VALUES ('P','NO-WRITE','B')")
+                    cur.execute(MIGRATION_026)
+                    cur.execute("SELECT xmin::text FROM products WHERE code='NO-WRITE'")
+                    product_version = cur.fetchone()[0]
+                    cur.execute("SELECT id,label,priority FROM regulatory_statuses WHERE stable_key='CAM_NHAP'")
+                    status_id, label, priority = cur.fetchone()
+                    cur.execute("""INSERT INTO regulatory_rules
+                                       (rule_type,rule_label,match_field,match_value,priority,is_active,status_id)
+                                   VALUES ('CAM_NHAP',%s,'code','NO-WRITE',%s,true,%s)""",
+                                (label, priority, status_id))
+                    cur.execute(f"""SELECT rr.rule_label,rr.export_policy,rr.source,
+                                            rr.stable_key,rr.status_id,rr.color_key
+                                     FROM products p {product_resolver_lateral('p', manual_enabled_expr='FALSE')}
+                                     WHERE p.code='NO-WRITE'""")
+                    pre_migration_result = cur.fetchone()
+                    self.assertIsNone(pre_migration_result[5])
+                    resolved = search.resolve_compliance_precedence(
+                        brand_manual_enabled=False, manual_compliance=None,
+                        manual_compliance_note=None, legacy_compliance=pre_migration_result[0],
+                        legacy_compliance_note=None, cas=None,
+                        export_policy=pre_migration_result[1], source=pre_migration_result[2],
+                        stable_key=pre_migration_result[3], status_id=pre_migration_result[4],
+                        color_key=pre_migration_result[5],
+                    )
+                    self.assertEqual(resolved["compliance_css"], "regulatory-color-red")
+                    cur.execute("""INSERT INTO app_users
+                                       (username,password_hash,is_admin,account_status,auth_version)
+                                   VALUES ('pre027-admin','x',true,'ACTIVE',1) RETURNING id""")
+                    pre027_admin_id = cur.fetchone()[0]
+                    cur.execute("SELECT updated_at FROM regulatory_statuses WHERE id=%s", (status_id,))
+                    pre027_revision = cur.fetchone()[0]
+                conn.commit()
+                with mock.patch.dict(os.environ, {"DATABASE_URL": dsn, "DISABLE_IP_ALLOWLIST": "1"}):
+                    search.app.testing = True
+                    client = search.app.test_client()
+                    with client.session_transaction() as sess:
+                        sess.update(authenticated=True, user_id=pre027_admin_id, auth_version=1,
+                                    is_admin=True, username="pre027-admin", csrf_token="pre027-csrf")
+                    response = client.post("/admin/regulatory/statuses", data={
+                        "csrf_token": "pre027-csrf", "action": "set_color",
+                        "status_id": status_id, "revision": str(pre027_revision), "color_key": "blue",
+                    })
+                    self.assertIn("migration+027", response.location)
+                with conn.cursor() as cur:
+                    cur.execute(MIGRATION_027)
+                    cur.execute("""SELECT stable_key,color_key FROM regulatory_statuses
+                                   WHERE stable_key IN ('CAM_NHAP','PHU_LUC_II','PHU_LUC_III','DUOC_BAN')
+                                   ORDER BY stable_key""")
+                    self.assertEqual(cur.fetchall(), [
+                        ("CAM_NHAP", "red"), ("DUOC_BAN", "green"),
+                        ("PHU_LUC_II", "amber"), ("PHU_LUC_III", "teal"),
+                    ])
+                    cur.execute("UPDATE regulatory_statuses SET color_key='purple' WHERE stable_key='CAM_NHAP'")
+                    cur.execute(MIGRATION_027)
+                    cur.execute("SELECT color_key FROM regulatory_statuses WHERE stable_key='CAM_NHAP'")
+                    self.assertEqual(cur.fetchone()[0], "purple")
+                    cur.execute("SELECT xmin::text FROM products WHERE code='NO-WRITE'")
+                    self.assertEqual(cur.fetchone()[0], product_version)
+                    with self.assertRaises(psycopg2.errors.CheckViolation):
+                        with conn.cursor() as invalid_cur:
+                            invalid_cur.execute("UPDATE regulatory_statuses SET color_key='raw-css' WHERE stable_key='CAM_NHAP'")
             conn.close()
         finally:
             pg_temp_db.drop_temp_db(db_name)

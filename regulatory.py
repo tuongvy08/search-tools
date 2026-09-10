@@ -15,6 +15,26 @@ EXPORT_BLOCK = "BLOCK"
 REGULATORY_LOCK_KEY = 62402601
 MATCH_FIELDS = ("cas", "code", "name")
 MATCH_FIELD_LABELS = {"cas": "CAS", "code": "Code", "name": "Tên"}
+REGULATORY_COLORS = {
+    "gray": ("Xám", "Trung tính, phù hợp tình trạng chưa phân loại"),
+    "red": ("Đỏ", "Nổi bật cho tình trạng cần chú ý cao"),
+    "amber": ("Vàng", "Nhắc người dùng cần xem xét"),
+    "teal": ("Xanh ngọc", "Tông thông tin dễ phân biệt"),
+    "green": ("Xanh lá", "Tông tích cực, dễ nhận biết"),
+    "blue": ("Xanh dương", "Tông thông tin đậm"),
+    "purple": ("Tím", "Tông phân loại bổ sung"),
+}
+
+# Compatibility while application workers and migration 027 are rolled out.
+# This is stable-identity based; mutable labels and export policy are never used.
+_LEGACY_STABLE_COLORS = {
+    "CAM_NHAP": "red",
+    "PHU_LUC_II": "amber",
+    "PHU_LUC_III": "teal",
+    "DUOC_BAN": "green",
+    "CAN_GIAY_PHEP": "blue",
+    "CHUA_XAC_DINH": "gray",
+}
 
 _CAS_RE = re.compile(r"^(\d{2,7})-(\d{2})-(\d)$")
 
@@ -72,6 +92,7 @@ def stable_key_for_label(label: str) -> str:
 
 
 def policy_css(export_policy: Optional[str], stable_key: Optional[str] = None) -> str:
+    """Legacy-only adapter; current UI colour is resolved by ``color_css``."""
     if export_policy == EXPORT_BLOCK:
         return "warning-cam-nhap"
     known = {
@@ -82,6 +103,26 @@ def policy_css(export_policy: Optional[str], stable_key: Optional[str] = None) -
     return known.get(stable_key or "", "warning-regulatory" if stable_key else "")
 
 
+def normalize_color_key(value: Any) -> str:
+    color_key = clean_text(value, max_chars=20).lower()
+    if color_key not in REGULATORY_COLORS:
+        raise RegulatoryError("Màu tình trạng không hợp lệ; hãy chọn lại trong bảng màu.")
+    return color_key
+
+
+def effective_color_key(color_key: Any = None, stable_key: Any = None) -> str:
+    """Return a finite palette key without consulting mutable labels/policy."""
+    raw = "" if color_key is None else str(color_key).strip().lower()
+    if raw in REGULATORY_COLORS:
+        return raw
+    return _LEGACY_STABLE_COLORS.get(str(stable_key or ""), "gray" if stable_key else "")
+
+
+def color_css(color_key: Any = None, stable_key: Any = None) -> str:
+    effective = effective_color_key(color_key, stable_key)
+    return f"regulatory-color-{effective}" if effective else ""
+
+
 def resolved_result(
     label: Any = None,
     note: Any = None,
@@ -89,6 +130,7 @@ def resolved_result(
     source: Any = None,
     stable_key: Any = None,
     status_id: Any = None,
+    color_key: Any = None,
 ) -> dict[str, Any]:
     label_text = clean_text(label) if label is not None else ""
     # Individual rule notes are bounded at ingestion. A resolved product may
@@ -99,11 +141,12 @@ def resolved_result(
     result = {
         "compliance": label_text,
         "compliance_note": note_text,
-        "compliance_css": policy_css(policy, str(stable_key or "")),
+        "compliance_css": color_css(color_key, stable_key),
         "compliance_source": str(source or ("automatic" if label_text else "none")),
         "compliance_export_policy": policy,
         "compliance_status_id": status_id,
         "compliance_stable_key": str(stable_key or ""),
+        "compliance_color": effective_color_key(color_key, stable_key),
     }
     return result
 
@@ -130,7 +173,8 @@ def product_resolver_lateral(
         LEFT JOIN LATERAL (
             WITH manual_choice AS (
                 SELECT s.id AS status_id, s.stable_key, s.label AS rule_label,
-                       s.export_policy, NULLIF(btrim({p}.manual_compliance_note), '') AS note,
+                       s.export_policy, to_jsonb(s)->>'color_key' AS color_key,
+                       NULLIF(btrim({p}.manual_compliance_note), '') AS note,
                        'manual'::text AS source
                 FROM regulatory_statuses s
                 WHERE COALESCE({enabled}, FALSE)
@@ -154,18 +198,19 @@ def product_resolver_lateral(
                 SELECT status_id FROM matched ORDER BY priority, status_id LIMIT 1
             ), automatic_choice AS (
                 SELECT s.id AS status_id, s.stable_key, s.label AS rule_label,
-                       s.export_policy,
+                       s.export_policy, to_jsonb(s)->>'color_key' AS color_key,
                        string_agg(DISTINCT m.note, E'\n' ORDER BY m.note)
                            FILTER (WHERE m.note IS NOT NULL) AS note,
                        'automatic'::text AS source
                 FROM winning_status w
                 JOIN regulatory_statuses s ON s.id = w.status_id
                 JOIN matched m ON m.status_id = w.status_id
-                GROUP BY s.id, s.stable_key, s.label, s.export_policy
+                GROUP BY s.id, s.stable_key, s.label, s.export_policy, to_jsonb(s)->>'color_key'
             ), broken_manual AS (
                 SELECT NULL::bigint AS status_id, 'DATA_ERROR'::text AS stable_key,
                        'Lỗi dữ liệu quản lý'::text AS rule_label,
                        'BLOCK'::text AS export_policy,
+                       NULL::text AS color_key,
                        'Ngoại lệ thủ công không còn liên kết với danh mục tình trạng.'::text AS note,
                        'error'::text AS source
                 WHERE COALESCE({enabled}, FALSE)
@@ -188,7 +233,8 @@ def cas_resolver_lateral(input_expression: str = "i.cas_value") -> str:
         LEFT JOIN LATERAL (
             WITH matched AS (
                 SELECT r.status_id, NULLIF(btrim(r.note), '') AS note,
-                       s.priority, s.stable_key, s.label, s.export_policy
+                       s.priority, s.stable_key, s.label, s.export_policy,
+                       to_jsonb(s)->>'color_key' AS color_key
                 FROM regulatory_rules r
                 JOIN regulatory_statuses s ON s.id = r.status_id
                 WHERE r.is_active = TRUE AND r.match_field = 'cas'
@@ -197,13 +243,13 @@ def cas_resolver_lateral(input_expression: str = "i.cas_value") -> str:
                 SELECT status_id FROM matched ORDER BY priority, status_id LIMIT 1
             )
             SELECT s.id AS status_id, s.stable_key, s.label AS rule_label,
-                   s.export_policy,
+                   s.export_policy, to_jsonb(s)->>'color_key' AS color_key,
                    string_agg(DISTINCT m.note, E'\n' ORDER BY m.note)
                        FILTER (WHERE m.note IS NOT NULL) AS note,
                    'automatic'::text AS source
             FROM winner w JOIN regulatory_statuses s ON s.id=w.status_id
             JOIN matched m ON m.status_id=w.status_id
-            GROUP BY s.id,s.stable_key,s.label,s.export_policy
+            GROUP BY s.id,s.stable_key,s.label,s.export_policy,to_jsonb(s)->>'color_key'
         ) rr ON TRUE
     """
 
@@ -212,7 +258,8 @@ def catalog_fingerprint(cur) -> str:
     cur.execute(
         """
         SELECT jsonb_build_object(
-          'statuses', COALESCE((SELECT jsonb_agg(jsonb_build_array(id,stable_key,label,priority,export_policy)
+          'statuses', COALESCE((SELECT jsonb_agg(jsonb_build_array(id,stable_key,label,priority,export_policy,
+                                                                   to_jsonb(regulatory_statuses)->>'color_key')
                                      ORDER BY priority,id) FROM regulatory_statuses), '[]'::jsonb),
           'rules', COALESCE((SELECT jsonb_agg(jsonb_build_array(id,status_id,match_field,match_value,note,is_active)
                                   ORDER BY id) FROM regulatory_rules), '[]'::jsonb)

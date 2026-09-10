@@ -17,15 +17,7 @@ const EXPORT_COLUMNS = [
     { key: 'Compliance_Note', label: 'Ghi chú quản lý', resolve: productComplianceNote },
 ].filter((col) => TeamPermissions.field(col.key));
 
-const COMPLIANCE_CLASS = {
-    'CẤM NHẬP': 'warning-cam-nhap',
-    'Phụ lục II': 'warning-phu-luc-ii',
-    'Phụ lục III': 'warning-phu-luc-iii',
-    'TỒN KHO': 'warning-ton-kho',
-    'Được bán': 'warning-duoc-ban',
-    'Chưa xác định': 'warning-chua-xac-dinh',
-    'Không phát hiện hạn chế': 'warning-khong-phat-hien',
-};
+const REGULATORY_CLASS_RE = /^regulatory-color-(gray|red|amber|teal|green|blue|purple)$/;
 
 const AJAX_LONG_TIMEOUT_MS = 180000;
 
@@ -333,10 +325,7 @@ function productComplianceNote(product) {
 
 function productComplianceCss(product) {
     const fromApi = product.Compliance_Css || product.compliance_css || '';
-    if (fromApi) {
-        return fromApi;
-    }
-    return COMPLIANCE_CLASS[productCompliance(product)] || '';
+    return REGULATORY_CLASS_RE.test(fromApi) ? fromApi : '';
 }
 
 function setTextCell(row, text, className) {
@@ -367,14 +356,13 @@ function setComplianceBadgeCell(row, product) {
     return cell;
 }
 
-function badgeForCompliance(label) {
+function badgeForCompliance(label, cssClass) {
     if (!label) {
         return '';
     }
-    const cssClass = COMPLIANCE_CLASS[label] || '';
     const span = document.createElement('span');
     span.className = 'compliance-badge';
-    if (cssClass) {
+    if (REGULATORY_CLASS_RE.test(cssClass || '')) {
         span.classList.add(cssClass);
     }
     span.textContent = label;
@@ -419,6 +407,7 @@ function displayResults(products) {
 
         const cssClass = productComplianceCss(product);
         if (cssClass) {
+            row.classList.add('regulatory-row');
             row.classList.add(cssClass);
         }
         if (isSelected) {
@@ -798,11 +787,13 @@ $(document).ready(function() {
                     items.forEach(item => {
                         const status = item.Compliance_Status || '';
                         const note = item.Compliance_Note || '';
+                        const cssClass = REGULATORY_CLASS_RE.test(item.Compliance_Css || '') ? item.Compliance_Css : '';
+                        const statusBadge = status ? `<span class="compliance-badge ${cssClass}">${$('<div/>').text(status).html()}</span>` : '';
                         if (status) warnCount += 1;
                         rowsHtml += `
-                          <tr>
+                          <tr class="${cssClass ? `regulatory-row ${cssClass}` : ''}">
                             ${TeamPermissions.field('Cas') ? `<td>${$('<div/>').text(item.Cas || '').html()}</td>` : ''}
-                            <td>${$('<div/>').text(status).html()}</td>
+                            <td>${statusBadge}</td>
                             ${TeamPermissions.field('Compliance_Note') ? `<td class="cell-compliance-note">${$('<div/>').text(note).html()}</td>` : ''}
                           </tr>
                         `;

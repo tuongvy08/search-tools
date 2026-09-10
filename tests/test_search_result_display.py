@@ -95,9 +95,8 @@ class SearchDisplayStaticTests(unittest.TestCase):
 
     def test_script_has_compliance_classes_and_copy_columns(self):
         js = SCRIPT_JS.read_text(encoding="utf-8")
-        self.assertIn("'Được bán': 'warning-duoc-ban'", js)
-        self.assertIn("'Chưa xác định': 'warning-chua-xac-dinh'", js)
-        self.assertIn("'Không phát hiện hạn chế': 'warning-khong-phat-hien'", js)
+        self.assertIn("REGULATORY_CLASS_RE", js)
+        self.assertNotIn("'Được bán': 'warning-duoc-ban'", js)
         self.assertIn("label: 'Ghi chú quản lý'", js)
         self.assertIn("cell.textContent", js)
         self.assertNotIn("button-brand", js)
@@ -114,7 +113,7 @@ class SearchDisplayResolverTests(unittest.TestCase):
             cas="123-45-6",
         )
         self.assertEqual(resolved["compliance"], "Được bán")
-        self.assertEqual(resolved["compliance_css"], "warning-duoc-ban")
+        self.assertEqual(resolved["compliance_css"], "regulatory-color-green")
         self.assertEqual(resolved["compliance_note"], "ok")
 
     def test_legacy_category_and_note(self):
@@ -128,7 +127,7 @@ class SearchDisplayResolverTests(unittest.TestCase):
         )
         self.assertEqual(resolved["compliance"], "Phụ lục II")
         self.assertEqual(resolved["compliance_note"], "legacy note")
-        self.assertEqual(resolved["compliance_css"], "warning-phu-luc-ii")
+        self.assertEqual(resolved["compliance_css"], "regulatory-color-amber")
 
     def test_missing_cas_is_amber_not_green(self):
         resolved = resolve_compliance_precedence(
@@ -403,7 +402,7 @@ class SearchDisplayIntegrationTests(unittest.TestCase):
         self.assertEqual(row["note"], "product note separate")
         self.assertEqual(row["compliance"], "Được bán")
         self.assertEqual(row["compliance_note"], "manual compliance note")
-        self.assertEqual(row["Compliance_Css"], "warning-duoc-ban")
+        self.assertEqual(row["Compliance_Css"], "regulatory-color-green")
         self.assertNotEqual(row["Note"], row["compliance_note"])
 
     def test_copy_selected_output_from_search_row(self):

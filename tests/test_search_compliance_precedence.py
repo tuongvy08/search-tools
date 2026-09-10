@@ -316,7 +316,7 @@ class SearchCompliancePrecedenceTests(unittest.TestCase):
         self.assertEqual(manual["compliance"], "Được bán")
         self.assertEqual(manual["Compliance_Status"], "Được bán")
         self.assertEqual(manual["compliance_note"], "manual note only")
-        self.assertEqual(manual["compliance_css"], "warning-duoc-ban")
+        self.assertEqual(manual["compliance_css"], "regulatory-color-green")
         self.assertEqual(manual["compliance_source"], "manual")
         self.assertEqual(manual["note"], "product note manual")
         self.assertNotIn("legacy regulatory note", manual["compliance_note"])

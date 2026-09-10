@@ -40,6 +40,7 @@ def resolve_compliance_precedence(
     source: Any = None,
     stable_key: Any = None,
     status_id: Any = None,
+    color_key: Any = None,
 ) -> dict[str, Any]:
     """
     Resolve final compliance fields without database access.
@@ -59,6 +60,7 @@ def resolve_compliance_precedence(
             source,
             stable_key,
             status_id,
+            color_key,
         )
 
     # Compatibility for isolated pure unit tests that do not own a database.

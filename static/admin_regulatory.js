@@ -1,4 +1,18 @@
 document.addEventListener('DOMContentLoaded',function(){
+  var paletteClasses=['regulatory-color-gray','regulatory-color-red','regulatory-color-amber','regulatory-color-teal','regulatory-color-green','regulatory-color-blue','regulatory-color-purple'];
+  document.querySelectorAll('[data-color-form]').forEach(function(form){
+    form.addEventListener('change',function(event){
+      if(!event.target.matches('input[name="color_key"]'))return;
+      var row=form.closest('[data-status-color-preview]');
+      if(!row)return;
+      var badge=row.querySelector('.compliance-badge');
+      [row,badge].forEach(function(node){
+        if(!node)return;
+        paletteClasses.forEach(function(css){node.classList.remove(css);});
+        node.classList.add(event.target.dataset.colorCss);
+      });
+    });
+  });
   var card=document.querySelector('[data-job-status-url]');
   if(!card)return;
   var pill=card.querySelector('[data-job-status]');

@@ -48,6 +48,20 @@ def main():
                     (generate_password_hash("qa-only"),),
                 )
                 cur.execute(
+                    """INSERT INTO teams(name,lifecycle_status,permission_keys)
+                       VALUES ('QA staff no compliance','ACTIVE',%s) RETURNING id""",
+                    (["SEARCH", "FIND_CODE", "QUICK_QUOTE", "VIEW_NAME", "VIEW_CODE",
+                      "VIEW_CAS", "VIEW_PRICE", "VIEW_NOTE"],),
+                )
+                staff_team_id = cur.fetchone()[0]
+                cur.execute("INSERT INTO team_brands(team_id,brand) VALUES (%s,'TRC')", (staff_team_id,))
+                cur.execute(
+                    """INSERT INTO app_users
+                           (username,password_hash,team_id,is_admin,auth_provider,account_status)
+                       VALUES ('qa-staff',%s,%s,false,'LOCAL','ACTIVE')""",
+                    (generate_password_hash("qa-only"), staff_team_id),
+                )
+                cur.execute(
                     "SELECT id,label,priority FROM regulatory_statuses WHERE stable_key='PHU_LUC_II'"
                 )
                 status_id, label, priority = cur.fetchone()
@@ -82,7 +96,7 @@ def main():
             signal.signal(signal.SIGTERM, stop)
             signal.signal(signal.SIGINT, stop)
             print(
-                f"PHASE6D1_SMOKE http://127.0.0.1:5013 qa-admin qa-only {fixture_path}",
+                f"PHASE6D1_SMOKE http://127.0.0.1:5013 qa-admin/qa-staff qa-only {fixture_path}",
                 flush=True,
             )
             search.app.run(host="127.0.0.1", port=5013, debug=False, use_reloader=False)

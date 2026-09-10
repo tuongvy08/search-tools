@@ -78,6 +78,7 @@ _FULL_SCHEMA_SQL_FILES = (
     "migration_011_manual_compliance.sql",
     "migration_012_product_preparation_type.sql",
     "migration_026_regulatory_management.sql",
+    "migration_027_regulatory_status_colors.sql",
 )
 
 # Same minimal pre-014 base `test_admin_pg_integration.py` /

@@ -577,6 +577,7 @@ def _product_row_to_result(
     compliance_source=None,
     compliance_stable_key=None,
     compliance_status_id=None,
+    compliance_color_key=None,
 ) -> dict:
     unit_price, unit_price_display, rate_valid, rate_status = _compute_unit_price_details(
         price, ship, brand, rate_map
@@ -592,6 +593,7 @@ def _product_row_to_result(
         source=compliance_source,
         stable_key=compliance_stable_key,
         status_id=compliance_status_id,
+        color_key=compliance_color_key,
     )
     return {
         "product_id": product_id,
@@ -610,12 +612,14 @@ def _product_row_to_result(
         "Compliance_Css": resolved["compliance_css"],
         "Compliance_Source": resolved["compliance_source"],
         "Compliance_Export_Policy": resolved["compliance_export_policy"],
+        "Compliance_Color": resolved["compliance_color"],
         "note": note or "",
         "compliance": resolved["compliance"],
         "compliance_note": resolved["compliance_note"],
         "compliance_css": resolved["compliance_css"],
         "compliance_source": resolved["compliance_source"],
         "compliance_export_policy": resolved["compliance_export_policy"],
+        "compliance_color": resolved["compliance_color"],
     }
 
 
@@ -1173,6 +1177,7 @@ def _quote_candidate_from_row(row: tuple, rate_map) -> dict:
             legacy_source,
             stable_keys.get(legacy_label, ""),
             None,
+            None,
         )
     (
         _ord,
@@ -1195,6 +1200,7 @@ def _quote_candidate_from_row(row: tuple, rate_map) -> dict:
         compliance_source,
         compliance_stable_key,
         compliance_status_id,
+        compliance_color_key,
     ) = row
     unit_price, currency_rate_status = _quote_unit_price_value(ship, price, brand, rate_map)
     resolved = resolve_compliance_precedence(
@@ -1208,6 +1214,7 @@ def _quote_candidate_from_row(row: tuple, rate_map) -> dict:
         source=compliance_source,
         stable_key=compliance_stable_key,
         status_id=compliance_status_id,
+        color_key=compliance_color_key,
     )
     compliance = resolved["compliance"]
     warnings = [compliance] if compliance in QUOTE_WARNING_COMPLIANCE else []
@@ -1243,8 +1250,10 @@ def _quote_candidate_from_row(row: tuple, rate_map) -> dict:
         "Compliance": compliance,
         "Compliance_Note": resolved["compliance_note"],
         "Compliance_Export_Policy": resolved["compliance_export_policy"],
+        "Compliance_Color": resolved["compliance_color"],
         "compliance_source": resolved["compliance_source"],
         "compliance_css": resolved["compliance_css"],
+        "compliance_color": resolved["compliance_color"],
         "eligible": eligible,
         "ineligible_reason": ineligible_reason,
         "currency_rate_status": currency_rate_status,
@@ -2037,6 +2046,7 @@ def _quote_match_rows(conn, parsed_rows: list[dict], filters: dict, strategy: st
             rr.source AS compliance_source,
             rr.stable_key AS compliance_stable_key,
             rr.status_id AS compliance_status_id,
+            rr.color_key AS compliance_color_key,
             o.cas_count,
             o.resolved_cas_u,
             o.total_cas_count
@@ -2067,8 +2077,8 @@ def _quote_match_rows(conn, parsed_rows: list[dict], filters: dict, strategy: st
             row_type = db_row[0]
             ord_ = int(db_row[1])
             if row_type == "CODE_CAS_META":
-                code_cas_counts[ord_] = int(db_row[23] or 0)
-                code_total_cas_counts[ord_] = int(db_row[25] or 0)
+                code_cas_counts[ord_] = int(db_row[24] or 0)
+                code_total_cas_counts[ord_] = int(db_row[26] or 0)
                 continue
             if row_type == "CODE_CAS_VERIFIED":
                 code_cas_verified.add(ord_)
@@ -2094,6 +2104,7 @@ def _quote_match_rows(conn, parsed_rows: list[dict], filters: dict, strategy: st
                 db_row[20],
                 db_row[21],
                 db_row[22],
+                db_row[23],
             )
             by_ord.setdefault(ord_, []).append(_quote_candidate_from_row(candidate_row, rate_map))
             match_modes.setdefault(ord_, db_row[2])
@@ -4706,7 +4717,8 @@ def search_products():
                     rr.export_policy AS compliance_export_policy,
                     rr.source AS compliance_source,
                     rr.stable_key AS compliance_stable_key,
-                    rr.status_id AS compliance_status_id
+                    rr.status_id AS compliance_status_id,
+                    rr.color_key AS compliance_color_key
                 FROM products p
                 LEFT JOIN brand_compliance_settings bcs
                   ON bcs.brand_norm = UPPER(TRIM(COALESCE(p.brand, '')))
@@ -4746,6 +4758,7 @@ def search_products():
                 compliance_source,
                 compliance_stable_key,
                 compliance_status_id,
+                compliance_color_key,
             ) = product
             unit_price, formatted_unit_price, _rate_valid, rate_status = _compute_unit_price_details(
                 price, ship, brand, rate_map
@@ -4761,6 +4774,7 @@ def search_products():
                 source=compliance_source,
                 stable_key=compliance_stable_key,
                 status_id=compliance_status_id,
+                color_key=compliance_color_key,
             )
 
             results.append(
@@ -4781,12 +4795,14 @@ def search_products():
                     "Compliance_Css": resolved["compliance_css"],
                     "Compliance_Source": resolved["compliance_source"],
                     "Compliance_Export_Policy": resolved["compliance_export_policy"],
+                    "Compliance_Color": resolved["compliance_color"],
                     "note": note or "",
                     "compliance": resolved["compliance"],
                     "compliance_note": resolved["compliance_note"],
                     "compliance_css": resolved["compliance_css"],
                     "compliance_source": resolved["compliance_source"],
                     "compliance_export_policy": resolved["compliance_export_policy"],
+                    "compliance_color": resolved["compliance_color"],
                 }
             )
 
@@ -4805,7 +4821,8 @@ def check_cas():
     try:
         with conn.cursor() as cursor:
             query = f"""
-                SELECT rr.rule_label, rr.note, rr.export_policy
+                SELECT rr.rule_label, rr.note, rr.export_policy, rr.source,
+                       rr.stable_key, rr.status_id, rr.color_key
                 FROM (SELECT %s::text AS cas_value) i
                 {cas_resolver_lateral('i.cas_value')}
             """
@@ -4814,11 +4831,19 @@ def check_cas():
 
         warning = row[0] if row else None
         if warning:
+            resolved = resolve_compliance_precedence(
+                brand_manual_enabled=False, manual_compliance=None,
+                manual_compliance_note=None, legacy_compliance=row[0],
+                legacy_compliance_note=row[1], cas=cas, export_policy=row[2],
+                source=row[3], stable_key=row[4], status_id=row[5], color_key=row[6],
+            )
             return jsonify({
                 "warning": True,
                 "warning_type": warning,
                 "Compliance_Note": row[1] or "",
                 "export_policy": row[2],
+                "Compliance_Css": resolved["compliance_css"],
+                "Compliance_Color": resolved["compliance_color"],
                 "message": f"CAS {cas} thuộc danh mục {warning}.",
             })
         return jsonify({"warning": False})
@@ -4848,7 +4873,12 @@ def check_cas_batch():
                     i.ord,
                     i.cas_u,
                     rr.rule_label AS compliance_status,
-                    rr.note AS compliance_note
+                    rr.note AS compliance_note,
+                    rr.export_policy AS compliance_export_policy,
+                    rr.source AS compliance_source,
+                    rr.stable_key AS compliance_stable_key,
+                    rr.status_id AS compliance_status_id,
+                    rr.color_key AS compliance_color_key
                 FROM input i
                 {cas_resolver_lateral('i.cas_u')}
                 ORDER BY i.ord
@@ -4861,11 +4891,23 @@ def check_cas_batch():
             {"Cas": original, "Compliance_Status": "", "Compliance_Note": ""}
             for original in cas_items
         ]
-        for ord_, _cas_u, compliance_status, compliance_note in rows:
+        for (ord_, _cas_u, compliance_status, compliance_note,
+             compliance_export_policy, compliance_source, compliance_stable_key,
+             compliance_status_id, compliance_color_key) in rows:
             idx = int(ord_) - 1
             if 0 <= idx < len(results):
-                results[idx]["Compliance_Status"] = compliance_status or ""
-                results[idx]["Compliance_Note"] = compliance_note or ""
+                resolved = resolve_compliance_precedence(
+                    brand_manual_enabled=False, manual_compliance=None,
+                    manual_compliance_note=None, legacy_compliance=compliance_status,
+                    legacy_compliance_note=compliance_note, cas=cas_items[idx],
+                    export_policy=compliance_export_policy, source=compliance_source,
+                    stable_key=compliance_stable_key, status_id=compliance_status_id,
+                    color_key=compliance_color_key,
+                )
+                results[idx]["Compliance_Status"] = resolved["compliance"]
+                results[idx]["Compliance_Note"] = resolved["compliance_note"]
+                results[idx]["Compliance_Css"] = resolved["compliance_css"]
+                results[idx]["Compliance_Color"] = resolved["compliance_color"]
 
         return jsonify({"results": results})
     finally:
@@ -4911,7 +4953,8 @@ def find_code_batch():
                     rr.export_policy AS compliance_export_policy,
                     rr.source AS compliance_source,
                     rr.stable_key AS compliance_stable_key,
-                    rr.status_id AS compliance_status_id
+                    rr.status_id AS compliance_status_id,
+                    rr.color_key AS compliance_color_key
                 FROM input i
                 LEFT JOIN LATERAL (
                     SELECT
@@ -4961,12 +5004,14 @@ def find_code_batch():
                 "Compliance_Css": "",
                 "Compliance_Source": "none",
                 "Compliance_Export_Policy": "ALLOW",
+                "Compliance_Color": "",
                 "note": "",
                 "compliance": "",
                 "compliance_note": "",
                 "compliance_css": "",
                 "compliance_source": "none",
                 "compliance_export_policy": "ALLOW",
+                "compliance_color": "",
             }
             for original in codes_items
         ]
@@ -4992,6 +5037,7 @@ def find_code_batch():
                 compliance_source,
                 compliance_stable_key,
                 compliance_status_id,
+                compliance_color_key,
             ) = row
             idx = int(ord_) - 1
             if not (0 <= idx < len(results)):
@@ -5016,17 +5062,20 @@ def find_code_batch():
                 source=compliance_source,
                 stable_key=compliance_stable_key,
                 status_id=compliance_status_id,
+                color_key=compliance_color_key,
             )
             results[idx]["Compliance_Status"] = resolved["compliance"]
             results[idx]["Compliance_Note"] = resolved["compliance_note"]
             results[idx]["Compliance_Css"] = resolved["compliance_css"]
             results[idx]["Compliance_Source"] = resolved["compliance_source"]
             results[idx]["Compliance_Export_Policy"] = resolved["compliance_export_policy"]
+            results[idx]["Compliance_Color"] = resolved["compliance_color"]
             results[idx]["compliance"] = resolved["compliance"]
             results[idx]["compliance_note"] = resolved["compliance_note"]
             results[idx]["compliance_css"] = resolved["compliance_css"]
             results[idx]["compliance_source"] = resolved["compliance_source"]
             results[idx]["compliance_export_policy"] = resolved["compliance_export_policy"]
+            results[idx]["compliance_color"] = resolved["compliance_color"]
 
             # Unit price chỉ tính nếu có đủ số
             try:
@@ -5181,7 +5230,8 @@ def advanced_search():
                     rr.export_policy AS compliance_export_policy,
                     rr.source AS compliance_source,
                     rr.stable_key AS compliance_stable_key,
-                    rr.status_id AS compliance_status_id
+                    rr.status_id AS compliance_status_id,
+                    rr.color_key AS compliance_color_key
                 FROM input i
                 LEFT JOIN LATERAL (
                     SELECT
@@ -5240,6 +5290,7 @@ def advanced_search():
                 compliance_source,
                 compliance_stable_key,
                 compliance_status_id,
+                compliance_color_key,
             ) = row
             if product_id is None:
                 continue
@@ -5269,6 +5320,7 @@ def advanced_search():
                     compliance_source=compliance_source,
                     compliance_stable_key=compliance_stable_key,
                     compliance_status_id=compliance_status_id,
+                    compliance_color_key=compliance_color_key,
                 )
             )
 
@@ -5844,7 +5896,8 @@ def _quote_export_products(conn, selections: list[dict], context: Optional[dict]
             rr.export_policy AS compliance_export_policy,
             rr.source AS compliance_source,
             rr.stable_key AS compliance_stable_key,
-            rr.status_id AS compliance_status_id
+            rr.status_id AS compliance_status_id,
+            rr.color_key AS compliance_color_key
         FROM product_rows pr
         {product_resolver_lateral('pr', manual_enabled_expr='pr.brand_manual_enabled')}
         ORDER BY pr.ord ASC

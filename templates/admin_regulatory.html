@@ -4,12 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Quy tắc quản lý</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260910d1') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260910d2') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260909d1') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='admin_regulatory.css', v='20260909d1') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_regulatory.css', v='20260910d2') }}">
   <script defer src="{{ url_for('static', filename='admin_ux.js', v='20260909d1') }}"></script>
-  <script defer src="{{ url_for('static', filename='admin_regulatory.js', v='20260910d1') }}"></script>
+  <script defer src="{{ url_for('static', filename='admin_regulatory.js', v='20260910d2') }}"></script>
 </head>
 <body class="admin-page regulatory-page">
 {% include '_user_nav.html' %}
@@ -76,13 +76,19 @@
       </form>
       <ol class="status-list">
       {% for status in statuses %}
-        <li>
-          <div class="status-summary"><span class="priority">{{ loop.index }}</span><div><strong>{{ status.label }}</strong>
+        <li class="regulatory-row {{ status.color_css }}" data-status-color-preview>
+          <div class="status-summary"><span class="priority">{{ loop.index }}</span><div><strong class="compliance-badge {{ status.color_css }}">{{ status.label }}</strong>
             <span>{{ status.rule_count }} quy tắc · {{ 'Chặn xuất' if status.export_policy == 'BLOCK' else 'Cho xuất' }}</span></div></div>
           <div class="status-actions">
             <form method="post" action="{{ url_for('regulatory_status_action') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="status_id" value="{{ status.id }}"><input type="hidden" name="action" value="up"><button class="secondary compact" aria-label="Đưa {{ status.label }} lên" {% if loop.first %}disabled{% endif %}>↑</button></form>
             <form method="post" action="{{ url_for('regulatory_status_action') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="status_id" value="{{ status.id }}"><input type="hidden" name="action" value="down"><button class="secondary compact" aria-label="Đưa {{ status.label }} xuống" {% if loop.last %}disabled{% endif %}>↓</button></form>
             <details><summary>Đổi tên</summary><form method="post" action="{{ url_for('regulatory_status_action') }}" data-submit-once><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="status_id" value="{{ status.id }}"><input type="hidden" name="revision" value="{{ status.updated_at }}"><input type="hidden" name="action" value="rename"><input name="label" value="{{ status.label }}" maxlength="120" required><button type="submit">Lưu tên</button></form></details>
+            <details class="color-editor"><summary>Đổi màu</summary><form method="post" action="{{ url_for('regulatory_status_action') }}" data-submit-once data-color-form>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="status_id" value="{{ status.id }}"><input type="hidden" name="revision" value="{{ status.updated_at }}"><input type="hidden" name="action" value="set_color">
+              <fieldset><legend>Bảng màu cho {{ status.label }}</legend><div class="color-palette">
+                {% for key, color in regulatory_colors.items() %}<label class="color-choice" title="{{ color[1] }}"><input type="radio" name="color_key" value="{{ key }}" data-color-css="regulatory-color-{{ key }}"{{ ' checked' if status.color_key == key else '' }}><span class="color-swatch regulatory-color-{{ key }}" aria-hidden="true"></span><span>{{ color[0] }}</span></label>{% endfor %}
+              </div></fieldset><button type="submit">Lưu màu</button>
+            </form></details>
           </div>
         </li>
       {% else %}<li class="empty-state">Chưa có tình trạng.</li>{% endfor %}

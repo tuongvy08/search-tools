@@ -2566,17 +2566,8 @@ function qqRenderSummary(counts, totalRows) {
 
 /* ═══════════════ compliance CSS ═══════════════ */
 
-function qqComplianceClass(label) {
-    const map = {
-        'CẤM NHẬP': 'warning-cam-nhap',
-        'Phụ lục II': 'warning-phu-luc-ii',
-        'Phụ lục III': 'warning-phu-luc-iii',
-        'TỒN KHO': 'warning-ton-kho',
-        'Được bán': 'warning-duoc-ban',
-        'Chưa xác định': 'warning-chua-xac-dinh',
-        'Không phát hiện hạn chế': 'warning-khong-phat-hien',
-    };
-    return map[label] || '';
+function qqComplianceClass(value) {
+    return /^regulatory-color-(gray|red|amber|teal|green|blue|purple)$/.test(value || '') ? value : '';
 }
 
 /* ═══════════════ result table (product-search style) ═══════════════ */
@@ -3019,9 +3010,15 @@ function qqRenderResultTable(results) {
             /* compliance with colour */
             const compLabel = candidate.Compliance || candidate.compliance || '';
             const compTd = document.createElement('td');
-            compTd.textContent = compLabel;
-            const compCss = candidate.compliance_css || qqComplianceClass(compLabel);
-            if (compCss) compTd.className = compCss;
+            const compCss = qqComplianceClass(candidate.compliance_css || candidate.Compliance_Css || '');
+            if (compLabel) {
+                const compBadge = document.createElement('span');
+                compBadge.className = 'compliance-badge';
+                if (compCss) compBadge.classList.add(compCss);
+                compBadge.textContent = compLabel;
+                compTd.appendChild(compBadge);
+            }
+            if (compCss) tr.classList.add('regulatory-row', compCss);
             if (qqField("Compliance")) tr.appendChild(compTd);
 
             if (qqField("Compliance_Note")) qqAppendCell(tr, candidate.Compliance_Note || candidate.compliance_note || '', 'qq-cell-comp-note');

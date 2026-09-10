@@ -313,7 +313,7 @@
   <div class="wrap">
     <header>
       <h1>Nhập dữ liệu (Admin)</h1>
-      <p class="sub">Import sản phẩm hoặc quy tắc từ Excel. Hệ thống dùng hai bước để tránh ghi nhầm vào cơ sở dữ liệu.</p>
+      <p class="sub">Công cụ dữ liệu lẻ cho sản phẩm. Quy tắc quản lý đã chuyển sang module riêng.</p>
     </header>
 
     <div class="flow">
@@ -329,11 +329,10 @@
 
     <div class="card quick-card">
       <h2><span class="badge">✎</span> Thêm/Sửa nhanh dữ liệu lẻ</h2>
-      <p class="hint">Dùng khi cần sửa sai tên, CAS, size, thêm 1–2 dòng, hoặc <strong>xóa</strong> sản phẩm/quy tắc không còn dùng — không cần file Excel. Thêm/sửa dùng <strong>UPSERT</strong> (đã có thì cập nhật, chưa có thì thêm mới).</p>
+      <p class="hint">Dùng khi cần sửa sai tên, CAS, size hoặc thêm/xóa 1–2 sản phẩm. Quy tắc quản lý phải dùng luồng preview/confirm trong <a href="{{ url_for('admin_regulatory') }}">module Quy tắc quản lý</a>.</p>
 
       <div class="tabs" role="tablist">
         <button type="button" class="tab-btn active" data-tab="quick-product" role="tab" aria-selected="true">Sản phẩm (Products)</button>
-        <button type="button" class="tab-btn" data-tab="quick-rule" role="tab" aria-selected="false">Quy tắc (Regulatory rules)</button>
       </div>
 
       <div id="quick-product" class="tab-panel active" role="tabpanel">
@@ -357,43 +356,6 @@
         </form>
       </div>
 
-      <div id="quick-rule" class="tab-panel" role="tabpanel">
-        <p class="hint" style="margin-top:0;">Khóa khi thêm/sửa/xóa: <code>rule_type</code> + <code>match_field</code> + <code>match_value</code>.</p>
-        <form id="formQuickRule" class="quick-form" autocomplete="off">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-          <div class="quick-grid">
-            <div class="field">
-              <span class="lbl req">Rule Type</span>
-              <select name="rule_type" id="quickRuleType" required>
-                <option value="CAM_NHAP">CAM_NHAP — Cấm nhập</option>
-                <option value="PHU_LUC_II">PHU_LUC_II — Phụ lục II</option>
-                <option value="PHU_LUC_III">PHU_LUC_III — Phụ lục III</option>
-                <option value="TON_KHO">TON_KHO — Tồn kho</option>
-              </select>
-            </div>
-            <div class="field"><span class="lbl req">Rule Label</span><input type="text" name="rule_label" id="quickRuleLabel" required placeholder="vd. Phụ lục II" /></div>
-            <div class="field">
-              <span class="lbl req">Match Field</span>
-              <select name="match_field" required>
-                <option value="cas" selected>cas</option>
-                <option value="name">name</option>
-                <option value="code">code</option>
-              </select>
-            </div>
-            <div class="field"><span class="lbl req">Match Value</span><input type="text" name="match_value" required placeholder="CAS / tên / code khớp" /></div>
-            <div class="field"><span class="lbl">Priority</span><input type="number" name="priority" value="100" min="0" step="1" /></div>
-            <div class="field field-check">
-              <input type="checkbox" name="is_active" id="quickRuleActive" value="1" checked />
-              <label for="quickRuleActive">Is Active</label>
-            </div>
-            <div class="field field-wide"><span class="lbl">Ghi chú</span><textarea name="note" placeholder="Ghi chú tình trạng quản lý"></textarea></div>
-          </div>
-          <div class="quick-actions">
-            <button type="submit" class="btn btn-success">Cập nhật trực tiếp vào Database</button>
-            <button type="button" class="btn btn-danger" id="btnDeleteQuickRule">Xóa quy tắc</button>
-          </div>
-        </form>
-      </div>
     </div>
 
     <div class="card">
@@ -401,32 +363,10 @@
       <p class="hint">Tải mẫu, điền dữ liệu, giữ nguyên tên cột dòng đầu (tiếng Anh, chữ thường như mẫu). File phải là <strong>Excel Workbook (.xlsx)</strong> thật (File → Save As), không đổi đuôi CSV/HTML thành .xlsx. Có thể upload thêm <strong>.csv</strong> (UTF-8 hoặc Excel Việt Nam) với cùng tên cột.</p>
       <div class="tpl-links">
         <p><a href="/admin/templates/products.xlsx">products_import_template.xlsx</a> — <code>name, code, cas, brand, size, ship, price, note</code></p>
-        <p><a href="/admin/templates/regulatory_rules.xlsx">regulatory_rules_import_template.xlsx</a> — <code>rule_type, rule_label, match_field, match_value, priority, is_active, note</code></p>
+        <p><a href="{{ url_for('admin_regulatory') }}">Mẫu và import quy tắc CAS / Code / Tên nằm trong module Quy tắc quản lý →</a></p>
       </div>
     </div>
 
-    <div class="card">
-      <h2><span class="badge">1</span> Import quy tắc (Regulatory rules)</h2>
-      <p class="hint">Cột bắt buộc: <code>rule_type, rule_label, match_field, match_value, priority, is_active, note</code></p>
-      <form method="post" action="/admin/imports/preview" enctype="multipart/form-data">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" /><input type="hidden" name="dataset" value="regulatory_rules" />
-        <div class="form-row">
-          <div class="field" style="flex:1; min-width:220px;">
-            <span class="lbl">Chọn file .xlsx</span>
-            <input type="file" name="file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" required />
-          </div>
-          <div class="field">
-            <span class="lbl">Chế độ</span>
-            <select name="mode" aria-label="Chế độ import rules">
-              <option value="upsert" selected>Upsert</option>
-
-            </select>
-          </div>
-          <button type="submit" class="btn btn-primary">Xem trước — Rules</button>
-        </div>
-        <div class="upload-status" data-upload-status>Chưa chọn file.</div>
-      </form>
-    </div>
 
     {% if preview %}
     <div class="card preview-card">

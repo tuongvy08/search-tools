@@ -15,7 +15,7 @@
 {% set modes={'append':'Chỉ thêm mới','upsert':'Thêm / cập nhật','replace_by_brand':'Thay thế theo brand trong file'} %}
 <main class="import-main">
 <div class="heading"><div><p class="eyebrow">QUẢN TRỊ · DỮ LIỆU SẢN PHẨM</p><h1>Trung tâm nhập sản phẩm</h1><p class="muted">Tải workbook, kiểm tra phạm vi, rồi chủ động xác nhận ghi dữ liệu.</p></div>
-<a class="secondary" href="{{ url_for('admin_import_tools') }}">Dữ liệu lẻ & quy tắc ↗</a></div>
+<a class="secondary" href="{{ url_for('admin_import_tools') }}">Dữ liệu lẻ ↗</a></div>
 {% if error %}<div class="alert error" role="alert">{{ error }}</div>{% endif %}
 {% if not job %}
 <section class="upload-section" aria-labelledby="upload-title">

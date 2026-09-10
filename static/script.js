@@ -17,15 +17,8 @@ const EXPORT_COLUMNS = [
     { key: 'Compliance_Note', label: 'Ghi chú quản lý', resolve: productComplianceNote },
 ].filter((col) => TeamPermissions.field(col.key));
 
-const COMPLIANCE_CLASS = {
-    'CẤM NHẬP': 'warning-cam-nhap',
-    'Phụ lục II': 'warning-phu-luc-ii',
-    'Phụ lục III': 'warning-phu-luc-iii',
-    'TỒN KHO': 'warning-ton-kho',
-    'Được bán': 'warning-duoc-ban',
-    'Chưa xác định': 'warning-chua-xac-dinh',
-    'Không phát hiện hạn chế': 'warning-khong-phat-hien',
-};
+const REGULATORY_CLASS_RE = /^regulatory-color-(gray|red|amber|teal|green|blue|purple|custom)$/;
+const REGULATORY_HEX_RE = /^#[0-9A-F]{6}$/;
 
 const AJAX_LONG_TIMEOUT_MS = 180000;
 
@@ -333,10 +326,26 @@ function productComplianceNote(product) {
 
 function productComplianceCss(product) {
     const fromApi = product.Compliance_Css || product.compliance_css || '';
-    if (fromApi) {
-        return fromApi;
-    }
-    return COMPLIANCE_CLASS[productCompliance(product)] || '';
+    return REGULATORY_CLASS_RE.test(fromApi) ? fromApi : '';
+}
+
+function productCompliancePair(product) {
+    if (!TeamPermissions.field('Compliance')) return null;
+    const bg = String(product.Compliance_Bg || product.compliance_bg || '').toUpperCase();
+    const fg = String(product.Compliance_Fg || product.compliance_fg || '').toUpperCase();
+    return REGULATORY_HEX_RE.test(bg) && REGULATORY_HEX_RE.test(fg) ? { bg, fg } : null;
+}
+
+function applyCompliancePair(node, product) {
+    const pair = productCompliancePair(product);
+    if (!node || !pair) return;
+    node.style.setProperty('--reg-bg', pair.bg);
+    node.style.setProperty('--reg-fg', pair.fg);
+}
+
+function complianceStyleAttribute(product) {
+    const pair = productCompliancePair(product);
+    return pair ? ` style="--reg-bg:${pair.bg};--reg-fg:${pair.fg}"` : '';
 }
 
 function setTextCell(row, text, className) {
@@ -362,19 +371,19 @@ function setComplianceBadgeCell(row, product) {
     if (cssClass) {
         span.classList.add(cssClass);
     }
+    applyCompliancePair(span, product);
     span.textContent = label;
     cell.appendChild(span);
     return cell;
 }
 
-function badgeForCompliance(label) {
+function badgeForCompliance(label, cssClass) {
     if (!label) {
         return '';
     }
-    const cssClass = COMPLIANCE_CLASS[label] || '';
     const span = document.createElement('span');
     span.className = 'compliance-badge';
-    if (cssClass) {
+    if (REGULATORY_CLASS_RE.test(cssClass || '')) {
         span.classList.add(cssClass);
     }
     span.textContent = label;
@@ -410,12 +419,18 @@ function displayResults(products) {
 
         EXPORT_COLUMNS.forEach((col) => {
             if (col.key === 'Compliance') setComplianceBadgeCell(row, product);
-            else setTextCell(row, col.resolve ? col.resolve(product) : product[col.key] || '');
+            else setTextCell(
+                row,
+                col.resolve ? col.resolve(product) : product[col.key] || '',
+                col.key === 'Compliance_Note' ? 'cell-compliance-note' : ''
+            );
         });
 
         const cssClass = productComplianceCss(product);
         if (cssClass) {
+            row.classList.add('regulatory-row');
             row.classList.add(cssClass);
+            applyCompliancePair(row, product);
         }
         if (isSelected) {
             row.classList.add('row-selected');
@@ -794,12 +809,15 @@ $(document).ready(function() {
                     items.forEach(item => {
                         const status = item.Compliance_Status || '';
                         const note = item.Compliance_Note || '';
+                        const cssClass = REGULATORY_CLASS_RE.test(item.Compliance_Css || '') ? item.Compliance_Css : '';
+                        const colorStyle = complianceStyleAttribute(item);
+                        const statusBadge = status ? `<span class="compliance-badge ${cssClass}"${colorStyle}>${$('<div/>').text(status).html()}</span>` : '';
                         if (status) warnCount += 1;
                         rowsHtml += `
-                          <tr>
+                          <tr class="${cssClass ? `regulatory-row ${cssClass}` : ''}"${colorStyle}>
                             ${TeamPermissions.field('Cas') ? `<td>${$('<div/>').text(item.Cas || '').html()}</td>` : ''}
-                            <td>${$('<div/>').text(status).html()}</td>
-                            ${TeamPermissions.field('Compliance_Note') ? `<td>${$('<div/>').text(note).html()}</td>` : ''}
+                            <td>${statusBadge}</td>
+                            ${TeamPermissions.field('Compliance_Note') ? `<td class="cell-compliance-note">${$('<div/>').text(note).html()}</td>` : ''}
                           </tr>
                         `;
                     });

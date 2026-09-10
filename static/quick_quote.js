@@ -4,7 +4,10 @@ const qqField = (key) => typeof TeamPermissions === 'undefined' || TeamPermissio
 
 const QQ_MAX_ROWS = 2000;
 const QQ_AJAX_TIMEOUT_MS = 180000;
-const QQ_BLOCKED_COMPLIANCE = new Set(['CẤM NHẬP', 'Cấm nhập']);
+function qqIsComplianceBlocked(candidate) {
+    if (!candidate) return false;
+    return (candidate.Compliance_Export_Policy || candidate.compliance_export_policy || '') === 'BLOCK';
+}
 
 const QQ_LIFECYCLE_SELECTED = 'SELECTED';
 const QQ_LIFECYCLE_REVIEW = 'REVIEW';
@@ -741,8 +744,7 @@ function qqBuildMatchPayload(rows, policy, sizeText, strategy, equivDefault) {
 
 function qqIsSelectableCandidate(candidate) {
     if (!candidate || candidate.eligible === false) return false;
-    const compliance = candidate.Compliance || candidate.compliance || '';
-    return !QQ_BLOCKED_COMPLIANCE.has(compliance);
+    return !qqIsComplianceBlocked(candidate);
 }
 
 /** Resolve the request_id for a result, preferring backend-provided identity. */
@@ -872,7 +874,7 @@ function qqGetRequestLifecycle(result, resultIndex) {
             const hasEligible = candidates.some(qqIsSelectableCandidate);
             if (!hasEligible) {
                 const allBlocked = candidates.every((c) =>
-                    c.ineligible_reason === 'COMPLIANCE_BLOCKED' || QQ_BLOCKED_COMPLIANCE.has(c.Compliance || c.compliance)
+                    c.ineligible_reason === 'COMPLIANCE_BLOCKED' || qqIsComplianceBlocked(c)
                 );
                 if (allBlocked) {
                     return {
@@ -923,7 +925,7 @@ function qqGetRequestLifecycle(result, resultIndex) {
         const hasEligible = candidates.some(qqIsSelectableCandidate);
         if (!hasEligible) {
             const allBlocked = candidates.every((c) =>
-                c.ineligible_reason === 'COMPLIANCE_BLOCKED' || QQ_BLOCKED_COMPLIANCE.has(c.Compliance || c.compliance)
+                c.ineligible_reason === 'COMPLIANCE_BLOCKED' || qqIsComplianceBlocked(c)
             );
             if (allBlocked) {
                 return {
@@ -2564,17 +2566,23 @@ function qqRenderSummary(counts, totalRows) {
 
 /* ═══════════════ compliance CSS ═══════════════ */
 
-function qqComplianceClass(label) {
-    const map = {
-        'CẤM NHẬP': 'warning-cam-nhap',
-        'Phụ lục II': 'warning-phu-luc-ii',
-        'Phụ lục III': 'warning-phu-luc-iii',
-        'TỒN KHO': 'warning-ton-kho',
-        'Được bán': 'warning-duoc-ban',
-        'Chưa xác định': 'warning-chua-xac-dinh',
-        'Không phát hiện hạn chế': 'warning-khong-phat-hien',
-    };
-    return map[label] || '';
+function qqComplianceClass(value) {
+    return /^regulatory-color-(gray|red|amber|teal|green|blue|purple|custom)$/.test(value || '') ? value : '';
+}
+
+function qqCompliancePair(candidate) {
+    if (!qqField("Compliance")) return null;
+    const bg = String(candidate.Compliance_Bg || candidate.compliance_bg || '').toUpperCase();
+    const fg = String(candidate.Compliance_Fg || candidate.compliance_fg || '').toUpperCase();
+    const valid = /^#[0-9A-F]{6}$/;
+    return valid.test(bg) && valid.test(fg) ? { bg, fg } : null;
+}
+
+function qqApplyCompliancePair(node, candidate) {
+    const pair = qqCompliancePair(candidate);
+    if (!node || !pair) return;
+    node.style.setProperty('--reg-bg', pair.bg);
+    node.style.setProperty('--reg-fg', pair.fg);
 }
 
 /* ═══════════════ result table (product-search style) ═══════════════ */
@@ -2615,13 +2623,13 @@ function qqFallbackTierEntries(result) {
         const cands = result.candidates || [];
         const eligibleCount = cands.filter(qqIsSelectableCandidate).length;
         const complianceCount = cands.filter(
-            (c) => c.ineligible_reason === 'COMPLIANCE_BLOCKED' || QQ_BLOCKED_COMPLIANCE.has(c.Compliance || c.compliance)
+            (c) => c.ineligible_reason === 'COMPLIANCE_BLOCKED' || qqIsComplianceBlocked(c)
         ).length;
         const noPriceCount = cands.filter(
             (c) => !qqIsSelectableCandidate(c)
                 && (c.Unit_Price_Value || 0) <= 0
                 && c.ineligible_reason !== 'COMPLIANCE_BLOCKED'
-                && !QQ_BLOCKED_COMPLIANCE.has(c.Compliance || c.compliance)
+                && !qqIsComplianceBlocked(c)
         ).length;
         entries.push({
             tierIndex: matchedIdx,
@@ -3017,9 +3025,19 @@ function qqRenderResultTable(results) {
             /* compliance with colour */
             const compLabel = candidate.Compliance || candidate.compliance || '';
             const compTd = document.createElement('td');
-            compTd.textContent = compLabel;
-            const compCss = candidate.compliance_css || qqComplianceClass(compLabel);
-            if (compCss) compTd.className = compCss;
+            const compCss = qqComplianceClass(candidate.compliance_css || candidate.Compliance_Css || '');
+            if (compLabel) {
+                const compBadge = document.createElement('span');
+                compBadge.className = 'compliance-badge';
+                if (compCss) compBadge.classList.add(compCss);
+                qqApplyCompliancePair(compBadge, candidate);
+                compBadge.textContent = compLabel;
+                compTd.appendChild(compBadge);
+            }
+            if (compCss) {
+                tr.classList.add('regulatory-row', compCss);
+                qqApplyCompliancePair(tr, candidate);
+            }
             if (qqField("Compliance")) tr.appendChild(compTd);
 
             if (qqField("Compliance_Note")) qqAppendCell(tr, candidate.Compliance_Note || candidate.compliance_note || '', 'qq-cell-comp-note');
@@ -3516,7 +3534,7 @@ if (typeof window !== 'undefined') {
         QQ_LIFECYCLE_EXPORTED,
         QQ_LIFECYCLE_LABELS,
         QQ_REASON_CODE_LABELS,
-        QQ_BLOCKED_COMPLIANCE,
+        qqIsComplianceBlocked,
         QQ_REASON_LABELS,
         QQ_MATCH_MODE_LABELS,
         QQ_WARNING_LABELS,

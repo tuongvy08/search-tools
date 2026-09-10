@@ -56,7 +56,9 @@ ALIASES = {
                    'currency_rate_status', 'currency_rate_message', 'total', 'total_price'},
     'VIEW_NOTE': {'note'},
     'VIEW_COMPLIANCE': {'compliance', 'compliance_status', 'compliance_css', 'compliance_source',
-                        'warning', 'warning_type', 'warnings'},
+                        'compliance_export_policy', 'compliance_status_id', 'compliance_stable_key',
+                        'compliance_color', 'compliance_bg', 'compliance_fg',
+                        'warning', 'warning_type', 'warnings', 'export_policy', 'message'},
     'VIEW_COMPLIANCE_NOTE': {'compliance_note'},
 }
 

@@ -14,6 +14,7 @@ from psycopg2.extras import Json, RealDictCursor, execute_values
 
 from db import get_connection
 from brand_gateway import acquire_products_import_lock
+from regulatory import acquire_regulatory_lock
 from import_engine import ImportProblem, limit, workbook_rows, create_stage, build_plan, apply_plan
 
 
@@ -265,6 +266,7 @@ def run_once(only_id=None):
                 cur.execute("SET LOCAL statement_timeout = %s", (str(limit('SQL_SECONDS',600)*1000),))
                 # Serializes preview snapshot and apply with all product writers.
                 acquire_products_import_lock(cur)
+                acquire_regulatory_lock(cur)
                 if cancelled.is_set():
                     raise ImportProblem('Tác vụ đã được hủy.')
                 cur.execute("SELECT 1 FROM app_users WHERE id=%s AND is_admin=true AND account_status='ACTIVE' AND auth_version=%s", (job['actor_user_id'],job['actor_auth_version']))

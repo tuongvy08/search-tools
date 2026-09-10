@@ -50,6 +50,8 @@ def register(app, require_admin, actor):
         denied=guard(True)
         if denied is not None:
             return denied
+        if kind == 'rule':
+            return jsonify(ok=False,message='Quy tắc đã chuyển sang module Quy tắc quản lý.'),410
         import import_quick_delete
         try:
             with import_jobs.connection() as conn,conn.cursor() as cur:

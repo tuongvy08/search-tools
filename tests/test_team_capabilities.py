@@ -123,7 +123,8 @@ class TeamCapabilitiesPgTests(unittest.TestCase):
                 self.assertEqual(response.status_code,200,response.data)
                 self.assertTrue(response.json['results'])
                 raw = response.get_data(as_text=True)
-                for forbidden in ('Unit_Price','Currency_Rate','123-45-6','SecretCompliance','compliance'):
+                for forbidden in ('Unit_Price','Currency_Rate','123-45-6','SecretCompliance','compliance',
+                                  'Compliance_Color','Compliance_Css','regulatory-color-'):
                     self.assertNotIn(forbidden,raw)
             self.assertEqual(self.match(client).status_code,403)
         payload = {'source':'SEARCH','rows':[{
@@ -169,7 +170,8 @@ class TeamCapabilitiesPgTests(unittest.TestCase):
         response=self.match()
         self.assertEqual(response.status_code,200,response.data)
         self.assertTrue(response.json['results'][0]['candidates'])
-        for forbidden in ('HiddenName','123-45-6','SecretCompliance','SecretNote'):
+        for forbidden in ('HiddenName','123-45-6','SecretCompliance','SecretNote',
+                          'Compliance_Color','Compliance_Css','regulatory-color-'):
             self.assertNotIn(forbidden,response.get_data(as_text=True))
         data={'source':'QUICK_QUOTE','rows':[{'product_id':self.product}]}
         response=self.client.post('/api/results/copy',json=data,headers={'X-CSRF-Token':'csrf-test'})

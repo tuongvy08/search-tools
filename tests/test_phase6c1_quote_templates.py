@@ -129,6 +129,9 @@ class Phase6C1ResolverPgTests(unittest.TestCase):
 
 class Phase6C1SharedBoundaryTests(unittest.TestCase):
     def setUp(self):
+        self._ip_patch = mock.patch.dict(os.environ, {"DISABLE_IP_ALLOWLIST": "1"})
+        self._ip_patch.start()
+        self.addCleanup(self._ip_patch.stop)
         start_auth_db_patch(self)
         search.app.testing = True
 

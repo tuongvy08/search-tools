@@ -254,6 +254,12 @@ def _base_db(extra_users=None, extra_teams=None):
 
 class _ClientTestCase(unittest.TestCase):
     def setUp(self):
+        # This fake-cursor module tests legacy user management, not network
+        # policy. Scope the bypass per test; middleware-negative suites remain
+        # fully active in their own modules.
+        self._ip_patch = mock.patch.dict(os.environ, {"DISABLE_IP_ALLOWLIST": "1"})
+        self._ip_patch.start()
+        self.addCleanup(self._ip_patch.stop)
         search.app.testing = True
         self.client = search.app.test_client()
 

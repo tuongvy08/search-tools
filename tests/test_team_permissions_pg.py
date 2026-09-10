@@ -100,6 +100,7 @@ _SCHEMA_PRODUCTS_SQL = _read("schema.sql")
 _MIGRATION_003_REGULATORY_RULES_SQL = _read("migration_003_regulatory_rules.sql")
 _MIGRATION_011_MANUAL_COMPLIANCE_SQL = _read("migration_011_manual_compliance.sql")
 _MIGRATION_012_PREPARATION_TYPE_SQL = _read("migration_012_product_preparation_type.sql")
+_MIGRATION_026_REGULATORY_SQL = _read("migration_026_regulatory_management.sql")
 
 _REAL_DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
@@ -193,6 +194,7 @@ class _RealPgTestBase(unittest.TestCase):
                     cur.execute(_MIGRATION_003_REGULATORY_RULES_SQL)
                     cur.execute(_MIGRATION_011_MANUAL_COMPLIANCE_SQL)
                     cur.execute(_MIGRATION_012_PREPARATION_TYPE_SQL)
+                    cur.execute(_MIGRATION_026_REGULATORY_SQL)
                     # `_exchange_rate_map()` SELECTs this table and only
                     # gracefully falls back to JSON defaults if the query
                     # itself raises (e.g. missing table) -- but a failed

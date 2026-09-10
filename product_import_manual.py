@@ -20,9 +20,9 @@ MANUAL_COMPLIANCE_CANONICAL = (
     "Cấm nhập",
     "Chưa xác định",
 )
+_CANONICAL_BY_LOWER = {value.casefold(): value for value in MANUAL_COMPLIANCE_CANONICAL}
 PREPARATION_TYPE_CANONICAL = ("NEAT", "SOLUTION", "MIXTURE", "OTHER")
 
-_CANONICAL_BY_LOWER = {value.casefold(): value for value in MANUAL_COMPLIANCE_CANONICAL}
 _PREPARATION_ALIASES = {
     "NEAT": "NEAT",
     "PURE": "NEAT",
@@ -55,13 +55,11 @@ def normalize_manual_compliance_value(raw: Any) -> Optional[str]:
     text = "" if raw is None else str(raw).strip()
     if not text:
         return None
-    canonical = _CANONICAL_BY_LOWER.get(text.casefold())
-    if canonical is None:
-        raise ValueError(
-            f"Giá trị Compliance không hợp lệ: {text!r}. "
-            f"Cho phép: {', '.join(MANUAL_COMPLIANCE_CANONICAL)}."
-        )
-    return canonical
+    if len(text) > 120:
+        raise ValueError("Tình trạng quản lý vượt quá 120 ký tự.")
+    # The dynamic database catalog is authoritative. Its write trigger maps
+    # this current label to a stable status ID atomically.
+    return _CANONICAL_BY_LOWER.get(text.casefold(), text)
 
 
 def normalize_preparation_type_value(raw: Any) -> Optional[str]:

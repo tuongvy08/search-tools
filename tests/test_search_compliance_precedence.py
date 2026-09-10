@@ -316,7 +316,7 @@ class SearchCompliancePrecedenceTests(unittest.TestCase):
         self.assertEqual(manual["compliance"], "Được bán")
         self.assertEqual(manual["Compliance_Status"], "Được bán")
         self.assertEqual(manual["compliance_note"], "manual note only")
-        self.assertEqual(manual["compliance_css"], "warning-duoc-ban")
+        self.assertEqual(manual["compliance_css"], "regulatory-color-green")
         self.assertEqual(manual["compliance_source"], "manual")
         self.assertEqual(manual["note"], "product note manual")
         self.assertNotIn("legacy regulatory note", manual["compliance_note"])
@@ -324,7 +324,7 @@ class SearchCompliancePrecedenceTests(unittest.TestCase):
         disabled = rows[f"{self.PREFIX}_DISABLED_CONFLICT"]
         self.assertEqual(disabled["compliance"], "CẤM NHẬP")
         self.assertEqual(disabled["compliance_note"], "legacy regulatory note")
-        self.assertEqual(disabled["compliance_source"], "legacy")
+        self.assertEqual(disabled["compliance_source"], "automatic")
 
         no_cas = rows[f"{self.PREFIX}_MANUAL_NO_CAS"]
         self.assertEqual(no_cas["compliance"], "Được bán")
@@ -333,26 +333,26 @@ class SearchCompliancePrecedenceTests(unittest.TestCase):
         blank_legacy = rows[f"{self.PREFIX}_BLANK_LEGACY"]
         self.assertEqual(blank_legacy["compliance"], "CẤM NHẬP")
         self.assertEqual(blank_legacy["compliance_note"], "legacy regulatory note")
-        self.assertEqual(blank_legacy["compliance_source"], "legacy")
+        self.assertEqual(blank_legacy["compliance_source"], "automatic")
 
         blank_no_cas = rows[f"{self.PREFIX}_BLANK_NO_CAS"]
-        self.assertEqual(blank_no_cas["compliance"], "Chưa xác định")
+        self.assertEqual(blank_no_cas["compliance"], "")
         self.assertEqual(blank_no_cas["compliance_note"], "")
-        self.assertEqual(blank_no_cas["compliance_source"], "unresolved")
+        self.assertEqual(blank_no_cas["compliance_source"], "none")
 
         blank_unknown_cas = rows[f"{self.PREFIX}_BLANK_UNKNOWN_CAS"]
-        self.assertEqual(blank_unknown_cas["compliance"], "Không phát hiện hạn chế")
+        self.assertEqual(blank_unknown_cas["compliance"], "")
         self.assertEqual(blank_unknown_cas["compliance_note"], "")
-        self.assertEqual(blank_unknown_cas["compliance_source"], "unresolved")
+        self.assertEqual(blank_unknown_cas["compliance_source"], "none")
 
         note_only = rows[f"{self.PREFIX}_NOTE_ONLY"]
-        self.assertEqual(note_only["compliance"], "Không phát hiện hạn chế")
+        self.assertEqual(note_only["compliance"], "")
         self.assertEqual(note_only["compliance_note"], "")
         self.assertEqual(note_only["note"], "product note note-only")
 
         main_query, _params = self._main_search_query(recorder)
         self.assertIn("LEFT JOIN brand_compliance_settings bcs", main_query)
-        self.assertIn("NULLIF(TRIM(COALESCE(p.manual_compliance, '')), '') IS NOT NULL", main_query)
+        self.assertIn("NULLIF(btrim(COALESCE(p.manual_compliance, '')), '') IS NOT NULL", main_query)
 
     def test_search_has_no_per_row_query(self):
         rows, recorder = self._call_search()

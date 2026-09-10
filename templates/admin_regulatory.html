@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quy tắc quản lý</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260910d2') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260909d1') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_regulatory.css', v='20260910e1') }}">
+  <script defer src="{{ url_for('static', filename='admin_ux.js', v='20260909d1') }}"></script>
+  <script defer src="{{ url_for('static', filename='admin_regulatory.js', v='20260910e1') }}"></script>
+</head>
+<body class="admin-page regulatory-page">
+{% include '_user_nav.html' %}
+<main class="admin-shell">
+  <header class="admin-page-header">
+    <div><p class="eyebrow">Quản trị danh mục</p><h1>Quy tắc quản lý</h1>
+      <p class="lead">Sắp xếp tình trạng và nhập danh sách đối chiếu theo CAS, mã hoặc tên sản phẩm sau khi xem trước.</p></div>
+  </header>
+
+  {% if error %}<div class="state-banner state-error" role="alert">{{ error }}</div>{% endif %}
+  {% if message %}<div class="state-banner state-success" role="status">{{ message }}</div>{% endif %}
+
+  {% if job %}
+  <a class="back-link" href="{{ url_for('admin_regulatory') }}">← Về Quy tắc quản lý</a>
+  <section class="admin-card job-card" data-job-status-url="{{ url_for('regulatory_job_status', job_id=job.id) }}">
+    <div class="section-heading"><div><p class="eyebrow">Mã tác vụ {{ job.id }}</p><h2>{{ job.filename }}</h2></div>
+      <span class="status-pill status-{{ job.status }}" data-job-status data-job-state="{{ job.status }}">{{ status_labels.get(job.status, 'Không xác định') }}</span></div>
+    <dl class="job-metrics">
+      <div><dt>Giai đoạn</dt><dd data-job-phase>{{ phase_labels.get(job.phase, 'Không xác định') }}</dd></div>
+      <div><dt>Số dòng</dt><dd>{{ job.row_count }}</dd></div>
+      <div><dt>Chế độ</dt><dd>{{ mode_labels.get(job.mode, 'Không xác định') }}</dd></div>
+    </dl>
+    {% if job.errors %}<div class="state-banner state-error" role="alert">{% for item in job.errors %}<p>{{ item }}</p>{% endfor %}</div>{% endif %}
+    {% if job.preview %}
+    <div class="preview-grid">
+      <div><strong>{{ job.preview.inserted }}</strong><span>thêm</span></div>
+      <div><strong>{{ job.preview.updated }}</strong><span>cập nhật</span></div>
+      <div><strong>{{ job.preview.deleted }}</strong><span>xóa</span></div>
+      <div><strong>{{ job.preview.unchanged }}</strong><span>giữ nguyên</span></div>
+    </div>
+    {% if job.preview.new_statuses %}<p><strong>Tình trạng mới ở cuối thứ tự:</strong> {{ job.preview.new_statuses|join(', ') }}</p>{% endif %}
+    <h3>Phạm vi</h3><ul>{% for scope in job.preview.scopes %}<li>{{ field_labels.get(scope.match_field, 'Không xác định') }} / {{ scope.status }}</li>{% endfor %}</ul>
+    {% if job.preview.sample %}<div class="table-wrap"><table><thead><tr><th>Thao tác</th><th>Trường</th><th>Giá trị</th><th>Tình trạng</th></tr></thead>
+      <tbody>{% for row in job.preview.sample %}<tr><td>{{ row.action }}</td><td>{{ field_labels.get(row.field, 'Không xác định') }}</td><td>{{ row.value }}</td><td>{{ row.status }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+    {% endif %}
+    <div class="job-actions">
+      {% if job.status == 'completed' and job.phase == 'preview' and job.preview_ready %}
+      <form method="post" action="{{ url_for('regulatory_job_control', job_id=job.id, action='apply') }}" data-submit-once>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="fingerprint" value="{{ job.preview.fingerprint }}">
+        {% if job.mode == 'replace_scoped' %}<label>Nhập <strong>{{ job.preview.deleted }}</strong> để xác nhận số dòng sẽ xóa
+          <input name="confirm_delete" inputmode="numeric" required autocomplete="off"></label>{% endif %}
+        <button type="submit">Xác nhận áp dụng</button>
+      </form>
+      {% elif job.status in ('queued','running') %}
+      <form method="post" action="{{ url_for('regulatory_job_control', job_id=job.id, action='cancel') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="secondary" type="submit">Hủy</button></form>
+      {% elif job.status in ('failed','cancelled') %}
+      <form method="post" action="{{ url_for('regulatory_job_control', job_id=job.id, action='retry') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Xem trước lại</button></form>
+      {% endif %}
+    </div>
+    <h3>Nhật ký tác vụ</h3>
+    <div class="table-wrap"><table><thead><tr><th>Thời gian</th><th>Tác nhân</th><th>Sự kiện</th></tr></thead><tbody>
+      {% for event in events %}<tr><td>{{ event.created_at }}</td><td>{{ 'Hệ thống' if event.actor == 'worker' else event.actor }}</td><td>{{ event_labels.get(event.event, 'Sự kiện hệ thống') }}</td></tr>
+      {% else %}<tr><td colspan="3" class="empty-state">Chưa có sự kiện.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+  {% else %}
+  <div class="regulatory-layout">
+    <section class="admin-card status-catalog">
+      <div class="section-heading"><div><p class="eyebrow">Danh mục linh hoạt</p><h2>Thứ tự tình trạng</h2></div></div>
+      <p class="muted">Quyền xuất báo giá được gắn cố định với từng tình trạng. Đổi tên không làm đổi quyền xuất hoặc mất liên kết.</p>
+      <form class="inline-create" method="post" action="{{ url_for('regulatory_status_action') }}" data-submit-once>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="add">
+        <label for="newStatus">Tên tình trạng mới</label><div><input id="newStatus" name="label" maxlength="120" required><button type="submit">Thêm cuối danh sách</button></div>
+      </form>
+      <ol class="status-list">
+      {% for status in statuses %}
+        <li class="regulatory-row {{ status.color_css }}" data-status-color-preview style="--reg-bg:{{ status.color_bg }};--reg-fg:{{ status.color_fg }}">
+          <div class="status-summary"><span class="priority">{{ loop.index }}</span><div><strong class="compliance-badge {{ status.color_css }}">{{ status.label }}</strong>
+            <span>{{ status.rule_count }} quy tắc · {{ 'Chặn xuất' if status.export_policy == 'BLOCK' else 'Cho xuất' }}</span></div></div>
+          <div class="status-actions">
+            <form method="post" action="{{ url_for('regulatory_status_action') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="status_id" value="{{ status.id }}"><input type="hidden" name="action" value="up"><button class="secondary compact" aria-label="Đưa {{ status.label }} lên" {% if loop.first %}disabled{% endif %}>↑</button></form>
+            <form method="post" action="{{ url_for('regulatory_status_action') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="status_id" value="{{ status.id }}"><input type="hidden" name="action" value="down"><button class="secondary compact" aria-label="Đưa {{ status.label }} xuống" {% if loop.last %}disabled{% endif %}>↓</button></form>
+            <details><summary>Đổi tên</summary><form method="post" action="{{ url_for('regulatory_status_action') }}" data-submit-once><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="status_id" value="{{ status.id }}"><input type="hidden" name="revision" value="{{ status.updated_at }}"><input type="hidden" name="action" value="rename"><input name="label" value="{{ status.label }}" maxlength="120" required><button type="submit">Lưu tên</button></form></details>
+            <details class="color-editor"><summary>Đổi màu</summary><form method="post" action="{{ url_for('regulatory_status_action') }}" data-submit-once data-color-form>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="status_id" value="{{ status.id }}"><input type="hidden" name="revision" value="{{ status.updated_at }}"><input type="hidden" name="action" value="set_color">
+              <fieldset><legend>Chọn màu cho {{ status.label }}</legend>
+                <p class="color-help">Chọn một màu gợi ý hoặc dùng bộ chọn “Màu khác…”. Hệ thống tự tạo nền nhạt và màu chữ dễ đọc.</p>
+                <div class="color-palette" role="group" aria-label="16 màu gợi ý">
+                {% for swatch in regulatory_swatches %}
+                  <label class="color-choice" title="{{ swatch.label }}">
+                    <input type="radio" name="color_hex" value="{{ swatch.hex }}" data-color-seed data-color-bg="{{ swatch.bg }}" data-color-fg="{{ swatch.fg }}"{{ ' checked' if status.color_hex == swatch.hex else '' }}{{ ' required' if loop.first else '' }}>
+                    <span class="color-swatch" style="background-color:{{ swatch.hex }}" aria-hidden="true"></span>
+                    <span class="sq-shell-sr">{{ swatch.label }} {{ swatch.hex }}</span>
+                  </label>
+                {% endfor %}
+                </div>
+                <div class="custom-color-row">
+                  <input id="customColorChoice{{ status.id }}" type="radio" name="color_hex" value="{{ status.color_hex or '#64748B' }}" data-custom-color-choice{{ ' checked' if status.color_hex and status.color_hex not in regulatory_swatches|map(attribute='hex')|list else '' }}>
+                  <label for="customColorChoice{{ status.id }}">Màu khác…</label>
+                  <input id="customColorInput{{ status.id }}" type="color" value="{{ status.color_hex or '#64748B' }}" data-custom-color-input aria-label="Chọn màu khác cho {{ status.label }}">
+                  <output for="customColorInput{{ status.id }}" data-color-hex>{{ status.color_hex or status.color_bg }}</output>
+                </div>
+              </fieldset><button type="submit" data-save-color{{ ' disabled' if not status.color_hex else '' }}>Lưu màu</button>
+            </form></details>
+          </div>
+        </li>
+      {% else %}<li class="empty-state">Chưa có tình trạng.</li>{% endfor %}
+      </ol>
+    </section>
+
+    <section class="admin-card import-panel">
+      <div class="section-heading"><div><p class="eyebrow">Nhập dữ liệu an toàn</p><h2>Nhập danh sách quy tắc</h2></div></div>
+      <div class="template-links"><a href="{{ url_for('regulatory_template', field='cas') }}">Mẫu CAS</a><a href="{{ url_for('regulatory_template', field='code') }}">Mẫu Code</a><a href="{{ url_for('regulatory_template', field='name') }}">Mẫu Tên</a></div>
+      <p class="muted">Mỗi tệp Excel dùng đúng một trường đối chiếu. CAS sai cấu trúc, sai số kiểm tra hoặc có dòng trùng trong cùng tình trạng sẽ khiến bước xem trước thất bại.</p>
+      <form method="post" enctype="multipart/form-data" action="{{ url_for('regulatory_upload') }}" data-submit-once>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="submission_key" value="{{ submission_key }}">
+        <label>Tệp Excel .xlsx (tối đa {{ max_mb }} MB)<input type="file" name="file" accept=".xlsx" required></label>
+        <fieldset><legend>Chế độ</legend><label><input type="radio" name="mode" value="upsert" checked> Thêm / cập nhật, giữ các dòng ngoài tệp</label>
+          <label><input type="radio" name="mode" value="replace_scoped"> Thay đúng nhóm trường + tình trạng có trong file</label></fieldset>
+        <button type="submit">Tải lên và xem trước</button>
+      </form>
+    </section>
+  </div>
+
+  <section class="admin-card history">
+    <div class="section-heading"><h2>Tác vụ gần đây</h2></div>
+    <div class="table-wrap"><table><thead><tr><th>Tệp</th><th>Chế độ</th><th>Giai đoạn</th><th>Trạng thái</th><th>Thời gian</th></tr></thead><tbody>
+      {% for item in jobs %}<tr><td><a href="{{ url_for('regulatory_job_detail', job_id=item.id) }}">{{ item.filename }}</a></td><td>{{ mode_labels.get(item.mode, 'Không xác định') }}</td><td>{{ phase_labels.get(item.phase, 'Không xác định') }}</td><td>{{ status_labels.get(item.status, 'Không xác định') }}</td><td>{{ item.created_at }}</td></tr>
+      {% else %}<tr><td colspan="5" class="empty-state">Chưa có tác vụ.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+  {% endif %}
+</main>
+</body>
+</html>

@@ -34,7 +34,7 @@
       <div class="field span-2"><label for="note">Ghi chú sản phẩm</label><textarea id="note" name="note" maxlength="4000">{{ p.note or '' }}</textarea></div>
     </div></fieldset>
     <fieldset><legend>Tình trạng quản lý thủ công</legend><p class="fieldset-note">Để trống để tiếp tục dùng regulatory resolver tự động. Form này không sửa quy tắc regulatory.</p><div class="form-grid">
-      <div class="field"><label for="compliance">Tình trạng</label><select id="compliance" name="manual_compliance"><option value="">Không ghi đè</option>{% for value in ['Được bán','Phụ lục II','Phụ lục III','Cần giấy phép','Cấm nhập','Chưa xác định'] %}<option value="{{ value }}"{{ ' selected' if value == p.manual_compliance else '' }}>{{ value }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="compliance">Tình trạng</label><select id="compliance" name="manual_compliance_status_id"><option value="">Không ghi đè</option>{% for status in regulatory_statuses %}<option value="{{ status.id }}"{{ ' selected' if status.id == p.manual_compliance_status_id else '' }}>{{ status.label }}</option>{% endfor %}</select></div>
       <div class="field"><label for="compliance-note">Ghi chú quản lý</label><textarea id="compliance-note" name="manual_compliance_note" maxlength="4000">{{ p.manual_compliance_note or '' }}</textarea></div>
     </div></fieldset>
     <div class="form-actions"><button class="button primary" type="submit"><i class="fas fa-save" aria-hidden="true"></i> {{ 'Lưu thay đổi' if product else 'Thêm sản phẩm' }}</button><a class="button secondary" href="{{ url_for('admin_products') }}">Hủy</a></div>

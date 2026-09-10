@@ -26,6 +26,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 import import_quick_delete
 import import_jobs
 import admin_import_center
+import admin_regulatory
 import admin_products
 import admin_google_users
 import admin_lifecycle
@@ -35,6 +36,11 @@ import auth_google
 import session_security
 import team_permissions
 from compliance_resolver import compliance_css_type, resolve_compliance_precedence
+from regulatory import (
+    EXPORT_BLOCK,
+    cas_resolver_lateral,
+    product_resolver_lateral,
+)
 from db import get_connection
 from brand_gateway import (
     load_brand_gateway,
@@ -567,6 +573,11 @@ def _product_row_to_result(
     manual_compliance=None,
     manual_compliance_note=None,
     product_id=None,
+    compliance_export_policy=None,
+    compliance_source=None,
+    compliance_stable_key=None,
+    compliance_status_id=None,
+    compliance_color_key=None,
 ) -> dict:
     unit_price, unit_price_display, rate_valid, rate_status = _compute_unit_price_details(
         price, ship, brand, rate_map
@@ -578,6 +589,11 @@ def _product_row_to_result(
         legacy_compliance=compliance_status,
         legacy_compliance_note=compliance_note,
         cas=cas,
+        export_policy=compliance_export_policy,
+        source=compliance_source,
+        stable_key=compliance_stable_key,
+        status_id=compliance_status_id,
+        color_key=compliance_color_key,
     )
     return {
         "product_id": product_id,
@@ -595,11 +611,19 @@ def _product_row_to_result(
         "Compliance_Note": resolved["compliance_note"],
         "Compliance_Css": resolved["compliance_css"],
         "Compliance_Source": resolved["compliance_source"],
+        "Compliance_Export_Policy": resolved["compliance_export_policy"],
+        "Compliance_Color": resolved["compliance_color"],
+        "Compliance_Bg": resolved["compliance_bg"],
+        "Compliance_Fg": resolved["compliance_fg"],
         "note": note or "",
         "compliance": resolved["compliance"],
         "compliance_note": resolved["compliance_note"],
         "compliance_css": resolved["compliance_css"],
         "compliance_source": resolved["compliance_source"],
+        "compliance_export_policy": resolved["compliance_export_policy"],
+        "compliance_color": resolved["compliance_color"],
+        "compliance_bg": resolved["compliance_bg"],
+        "compliance_fg": resolved["compliance_fg"],
     }
 
 
@@ -616,7 +640,9 @@ QUOTE_SELECTION_STRATEGIES = {
     QUOTE_SELECTION_LOWEST_OVERALL,
     QUOTE_SELECTION_LOWEST_PER_BRAND,
 }
-QUOTE_BLOCKED_COMPLIANCE = {"CẤM NHẬP", "Cấm nhập"}
+# Display labels are mutable. Export eligibility is exclusively the stable
+# status policy returned by the shared resolver.
+QUOTE_BLOCKED_COMPLIANCE = frozenset()  # compatibility symbol; never use for policy
 QUOTE_WARNING_COMPLIANCE = {"Phụ lục II", "Phụ lục III", "Cần giấy phép", "Chưa xác định"}
 QUOTE_UNIT_GROUP_ANY = "ANY"
 QUOTE_UNIT_GROUP_SOLID = "SOLID"
@@ -1142,6 +1168,21 @@ def _quote_unit_price_value(ship, price, brand, rate_map) -> tuple[float, Option
 
 
 def _quote_candidate_from_row(row: tuple, rate_map) -> dict:
+    if len(row) == 16:
+        # Compatibility for isolated pure unit fixtures. Production SQL always
+        # supplies stable policy/source/key/id after migration 026.
+        legacy_label = row[11] if row[13] and row[11] else row[14]
+        legacy_note = row[12] if row[13] and row[11] else row[15]
+        legacy_source = "manual" if row[13] and row[11] else ("automatic" if legacy_label else "none")
+        stable_keys = {"CẤM NHẬP": "CAM_NHAP", "Cấm nhập": "CAM_NHAP", "Được bán": "DUOC_BAN",
+                       "Phụ lục II": "PHU_LUC_II", "Phụ lục III": "PHU_LUC_III"}
+        row = tuple(row[:14]) + (legacy_label, legacy_note) + (
+            EXPORT_BLOCK if legacy_label in {"CẤM NHẬP", "Cấm nhập"} else "ALLOW",
+            legacy_source,
+            stable_keys.get(legacy_label, ""),
+            None,
+            None,
+        )
     (
         _ord,
         product_id,
@@ -1159,6 +1200,11 @@ def _quote_candidate_from_row(row: tuple, rate_map) -> dict:
         brand_manual_enabled,
         compliance_status,
         compliance_note,
+        compliance_export_policy,
+        compliance_source,
+        compliance_stable_key,
+        compliance_status_id,
+        compliance_color_key,
     ) = row
     unit_price, currency_rate_status = _quote_unit_price_value(ship, price, brand, rate_map)
     resolved = resolve_compliance_precedence(
@@ -1168,11 +1214,16 @@ def _quote_candidate_from_row(row: tuple, rate_map) -> dict:
         legacy_compliance=compliance_status,
         legacy_compliance_note=compliance_note,
         cas=cas,
+        export_policy=compliance_export_policy,
+        source=compliance_source,
+        stable_key=compliance_stable_key,
+        status_id=compliance_status_id,
+        color_key=compliance_color_key,
     )
     compliance = resolved["compliance"]
     warnings = [compliance] if compliance in QUOTE_WARNING_COMPLIANCE else []
     ineligible_reason = ""
-    if compliance in QUOTE_BLOCKED_COMPLIANCE:
+    if resolved["compliance_export_policy"] == EXPORT_BLOCK:
         ineligible_reason = "COMPLIANCE_BLOCKED"
     elif unit_price <= 0:
         ineligible_reason = "NO_VALID_PRICE"
@@ -1202,8 +1253,15 @@ def _quote_candidate_from_row(row: tuple, rate_map) -> dict:
         "preparation_type": preparation_type,
         "Compliance": compliance,
         "Compliance_Note": resolved["compliance_note"],
+        "Compliance_Export_Policy": resolved["compliance_export_policy"],
+        "Compliance_Color": resolved["compliance_color"],
+        "Compliance_Bg": resolved["compliance_bg"],
+        "Compliance_Fg": resolved["compliance_fg"],
         "compliance_source": resolved["compliance_source"],
         "compliance_css": resolved["compliance_css"],
+        "compliance_color": resolved["compliance_color"],
+        "compliance_bg": resolved["compliance_bg"],
+        "compliance_fg": resolved["compliance_fg"],
         "eligible": eligible,
         "ineligible_reason": ineligible_reason,
         "currency_rate_status": currency_rate_status,
@@ -1363,7 +1421,7 @@ def _quote_apply_brand_policy_to_row(
             compliance_blocked_count = sum(
                 1
                 for c in raw_tier
-                if c.get("ineligible_reason") == "COMPLIANCE_BLOCKED" or c.get("Compliance") in QUOTE_BLOCKED_COMPLIANCE
+                if c.get("Compliance_Export_Policy") == EXPORT_BLOCK
             )
             filter_rejected_count = len(raw_tier) - len(filtered_tier)
             no_valid_price_count = sum(
@@ -1371,7 +1429,7 @@ def _quote_apply_brand_policy_to_row(
                 for c in filtered_tier
                 if (c.get("ineligible_reason") == "NO_VALID_PRICE" or (c.get("Unit_Price_Value") or 0) <= 0)
                 and not (
-                    c.get("ineligible_reason") == "COMPLIANCE_BLOCKED" or c.get("Compliance") in QUOTE_BLOCKED_COMPLIANCE
+                    c.get("Compliance_Export_Policy") == EXPORT_BLOCK
                 )
             )
 
@@ -1439,7 +1497,7 @@ def _quote_apply_brand_policy_to_row(
                 lifecycle = LIFECYCLE_UNRESOLVED
                 reason_code = REASON_NO_MATCH
             elif all(
-                c.get("ineligible_reason") == "COMPLIANCE_BLOCKED" or c.get("Compliance") in QUOTE_BLOCKED_COMPLIANCE
+                c.get("Compliance_Export_Policy") == EXPORT_BLOCK
                 for c in all_raw_policy
             ):
                 return_cands = all_filtered_policy or all_raw_policy
@@ -1486,7 +1544,7 @@ def _quote_apply_brand_policy_to_row(
 
         if raw_allow:
             if all(
-                c.get("ineligible_reason") == "COMPLIANCE_BLOCKED" or c.get("Compliance") in QUOTE_BLOCKED_COMPLIANCE
+                c.get("Compliance_Export_Policy") == EXPORT_BLOCK
                 for c in raw_allow
             ):
                 return raw_allow, [], "UNRESOLVED", "MANUAL_REVIEW", LIFECYCLE_BLOCKED, REASON_COMPLIANCE_BLOCKED, matched_tier_idx, fallback_path
@@ -1505,7 +1563,7 @@ def _quote_apply_brand_policy_to_row(
         if not filtered_candidates:
             if raw_candidates:
                 if all(
-                    c.get("ineligible_reason") == "COMPLIANCE_BLOCKED" or c.get("Compliance") in QUOTE_BLOCKED_COMPLIANCE
+                    c.get("Compliance_Export_Policy") == EXPORT_BLOCK
                     for c in raw_candidates
                 ):
                     return raw_candidates, [], "UNRESOLVED", "MANUAL_REVIEW", LIFECYCLE_BLOCKED, REASON_COMPLIANCE_BLOCKED, matched_tier_idx, fallback_path
@@ -1561,7 +1619,7 @@ def _quote_apply_brand_policy_to_row(
             return best_per_brand, selected_cands, status, reason, lifecycle, reason_code, matched_tier_idx, fallback_path
 
         if all(
-            c.get("ineligible_reason") == "COMPLIANCE_BLOCKED" or c.get("Compliance") in QUOTE_BLOCKED_COMPLIANCE
+            c.get("Compliance_Export_Policy") == EXPORT_BLOCK
             for c in best_per_brand
         ):
             return best_per_brand, [], "UNRESOLVED", "MANUAL_REVIEW", LIFECYCLE_BLOCKED, REASON_COMPLIANCE_BLOCKED, matched_tier_idx, fallback_path
@@ -1589,6 +1647,7 @@ def _quote_product_lateral_sql(vis: str, product_filter_sql: str) -> str:
             p.preparation_type,
             p.manual_compliance,
             p.manual_compliance_note,
+            p.manual_compliance_status_id,
             COALESCE(bcs.manual_compliance_priority, FALSE) AS brand_manual_enabled
         FROM products p
         LEFT JOIN brand_compliance_settings bcs
@@ -1774,6 +1833,7 @@ def _quote_match_rows(conn, parsed_rows: list[dict], filters: dict, strategy: st
                 p.preparation_type,
                 p.manual_compliance,
                 p.manual_compliance_note,
+                p.manual_compliance_status_id,
                 p.brand_manual_enabled
             FROM (
                 SELECT *
@@ -1801,6 +1861,7 @@ def _quote_match_rows(conn, parsed_rows: list[dict], filters: dict, strategy: st
                 p.preparation_type,
                 p.manual_compliance,
                 p.manual_compliance_note,
+                p.manual_compliance_status_id,
                 p.brand_manual_enabled
             FROM (
                 SELECT *
@@ -1827,6 +1888,7 @@ def _quote_match_rows(conn, parsed_rows: list[dict], filters: dict, strategy: st
                 p.preparation_type,
                 p.manual_compliance,
                 p.manual_compliance_note,
+                p.manual_compliance_status_id,
                 p.brand_manual_enabled
             FROM (
                 SELECT *
@@ -1854,6 +1916,7 @@ def _quote_match_rows(conn, parsed_rows: list[dict], filters: dict, strategy: st
                 p.preparation_type,
                 p.manual_compliance,
                 p.manual_compliance_note,
+                p.manual_compliance_status_id,
                 p.brand_manual_enabled
             FROM (
                 SELECT *
@@ -1883,6 +1946,7 @@ def _quote_match_rows(conn, parsed_rows: list[dict], filters: dict, strategy: st
                 p.preparation_type,
                 p.manual_compliance,
                 p.manual_compliance_note,
+                p.manual_compliance_status_id,
                 p.brand_manual_enabled
             FROM (
                 SELECT *
@@ -1913,6 +1977,7 @@ def _quote_match_rows(conn, parsed_rows: list[dict], filters: dict, strategy: st
                 ph.preparation_type,
                 ph.manual_compliance,
                 ph.manual_compliance_note,
+                ph.manual_compliance_status_id,
                 ph.brand_manual_enabled,
                 NULL::int AS cas_count,
                 NULL::text AS resolved_cas_u,
@@ -1935,6 +2000,7 @@ def _quote_match_rows(conn, parsed_rows: list[dict], filters: dict, strategy: st
                 NULL::text AS preparation_type,
                 NULL::text AS manual_compliance,
                 NULL::text AS manual_compliance_note,
+                NULL::bigint AS manual_compliance_status_id,
                 FALSE AS brand_manual_enabled,
                 c.cas_count,
                 c.resolved_cas_u,
@@ -1957,6 +2023,7 @@ def _quote_match_rows(conn, parsed_rows: list[dict], filters: dict, strategy: st
                 NULL::text AS preparation_type,
                 NULL::text AS manual_compliance,
                 NULL::text AS manual_compliance_note,
+                NULL::bigint AS manual_compliance_status_id,
                 FALSE AS brand_manual_enabled,
                 NULL::int AS cas_count,
                 NULL::text AS resolved_cas_u,
@@ -1979,33 +2046,20 @@ def _quote_match_rows(conn, parsed_rows: list[dict], filters: dict, strategy: st
             o.preparation_type,
             o.manual_compliance,
             o.manual_compliance_note,
+            o.manual_compliance_status_id,
             o.brand_manual_enabled,
             rr.rule_label AS compliance_status,
             rr.note AS compliance_note,
+            rr.export_policy AS compliance_export_policy,
+            rr.source AS compliance_source,
+            rr.stable_key AS compliance_stable_key,
+            rr.status_id AS compliance_status_id,
+            rr.color_key AS compliance_color_key,
             o.cas_count,
             o.resolved_cas_u,
             o.total_cas_count
         FROM output_rows o
-        LEFT JOIN LATERAL (
-            SELECT r.rule_label, r.note
-            FROM regulatory_rules r
-            WHERE o.row_type = 'HIT'
-              AND NOT (
-                o.brand_manual_enabled
-                AND NULLIF(TRIM(COALESCE(o.manual_compliance, '')), '') IS NOT NULL
-            )
-              AND r.is_active = TRUE
-              AND (
-                (r.match_field = 'cas' AND NULLIF(TRIM(o.cas), '') IS NOT NULL
-                    AND UPPER(TRIM(o.cas)) = UPPER(TRIM(r.match_value)))
-                OR (r.match_field = 'name' AND NULLIF(TRIM(o.name), '') IS NOT NULL
-                    AND UPPER(TRIM(o.name)) = UPPER(TRIM(r.match_value)))
-                OR (r.match_field = 'code' AND NULLIF(TRIM(o.code), '') IS NOT NULL
-                    AND UPPER(TRIM(o.code)) = UPPER(TRIM(r.match_value)))
-              )
-            ORDER BY r.priority ASC, r.id ASC
-            LIMIT 1
-        ) rr ON TRUE
+        {product_resolver_lateral('o', manual_enabled_expr='o.brand_manual_enabled')}
         ORDER BY o.ord ASC, o.row_type ASC, o.product_id ASC
     """
     branch_params = vis_params + product_filter_params
@@ -2031,8 +2085,8 @@ def _quote_match_rows(conn, parsed_rows: list[dict], filters: dict, strategy: st
             row_type = db_row[0]
             ord_ = int(db_row[1])
             if row_type == "CODE_CAS_META":
-                code_cas_counts[ord_] = int(db_row[18] or 0)
-                code_total_cas_counts[ord_] = int(db_row[20] or 0)
+                code_cas_counts[ord_] = int(db_row[24] or 0)
+                code_total_cas_counts[ord_] = int(db_row[26] or 0)
                 continue
             if row_type == "CODE_CAS_VERIFIED":
                 code_cas_verified.add(ord_)
@@ -2051,9 +2105,14 @@ def _quote_match_rows(conn, parsed_rows: list[dict], filters: dict, strategy: st
                 db_row[12],
                 db_row[13],
                 db_row[14],
-                db_row[15],
                 db_row[16],
                 db_row[17],
+                db_row[18],
+                db_row[19],
+                db_row[20],
+                db_row[21],
+                db_row[22],
+                db_row[23],
             )
             by_ord.setdefault(ord_, []).append(_quote_candidate_from_row(candidate_row, rate_map))
             match_modes.setdefault(ord_, db_row[2])
@@ -3091,6 +3150,8 @@ def admin_imports_preview():
 
     if not session_security.verify_csrf_token(request.form.get("csrf_token", "")):
         return "CSRF token không hợp lệ hoặc đã hết hạn.", 400
+    if request.form.get("dataset") == "regulatory_rules":
+        return redirect(url_for("admin_regulatory", err="Quy tắc phải dùng module riêng với background preview/confirm."))
     if request.form.get("dataset") == "products":
         return redirect(url_for("admin_imports", err="Hãy dùng Trung tâm nhập sản phẩm để tải workbook và xem trước."))
     if request.content_length and request.content_length > 2 * 1024 * 1024:
@@ -3189,6 +3250,8 @@ def admin_imports_apply():
         return redirect(url_for("admin_imports", err="Preview hết hạn, vui lòng upload lại"))
 
     dataset = data["dataset"]
+    if dataset == "regulatory_rules":
+        return redirect(url_for("admin_regulatory", err="Preview legacy không còn được phép áp dụng."))
     mode = data["mode"]
     rows = data["rows"]
     filename = data.get("filename")
@@ -3604,6 +3667,10 @@ def admin_imports_quick_rule():
     if csrf_guard is not None:
         return csrf_guard
 
+    return _quick_edit_json_response(
+        False, "Quy tắc phải dùng module Quy tắc quản lý với preview/confirm.", status=410
+    )
+
     actor = _current_actor()
     conn = get_connection()
     try:
@@ -3694,6 +3761,10 @@ def admin_imports_quick_rule_delete():
     csrf_guard = _require_quick_edit_csrf()
     if csrf_guard is not None:
         return csrf_guard
+
+    return _quick_edit_json_response(
+        False, "Xóa/thay quy tắc phải dùng import có phạm vi và bước xác nhận.", status=410
+    )
 
     actor = _current_actor()
     conn = get_connection()
@@ -3957,12 +4028,7 @@ def admin_template_regulatory_rules():
     guard = _require_admin_page()
     if guard is not None:
         return guard
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "regulatory_rules"
-    ws.append(["rule_type", "rule_label", "match_field", "match_value", "priority", "is_active", "note"])
-    ws.append(["CAM_NHAP", "CẤM NHẬP", "cas", "123-45-6", 10, "TRUE", ""])
-    return _xlsx_response(wb, "regulatory_rules_import_template.xlsx")
+    return redirect(url_for("admin_regulatory"))
 
 
 def _currency_rate_display(rate) -> str:
@@ -4655,26 +4721,16 @@ def search_products():
                     p.manual_compliance_note,
                     COALESCE(bcs.manual_compliance_priority, FALSE) AS brand_manual_enabled,
                     rr.rule_label AS compliance_status,
-                    rr.note AS compliance_note
+                    rr.note AS compliance_note,
+                    rr.export_policy AS compliance_export_policy,
+                    rr.source AS compliance_source,
+                    rr.stable_key AS compliance_stable_key,
+                    rr.status_id AS compliance_status_id,
+                    rr.color_key AS compliance_color_key
                 FROM products p
                 LEFT JOIN brand_compliance_settings bcs
                   ON bcs.brand_norm = UPPER(TRIM(COALESCE(p.brand, '')))
-                LEFT JOIN LATERAL (
-                    SELECT r.rule_label, r.note
-                    FROM regulatory_rules r
-                    WHERE NOT (
-                        COALESCE(bcs.manual_compliance_priority, FALSE)
-                        AND NULLIF(TRIM(COALESCE(p.manual_compliance, '')), '') IS NOT NULL
-                    )
-                      AND r.is_active = TRUE
-                      AND (
-                        (r.match_field = 'cas' AND NULLIF(TRIM(p.cas), '') IS NOT NULL AND UPPER(TRIM(p.cas)) = UPPER(TRIM(r.match_value)))
-                        OR (r.match_field = 'name' AND NULLIF(TRIM(p.name), '') IS NOT NULL AND UPPER(TRIM(p.name)) = UPPER(TRIM(r.match_value)))
-                        OR (r.match_field = 'code' AND NULLIF(TRIM(p.code), '') IS NOT NULL AND UPPER(TRIM(p.code)) = UPPER(TRIM(r.match_value)))
-                      )
-                    ORDER BY r.priority ASC, r.id ASC
-                    LIMIT 1
-                ) rr ON TRUE
+                {product_resolver_lateral('p', 'bcs')}
                 WHERE (p.name ILIKE %s OR p.code ILIKE %s {cas_search_sql})
                 {vis}
                 ORDER BY
@@ -4706,6 +4762,11 @@ def search_products():
                 brand_manual_enabled,
                 compliance_status,
                 compliance_note,
+                compliance_export_policy,
+                compliance_source,
+                compliance_stable_key,
+                compliance_status_id,
+                compliance_color_key,
             ) = product
             unit_price, formatted_unit_price, _rate_valid, rate_status = _compute_unit_price_details(
                 price, ship, brand, rate_map
@@ -4717,6 +4778,11 @@ def search_products():
                 legacy_compliance=compliance_status,
                 legacy_compliance_note=compliance_note,
                 cas=cas,
+                export_policy=compliance_export_policy,
+                source=compliance_source,
+                stable_key=compliance_stable_key,
+                status_id=compliance_status_id,
+                color_key=compliance_color_key,
             )
 
             results.append(
@@ -4736,11 +4802,19 @@ def search_products():
                     "Compliance_Note": resolved["compliance_note"],
                     "Compliance_Css": resolved["compliance_css"],
                     "Compliance_Source": resolved["compliance_source"],
+                    "Compliance_Export_Policy": resolved["compliance_export_policy"],
+                    "Compliance_Color": resolved["compliance_color"],
+                    "Compliance_Bg": resolved["compliance_bg"],
+                    "Compliance_Fg": resolved["compliance_fg"],
                     "note": note or "",
                     "compliance": resolved["compliance"],
                     "compliance_note": resolved["compliance_note"],
                     "compliance_css": resolved["compliance_css"],
                     "compliance_source": resolved["compliance_source"],
+                    "compliance_export_policy": resolved["compliance_export_policy"],
+                    "compliance_color": resolved["compliance_color"],
+                    "compliance_bg": resolved["compliance_bg"],
+                    "compliance_fg": resolved["compliance_fg"],
                 }
             )
 
@@ -4755,31 +4829,37 @@ def check_cas():
     if not cas:
         return jsonify({"warning": False})
 
-    vis, vis_params = _visibility_sql("p")
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
             query = f"""
-                SELECT r.rule_label
-                FROM regulatory_rules r
-                WHERE r.is_active = TRUE
-                  AND r.match_field = 'cas'
-                  AND UPPER(TRIM(r.match_value)) = UPPER(TRIM(%s))
-                  AND EXISTS (
-                    SELECT 1
-                    FROM products p
-                    WHERE UPPER(TRIM(p.cas)) = UPPER(TRIM(%s))
-                    {vis}
-                  )
-                ORDER BY r.priority ASC, r.id ASC
-                LIMIT 1
+                SELECT rr.rule_label, rr.note, rr.export_policy, rr.source,
+                       rr.stable_key, rr.status_id, rr.color_key
+                FROM (SELECT %s::text AS cas_value) i
+                {cas_resolver_lateral('i.cas_value')}
             """
-            cursor.execute(query, (cas, cas) + vis_params)
+            cursor.execute(query, (cas,))
             row = cursor.fetchone()
 
         warning = row[0] if row else None
         if warning:
-            return jsonify({"warning": True, "warning_type": warning, "message": f"CAS {cas} thuộc danh mục {warning}."})
+            resolved = resolve_compliance_precedence(
+                brand_manual_enabled=False, manual_compliance=None,
+                manual_compliance_note=None, legacy_compliance=row[0],
+                legacy_compliance_note=row[1], cas=cas, export_policy=row[2],
+                source=row[3], stable_key=row[4], status_id=row[5], color_key=row[6],
+            )
+            return jsonify({
+                "warning": True,
+                "warning_type": warning,
+                "Compliance_Note": row[1] or "",
+                "export_policy": row[2],
+                "Compliance_Css": resolved["compliance_css"],
+                "Compliance_Color": resolved["compliance_color"],
+                "Compliance_Bg": resolved["compliance_bg"],
+                "Compliance_Fg": resolved["compliance_fg"],
+                "message": f"CAS {cas} thuộc danh mục {warning}.",
+            })
         return jsonify({"warning": False})
     finally:
         conn.close()
@@ -4794,7 +4874,6 @@ def check_cas_batch():
 
     cas_upper = [c.upper() for c in cas_items]
 
-    vis, vis_params = _visibility_sql("p")
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
@@ -4808,32 +4887,17 @@ def check_cas_batch():
                     i.ord,
                     i.cas_u,
                     rr.rule_label AS compliance_status,
-                    rr.note AS compliance_note
+                    rr.note AS compliance_note,
+                    rr.export_policy AS compliance_export_policy,
+                    rr.source AS compliance_source,
+                    rr.stable_key AS compliance_stable_key,
+                    rr.status_id AS compliance_status_id,
+                    rr.color_key AS compliance_color_key
                 FROM input i
-                LEFT JOIN LATERAL (
-                    SELECT 1 AS found
-                    FROM products p
-                    WHERE UPPER(TRIM(p.cas)) = i.cas_u
-                      AND p.cas IS NOT NULL
-                      AND TRIM(p.cas) <> ''
-                      {vis}
-                    -- (p.id + 0) keeps deterministic lowest-id order without tempting a pkey scan.
-                    ORDER BY (p.id + 0) ASC
-                    LIMIT 1
-                ) eligible ON TRUE
-                LEFT JOIN LATERAL (
-                    SELECT r.rule_label, r.note
-                    FROM regulatory_rules r
-                    WHERE eligible.found IS NOT NULL
-                      AND r.is_active = TRUE
-                      AND r.match_field = 'cas'
-                      AND UPPER(TRIM(r.match_value)) = i.cas_u
-                    ORDER BY r.priority ASC, r.id ASC
-                    LIMIT 1
-                ) rr ON TRUE
+                {cas_resolver_lateral('i.cas_u')}
                 ORDER BY i.ord
             """
-            cursor.execute(query, (cas_upper,) + vis_params)
+            cursor.execute(query, (cas_upper,))
             rows = cursor.fetchall()
 
         # Luôn trả về đúng số dòng bằng input (kể cả CAS không có match)
@@ -4841,11 +4905,25 @@ def check_cas_batch():
             {"Cas": original, "Compliance_Status": "", "Compliance_Note": ""}
             for original in cas_items
         ]
-        for ord_, _cas_u, compliance_status, compliance_note in rows:
+        for (ord_, _cas_u, compliance_status, compliance_note,
+             compliance_export_policy, compliance_source, compliance_stable_key,
+             compliance_status_id, compliance_color_key) in rows:
             idx = int(ord_) - 1
             if 0 <= idx < len(results):
-                results[idx]["Compliance_Status"] = compliance_status or ""
-                results[idx]["Compliance_Note"] = compliance_note or ""
+                resolved = resolve_compliance_precedence(
+                    brand_manual_enabled=False, manual_compliance=None,
+                    manual_compliance_note=None, legacy_compliance=compliance_status,
+                    legacy_compliance_note=compliance_note, cas=cas_items[idx],
+                    export_policy=compliance_export_policy, source=compliance_source,
+                    stable_key=compliance_stable_key, status_id=compliance_status_id,
+                    color_key=compliance_color_key,
+                )
+                results[idx]["Compliance_Status"] = resolved["compliance"]
+                results[idx]["Compliance_Note"] = resolved["compliance_note"]
+                results[idx]["Compliance_Css"] = resolved["compliance_css"]
+                results[idx]["Compliance_Color"] = resolved["compliance_color"]
+                results[idx]["Compliance_Bg"] = resolved["compliance_bg"]
+                results[idx]["Compliance_Fg"] = resolved["compliance_fg"]
 
         return jsonify({"results": results})
     finally:
@@ -4887,7 +4965,12 @@ def find_code_batch():
                     p.manual_compliance_note,
                     p.brand_manual_enabled,
                     rr.rule_label AS compliance_status,
-                    rr.note AS compliance_note
+                    rr.note AS compliance_note,
+                    rr.export_policy AS compliance_export_policy,
+                    rr.source AS compliance_source,
+                    rr.stable_key AS compliance_stable_key,
+                    rr.status_id AS compliance_status_id,
+                    rr.color_key AS compliance_color_key
                 FROM input i
                 LEFT JOIN LATERAL (
                     SELECT
@@ -4902,6 +4985,7 @@ def find_code_batch():
                         p.note,
                         p.manual_compliance,
                         p.manual_compliance_note,
+                        p.manual_compliance_status_id,
                         COALESCE(bcs.manual_compliance_priority, FALSE) AS brand_manual_enabled
                     FROM products p
                     LEFT JOIN brand_compliance_settings bcs
@@ -4914,26 +4998,7 @@ def find_code_batch():
                     ORDER BY (p.id + 0) ASC
                     LIMIT 1
                 ) p ON TRUE
-                LEFT JOIN LATERAL (
-                    SELECT r.rule_label, r.note
-                    FROM regulatory_rules r
-                    WHERE p.id IS NOT NULL
-                      AND NOT (
-                        p.brand_manual_enabled
-                        AND NULLIF(TRIM(COALESCE(p.manual_compliance, '')), '') IS NOT NULL
-                      )
-                      AND r.is_active = TRUE
-                      AND (
-                        (r.match_field = 'cas' AND NULLIF(TRIM(p.cas), '') IS NOT NULL
-                            AND UPPER(TRIM(p.cas)) = UPPER(TRIM(r.match_value)))
-                        OR (r.match_field = 'name' AND NULLIF(TRIM(p.name), '') IS NOT NULL
-                            AND UPPER(TRIM(p.name)) = UPPER(TRIM(r.match_value)))
-                        OR (r.match_field = 'code' AND NULLIF(TRIM(p.code), '') IS NOT NULL
-                            AND UPPER(TRIM(p.code)) = UPPER(TRIM(r.match_value)))
-                      )
-                    ORDER BY r.priority ASC, r.id ASC
-                    LIMIT 1
-                ) rr ON TRUE
+                {product_resolver_lateral('p', manual_enabled_expr='p.brand_manual_enabled')}
                 ORDER BY i.ord
             """
             cursor.execute(query, (codes_upper,) + vis_params)
@@ -4950,15 +5015,23 @@ def find_code_batch():
                 "Size": "",
                 "Unit_Price": "",
                 "Note": "",
-                "Compliance_Status": "Chưa xác định",
+                "Compliance_Status": "",
                 "Compliance_Note": "",
-                "Compliance_Css": "warning-chua-xac-dinh",
-                "Compliance_Source": "unresolved",
+                "Compliance_Css": "",
+                "Compliance_Source": "none",
+                "Compliance_Export_Policy": "ALLOW",
+                "Compliance_Color": "",
+                "Compliance_Bg": "",
+                "Compliance_Fg": "",
                 "note": "",
-                "compliance": "Chưa xác định",
+                "compliance": "",
                 "compliance_note": "",
-                "compliance_css": "warning-chua-xac-dinh",
-                "compliance_source": "unresolved",
+                "compliance_css": "",
+                "compliance_source": "none",
+                "compliance_export_policy": "ALLOW",
+                "compliance_color": "",
+                "compliance_bg": "",
+                "compliance_fg": "",
             }
             for original in codes_items
         ]
@@ -4980,6 +5053,11 @@ def find_code_batch():
                 brand_manual_enabled,
                 compliance_status,
                 compliance_note,
+                compliance_export_policy,
+                compliance_source,
+                compliance_stable_key,
+                compliance_status_id,
+                compliance_color_key,
             ) = row
             idx = int(ord_) - 1
             if not (0 <= idx < len(results)):
@@ -5000,15 +5078,28 @@ def find_code_batch():
                 legacy_compliance=compliance_status,
                 legacy_compliance_note=compliance_note,
                 cas=cas,
+                export_policy=compliance_export_policy,
+                source=compliance_source,
+                stable_key=compliance_stable_key,
+                status_id=compliance_status_id,
+                color_key=compliance_color_key,
             )
             results[idx]["Compliance_Status"] = resolved["compliance"]
             results[idx]["Compliance_Note"] = resolved["compliance_note"]
             results[idx]["Compliance_Css"] = resolved["compliance_css"]
             results[idx]["Compliance_Source"] = resolved["compliance_source"]
+            results[idx]["Compliance_Export_Policy"] = resolved["compliance_export_policy"]
+            results[idx]["Compliance_Color"] = resolved["compliance_color"]
+            results[idx]["Compliance_Bg"] = resolved["compliance_bg"]
+            results[idx]["Compliance_Fg"] = resolved["compliance_fg"]
             results[idx]["compliance"] = resolved["compliance"]
             results[idx]["compliance_note"] = resolved["compliance_note"]
             results[idx]["compliance_css"] = resolved["compliance_css"]
             results[idx]["compliance_source"] = resolved["compliance_source"]
+            results[idx]["compliance_export_policy"] = resolved["compliance_export_policy"]
+            results[idx]["compliance_color"] = resolved["compliance_color"]
+            results[idx]["compliance_bg"] = resolved["compliance_bg"]
+            results[idx]["compliance_fg"] = resolved["compliance_fg"]
 
             # Unit price chỉ tính nếu có đủ số
             try:
@@ -5159,7 +5250,12 @@ def advanced_search():
                     p.manual_compliance_note,
                     p.brand_manual_enabled,
                     rr.rule_label AS compliance_status,
-                    rr.note AS compliance_note
+                    rr.note AS compliance_note,
+                    rr.export_policy AS compliance_export_policy,
+                    rr.source AS compliance_source,
+                    rr.stable_key AS compliance_stable_key,
+                    rr.status_id AS compliance_status_id,
+                    rr.color_key AS compliance_color_key
                 FROM input i
                 LEFT JOIN LATERAL (
                     SELECT
@@ -5174,6 +5270,7 @@ def advanced_search():
                         p.note,
                         p.manual_compliance,
                         p.manual_compliance_note,
+                        p.manual_compliance_status_id,
                         COALESCE(bcs.manual_compliance_priority, FALSE) AS brand_manual_enabled
                     FROM products p
                     LEFT JOIN brand_compliance_settings bcs
@@ -5186,26 +5283,7 @@ def advanced_search():
                     -- (p.id + 0) keeps deterministic lowest-id order without tempting a pkey scan.
                     ORDER BY UPPER(TRIM(COALESCE(p.brand, ''))), UPPER(TRIM(COALESCE(p.size, ''))), (p.id + 0) ASC
                 ) p ON TRUE
-                LEFT JOIN LATERAL (
-                    SELECT r.rule_label, r.note
-                    FROM regulatory_rules r
-                    WHERE p.id IS NOT NULL
-                      AND NOT (
-                        p.brand_manual_enabled
-                        AND NULLIF(TRIM(COALESCE(p.manual_compliance, '')), '') IS NOT NULL
-                      )
-                      AND r.is_active = TRUE
-                      AND (
-                        (r.match_field = 'cas' AND NULLIF(TRIM(p.cas), '') IS NOT NULL
-                            AND UPPER(TRIM(p.cas)) = UPPER(TRIM(r.match_value)))
-                        OR (r.match_field = 'name' AND NULLIF(TRIM(p.name), '') IS NOT NULL
-                            AND UPPER(TRIM(p.name)) = UPPER(TRIM(r.match_value)))
-                        OR (r.match_field = 'code' AND NULLIF(TRIM(p.code), '') IS NOT NULL
-                            AND UPPER(TRIM(p.code)) = UPPER(TRIM(r.match_value)))
-                      )
-                    ORDER BY r.priority ASC, r.id ASC
-                    LIMIT 1
-                ) rr ON TRUE
+                {product_resolver_lateral('p', manual_enabled_expr='p.brand_manual_enabled')}
                 ORDER BY i.ord, UPPER(TRIM(COALESCE(p.brand, ''))), UPPER(TRIM(COALESCE(p.size, ''))), (p.id + 0) ASC
             """
             cursor.execute(query, (cas_upper,) + vis_params + product_filter_params)
@@ -5232,6 +5310,11 @@ def advanced_search():
                 brand_manual_enabled,
                 compliance_status,
                 compliance_note,
+                compliance_export_policy,
+                compliance_source,
+                compliance_stable_key,
+                compliance_status_id,
+                compliance_color_key,
             ) = row
             if product_id is None:
                 continue
@@ -5257,6 +5340,11 @@ def advanced_search():
                     manual_compliance=manual_compliance,
                     manual_compliance_note=manual_compliance_note,
                     product_id=product_id,
+                    compliance_export_policy=compliance_export_policy,
+                    compliance_source=compliance_source,
+                    compliance_stable_key=compliance_stable_key,
+                    compliance_status_id=compliance_status_id,
+                    compliance_color_key=compliance_color_key,
                 )
             )
 
@@ -5803,6 +5891,7 @@ def _quote_export_products(conn, selections: list[dict], context: Optional[dict]
                 p.preparation_type,
                 p.manual_compliance,
                 p.manual_compliance_note,
+                p.manual_compliance_status_id,
                 COALESCE(bcs.manual_compliance_priority, FALSE) AS brand_manual_enabled
             FROM input i
             JOIN products p ON p.id = i.product_id
@@ -5827,27 +5916,14 @@ def _quote_export_products(conn, selections: list[dict], context: Optional[dict]
             pr.manual_compliance_note,
             pr.brand_manual_enabled,
             rr.rule_label AS compliance_status,
-            rr.note AS compliance_note
+            rr.note AS compliance_note,
+            rr.export_policy AS compliance_export_policy,
+            rr.source AS compliance_source,
+            rr.stable_key AS compliance_stable_key,
+            rr.status_id AS compliance_status_id,
+            rr.color_key AS compliance_color_key
         FROM product_rows pr
-        LEFT JOIN LATERAL (
-            SELECT r.rule_label, r.note
-            FROM regulatory_rules r
-            WHERE NOT (
-                pr.brand_manual_enabled
-                AND NULLIF(TRIM(COALESCE(pr.manual_compliance, '')), '') IS NOT NULL
-            )
-              AND r.is_active = TRUE
-              AND (
-                (r.match_field = 'cas' AND NULLIF(TRIM(pr.cas), '') IS NOT NULL
-                    AND UPPER(TRIM(pr.cas)) = UPPER(TRIM(r.match_value)))
-                OR (r.match_field = 'name' AND NULLIF(TRIM(pr.name), '') IS NOT NULL
-                    AND UPPER(TRIM(pr.name)) = UPPER(TRIM(r.match_value)))
-                OR (r.match_field = 'code' AND NULLIF(TRIM(pr.code), '') IS NOT NULL
-                    AND UPPER(TRIM(pr.code)) = UPPER(TRIM(r.match_value)))
-              )
-            ORDER BY r.priority ASC, r.id ASC
-            LIMIT 1
-        ) rr ON TRUE
+        {product_resolver_lateral('pr', manual_enabled_expr='pr.brand_manual_enabled')}
         ORDER BY pr.ord ASC
     """
     params = (
@@ -6211,6 +6287,7 @@ def results_export():
 
 
 admin_import_center.register(app, _require_admin_page, _current_actor)
+admin_regulatory.register(app, _require_admin_page, _current_actor)
 admin_products.register(app, _require_admin_page, _current_actor)
 
 if __name__ == "__main__":

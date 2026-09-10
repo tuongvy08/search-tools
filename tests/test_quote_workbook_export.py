@@ -895,6 +895,11 @@ class QuoteWorkbookExportV2ApiTests(unittest.TestCase):
     """Phase 1 export_items v2: identity-preserving, re-fetched, sorted, STT labels."""
 
     def setUp(self):
+        self._disable_ip_patch = mock.patch.dict(
+            "os.environ", {"DISABLE_IP_ALLOWLIST": "1"}
+        )
+        self._disable_ip_patch.start()
+        self.addCleanup(self._disable_ip_patch.stop)
         start_auth_db_patch(self)
 
     def _post_items(self, rows, items, *, authenticated=True, is_admin=True, team_id=1, include_selections=False):

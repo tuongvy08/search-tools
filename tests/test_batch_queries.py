@@ -75,7 +75,9 @@ class RecordingCursor:
         self._cursor.close()
 
     def execute(self, query, params=None):
-        if "WITH input AS" in query and "FROM products p" in query:
+        if "WITH input AS" in query and (
+            "FROM products p" in query or "FROM regulatory_rules r" in query
+        ):
             self._recorder.append((query, params or ()))
         return self._cursor.execute(query, params)
 
@@ -314,7 +316,7 @@ class BatchQueryRegressionTests(unittest.TestCase):
                 [
                     ("CAM_NHAP", "CẤM NHẬP", "code", cls.CODE_MAIN, 10, True, "code wins"),
                     ("PHU_LUC_II", "Phụ lục II", "cas", cls.CAS_MAIN, 20, True, "cas note"),
-                    ("TON_KHO", "TỒN KHO", "cas", cls.CAS_TEAM, 30, True, "team cas"),
+                    ("PHU_LUC_II", "Phụ lục II", "cas", cls.CAS_TEAM, 30, True, "team cas"),
                     ("PHU_LUC_III", "Phụ lục III", "cas", cls.CAS_DENY, 40, True, "deny cas"),
                 ],
             )
@@ -364,20 +366,20 @@ class BatchQueryRegressionTests(unittest.TestCase):
         self.assertEqual(rows[0]["Unit_Price"], "2,000")
         self.assertEqual(rows[0]["Compliance_Status"], "Được bán")
         self.assertEqual(rows[0]["Compliance_Note"], "manual note only")
-        self.assertEqual(rows[0]["Compliance_Css"], "warning-duoc-ban")
+        self.assertEqual(rows[0]["Compliance_Css"], "regulatory-color-green")
         self.assertEqual(rows[0]["Compliance_Source"], "manual")
         self.assertEqual(rows[0]["note"], "early product note")
         self.assertEqual(rows[0]["compliance"], "Được bán")
         self.assertEqual(rows[0]["compliance_note"], "manual note only")
-        self.assertEqual(rows[0]["compliance_css"], "warning-duoc-ban")
+        self.assertEqual(rows[0]["compliance_css"], "regulatory-color-green")
         self.assertEqual(rows[0]["compliance_source"], "manual")
         self.assertEqual(rows[1]["Code"], "NO_SUCH_CURSOR_BATCH")
         self.assertEqual(rows[1]["Name"], "")
-        self.assertEqual(rows[1]["Compliance_Status"], "Chưa xác định")
-        self.assertEqual(rows[1]["Compliance_Source"], "unresolved")
+        self.assertEqual(rows[1]["Compliance_Status"], "")
+        self.assertEqual(rows[1]["Compliance_Source"], "none")
         self.assertEqual(rows[2]["Name"], "Batch Early")
         self.assertIn("brand_compliance_settings", find_query[0])
-        self.assertIn("NULLIF(TRIM(COALESCE(p.manual_compliance, '')), '') IS NOT NULL", find_query[0])
+        self.assertIn("NULLIF(btrim(COALESCE(p.manual_compliance, '')), '') IS NOT NULL", find_query[0])
 
         payload = f" {self.CAS_MAIN.lower()} \nNO-SUCH-CURSOR-CAS\n{self.CAS_MAIN}"
         data, _query = self._call_endpoint("/check_cas_batch", {"cas": payload})
@@ -394,9 +396,9 @@ class BatchQueryRegressionTests(unittest.TestCase):
         row = data["results"][0]
         self.assertEqual(row["Name"], "No CAS Product")
         self.assertEqual(row["Cas"], "")
-        self.assertEqual(row["Compliance_Status"], "Chưa xác định")
-        self.assertEqual(row["Compliance_Css"], "warning-chua-xac-dinh")
-        self.assertEqual(row["Compliance_Source"], "unresolved")
+        self.assertEqual(row["Compliance_Status"], "")
+        self.assertEqual(row["Compliance_Css"], "")
+        self.assertEqual(row["Compliance_Source"], "none")
         self.assertEqual(row["Note"], "no cas product note")
         self.assertEqual(row["Compliance_Note"], "")
 
@@ -404,8 +406,8 @@ class BatchQueryRegressionTests(unittest.TestCase):
         data, _query = self._call_endpoint("/find_code_batch", {"codes": self.CODE_TEAM})
         self.assertEqual(data["results"][0]["Name"], "Team Denied")
         self.assertEqual(data["results"][0]["Brand"], self.BRAND_DENY)
-        self.assertEqual(data["results"][0]["Compliance_Status"], "TỒN KHO")
-        self.assertEqual(data["results"][0]["Compliance_Source"], "legacy")
+        self.assertEqual(data["results"][0]["Compliance_Status"], "Phụ lục II")
+        self.assertEqual(data["results"][0]["Compliance_Source"], "automatic")
 
         data, _query = self._call_endpoint(
             "/find_code_batch",
@@ -422,8 +424,8 @@ class BatchQueryRegressionTests(unittest.TestCase):
             is_admin=False,
             team_id=self.team_id,
         )
-        self.assertEqual(data["results"][0]["Compliance_Status"], "TỒN KHO")
-        self.assertEqual(data["results"][1]["Compliance_Status"], "")
+        self.assertEqual(data["results"][0]["Compliance_Status"], "Phụ lục II")
+        self.assertEqual(data["results"][1]["Compliance_Status"], "Phụ lục III")
 
     def test_batch_endpoint_plans_use_normalized_indexes_for_late_matches(self):
         with self.conn.cursor() as cur:
@@ -434,7 +436,13 @@ class BatchQueryRegressionTests(unittest.TestCase):
         self._assert_no_position_dependent_product_scan(code_plan, "idx_products_code_upper_trim")
 
         cas_plan = self._plan_for_endpoint("/check_cas_batch", {"cas": "\n".join(cas_values)})
-        self._assert_no_position_dependent_product_scan(cas_plan, "idx_products_cas_upper_trim")
+        # Check License is intentionally catalog-only in Phase 6D1. The tiny
+        # four-rule fixture is cheaper to seq-scan, so assert the supporting
+        # expression index exists rather than forcing an unrealistic plan.
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT to_regclass('idx_reg_rules_cas_match_value_upper')")
+            self.assertEqual(cur.fetchone()[0], "idx_reg_rules_cas_match_value_upper")
+        self.assertNotIn("Seq Scan on products", cas_plan)
 
     def test_advanced_search_preserves_duplicates_missing_multimatch_and_compliance(self):
         payload = f" {self.CAS_MAIN.lower()} \nNO-SUCH-ADVANCED-CAS\n{self.CAS_MAIN}"
@@ -447,19 +455,19 @@ class BatchQueryRegressionTests(unittest.TestCase):
         self.assertEqual([row["Name"] for row in rows], ["Batch Early", "Batch Later", "", "Batch Early", "Batch Later"])
         self.assertEqual(rows[0]["Compliance_Status"], "Được bán")
         self.assertEqual(rows[0]["Compliance_Note"], "manual note only")
-        self.assertEqual(rows[0]["Compliance_Css"], "warning-duoc-ban")
+        self.assertEqual(rows[0]["Compliance_Css"], "regulatory-color-green")
         self.assertEqual(rows[0]["Compliance_Source"], "manual")
         self.assertEqual(rows[0]["Note"], "early product note")
         self.assertEqual(rows[0]["compliance"], "Được bán")
         self.assertEqual(rows[0]["compliance_note"], "manual note only")
         self.assertEqual(rows[1]["Compliance_Status"], "CẤM NHẬP")
         self.assertEqual(rows[1]["Compliance_Note"], "code wins")
-        self.assertEqual(rows[1]["Compliance_Source"], "legacy")
+        self.assertEqual(rows[1]["Compliance_Source"], "automatic")
         self.assertEqual(rows[2]["Cas"], "NO-SUCH-ADVANCED-CAS")
-        self.assertEqual(rows[2]["Compliance_Status"], "Không phát hiện hạn chế")
-        self.assertEqual(rows[2]["Compliance_Source"], "unresolved")
+        self.assertEqual(rows[2]["Compliance_Status"], "")
+        self.assertEqual(rows[2]["Compliance_Source"], "none")
         self.assertIn("brand_compliance_settings", adv_query[0])
-        self.assertIn("NULLIF(TRIM(COALESCE(p.manual_compliance, '')), '') IS NOT NULL", adv_query[0])
+        self.assertIn("NULLIF(btrim(COALESCE(p.manual_compliance, '')), '') IS NOT NULL", adv_query[0])
 
     def test_advanced_search_filters_and_placeholder_behavior(self):
         data, _query = self._call_endpoint(
@@ -476,7 +484,7 @@ class BatchQueryRegressionTests(unittest.TestCase):
         self.assertEqual(len(data["results"]), 1)
         self.assertEqual(data["results"][0]["Cas"], self.CAS_MAIN)
         self.assertEqual(data["results"][0]["Name"], "")
-        self.assertEqual(data["results"][0]["Compliance_Status"], "Không phát hiện hạn chế")
+        self.assertEqual(data["results"][0]["Compliance_Status"], "")
 
         data, _query = self._call_endpoint("/advanced_search", {"cas": self.CAS_MAIN, "size": "2g"})
         self.assertEqual([row["Name"] for row in data["results"]], ["Batch Later"])
@@ -486,7 +494,7 @@ class BatchQueryRegressionTests(unittest.TestCase):
         self.assertEqual(data["matched_cas"], 0)
         self.assertEqual(data["results"][0]["Cas"], self.CAS_MAIN)
         self.assertEqual(data["results"][0]["Name"], "")
-        self.assertEqual(data["results"][0]["Compliance_Status"], "Không phát hiện hạn chế")
+        self.assertEqual(data["results"][0]["Compliance_Status"], "")
 
         data, _query = self._call_endpoint(
             "/advanced_search",
@@ -504,7 +512,7 @@ class BatchQueryRegressionTests(unittest.TestCase):
         self.assertEqual(len(data["results"]), 1)
         self.assertEqual(data["results"][0]["Name"], "Team Allowed")
         self.assertEqual(data["results"][0]["Brand"], self.BRAND_ALLOW)
-        self.assertEqual(data["results"][0]["Compliance_Status"], "TỒN KHO")
+        self.assertEqual(data["results"][0]["Compliance_Status"], "Phụ lục II")
 
     def test_advanced_search_plan_uses_normalized_cas_index(self):
         with self.conn.cursor() as cur:

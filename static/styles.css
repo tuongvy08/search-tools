@@ -453,6 +453,31 @@ h1 {
   max-width: 180px;
 }
 
+/* Phase 6D1.1 regulatory palette. Row tint changes only the background;
+   foreground colour is scoped to the status badge. */
+.regulatory-color-gray { --reg-bg:#f1f5f9; --reg-fg:#334155; }
+.regulatory-color-red { --reg-bg:#fee2e2; --reg-fg:#991b1b; }
+.regulatory-color-amber { --reg-bg:#fef3c7; --reg-fg:#854d0e; }
+.regulatory-color-teal { --reg-bg:#ccfbf1; --reg-fg:#115e59; }
+.regulatory-color-green { --reg-bg:#dcfce7; --reg-fg:#166534; }
+.regulatory-color-blue { --reg-bg:#dbeafe; --reg-fg:#1e40af; }
+.regulatory-color-purple { --reg-bg:#f3e8ff; --reg-fg:#6b21a8; }
+
+.regulatory-row[class*="regulatory-color-"] {
+  background-color: var(--reg-bg) !important;
+  color: inherit !important;
+}
+
+.compliance-badge[class*="regulatory-color-"] {
+  background-color: var(--reg-bg);
+  color: var(--reg-fg);
+}
+
+.qq-result-table tr.regulatory-row[class*="regulatory-color-"] td:not(.qq-cell-lifecycle) {
+  background-color: var(--reg-bg) !important;
+  color: inherit !important;
+}
+
 .compliance-badge.warning-cam-nhap {
   background-color: #ffe4e1;
   color: #b22222;
@@ -495,7 +520,7 @@ h1 {
   min-width: 120px;
   word-break: break-word;
   overflow-wrap: anywhere;
-  white-space: normal;
+  white-space: pre-line;
   vertical-align: top;
 }
 
@@ -1922,7 +1947,8 @@ tr.is-missing-identifier .qq-grid-input {
 .qq-result-table .qq-cell-size    { white-space: nowrap; }
 .qq-result-table .qq-cell-price   { white-space: nowrap; text-align: right; }
 .qq-result-table .qq-cell-note    { max-width: 160px; }
-.qq-result-table .qq-cell-comp-note { max-width: 160px; }
+.qq-result-table .qq-cell-comp-note { max-width: 160px; white-space: pre-line; }
+.cell-compliance-note { white-space: pre-line; }
 .qq-result-table .qq-cell-match-mode { min-width: 110px; }
 .qq-result-table .qq-cell-status  { color: #64748b; font-style: italic; }
 

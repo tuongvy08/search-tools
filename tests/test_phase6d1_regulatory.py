@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import secrets
 import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -21,7 +22,16 @@ os.environ.setdefault("FLASK_SECRET_KEY", "phase6d1-test-only")
 import regulatory_import_jobs
 import admin_regulatory
 from import_engine import ImportProblem
-from regulatory import normalize_cas, normalized_identity, product_resolver_lateral
+from regulatory import (
+    REGULATORY_SWATCHES,
+    catalog_fingerprint,
+    color_pair,
+    contrast_ratio,
+    normalize_cas,
+    normalize_color_hex,
+    normalized_identity,
+    product_resolver_lateral,
+)
 import search
 from auth_test_helpers import start_auth_db_patch
 import pg_temp_db
@@ -30,6 +40,7 @@ import pg_temp_db
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION_026 = (ROOT / "sql" / "migration_026_regulatory_management.sql").read_text(encoding="utf-8")
 MIGRATION_027 = (ROOT / "sql" / "migration_027_regulatory_status_colors.sql").read_text(encoding="utf-8")
+MIGRATION_028 = (ROOT / "sql" / "migration_028_regulatory_custom_colors.sql").read_text(encoding="utf-8")
 
 
 def _workbook_bytes(headers, rows):
@@ -84,7 +95,8 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
             cur.execute("""UPDATE regulatory_statuses SET
                            label=CASE stable_key WHEN 'CAM_NHAP' THEN 'CẤM NHẬP' WHEN 'PHU_LUC_II' THEN 'Phụ lục II' WHEN 'PHU_LUC_III' THEN 'Phụ lục III' WHEN 'DUOC_BAN' THEN 'Được bán' WHEN 'CAN_GIAY_PHEP' THEN 'Cần giấy phép' ELSE 'Chưa xác định' END,
                            priority=CASE stable_key WHEN 'CAM_NHAP' THEN 10 WHEN 'PHU_LUC_II' THEN 20 WHEN 'PHU_LUC_III' THEN 30 WHEN 'DUOC_BAN' THEN 40 WHEN 'CAN_GIAY_PHEP' THEN 50 ELSE 60 END,
-                           color_key=CASE stable_key WHEN 'CAM_NHAP' THEN 'red' WHEN 'PHU_LUC_II' THEN 'amber' WHEN 'PHU_LUC_III' THEN 'teal' WHEN 'DUOC_BAN' THEN 'green' WHEN 'CAN_GIAY_PHEP' THEN 'blue' ELSE 'gray' END""")
+                           color_key=CASE stable_key WHEN 'CAM_NHAP' THEN 'red' WHEN 'PHU_LUC_II' THEN 'amber' WHEN 'PHU_LUC_III' THEN 'teal' WHEN 'DUOC_BAN' THEN 'green' WHEN 'CAN_GIAY_PHEP' THEN 'blue' ELSE 'gray' END,
+                           color_hex=NULL""")
 
     def _status(self, key):
         with self.conn.cursor() as cur:
@@ -278,8 +290,8 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
                 plan = regulatory_import_jobs.build_plan(cur, rows, "upsert")
                 regulatory_import_jobs.apply_plan(cur, rows, "upsert", plan)
         with self.conn.cursor() as cur:
-            cur.execute("SELECT export_policy,priority=(SELECT max(priority) FROM regulatory_statuses),color_key FROM regulatory_statuses WHERE label='Theo dõi nội bộ'")
-            self.assertEqual(cur.fetchone(), ("ALLOW", True, "gray"))
+            cur.execute("SELECT export_policy,priority=(SELECT max(priority) FROM regulatory_statuses),color_key,color_hex FROM regulatory_statuses WHERE label='Theo dõi nội bộ'")
+            self.assertEqual(cur.fetchone(), ("ALLOW", True, "gray", None))
 
     def test_admin_ui_status_create_rename_and_templates(self):
         client = self._admin_client()
@@ -290,7 +302,10 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
         self.assertIn("Thay đúng nhóm trường + tình trạng", html)
         self.assertIn("Nhập dữ liệu an toàn", html)
         self.assertIn("Đổi màu", html)
-        self.assertIn("Bảng màu cho", html)
+        self.assertIn("16 màu gợi ý", html)
+        self.assertIn("Màu khác…", html)
+        self.assertIn("font-awesome/5.15.2", html)
+        self.assertEqual(html.count("data-color-seed"), 16 * 6)
         for raw in ("Phase 6D1", "Policy cho/chặn", "Background import", "format/checksum", "giữ rule"):
             self.assertNotIn(raw, html)
         self.assertIn('meta name="viewport"', html)
@@ -306,21 +321,21 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
         self.assertEqual(color_key, "gray")
         response = client.post("/admin/regulatory/statuses", data={
             "csrf_token": "phase6d1-csrf", "action": "set_color", "status_id": status_id,
-            "revision": str(revision), "color_key": "purple",
+            "revision": str(revision), "color_hex": "#6d28d9",
         })
         self.assertEqual(response.status_code, 302)
         with self.conn.cursor() as cur:
-            cur.execute("SELECT color_key,updated_at FROM regulatory_statuses WHERE id=%s", (status_id,))
-            self.assertEqual((color_key := cur.fetchone())[0], "purple")
-            revision = color_key[1]
+            cur.execute("SELECT color_hex,updated_at FROM regulatory_statuses WHERE id=%s", (status_id,))
+            self.assertEqual((color_hex := cur.fetchone())[0], "#6D28D9")
+            revision = color_hex[1]
         response = client.post("/admin/regulatory/statuses", data={
             "csrf_token": "phase6d1-csrf", "action": "rename", "status_id": status_id,
             "revision": str(revision), "label": "Theo dõi UI mới",
         })
         self.assertEqual(response.status_code, 302)
         with self.conn.cursor() as cur:
-            cur.execute("SELECT stable_key,label,export_policy,color_key FROM regulatory_statuses WHERE id=%s", (status_id,))
-            self.assertEqual(cur.fetchone(), (stable_key, "Theo dõi UI mới", "ALLOW", "purple"))
+            cur.execute("SELECT stable_key,label,export_policy,color_key,color_hex FROM regulatory_statuses WHERE id=%s", (status_id,))
+            self.assertEqual(cur.fetchone(), (stable_key, "Theo dõi UI mới", "ALLOW", "gray", "#6D28D9"))
             cur.execute("SELECT event FROM regulatory_status_events WHERE status_id=%s ORDER BY id", (status_id,))
             self.assertEqual([row[0] for row in cur.fetchall()], ["created", "color_changed", "renamed"])
         template = client.get("/admin/regulatory/templates/cas")
@@ -353,44 +368,54 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
 
         invalid = client.post("/admin/regulatory/statuses", data={
             "csrf_token": "phase6d1-csrf", "action": "set_color", "status_id": blocked_id,
-            "revision": str(blocked_revision), "color_key": "url(javascript:bad)",
+            "revision": str(blocked_revision), "color_hex": "url(javascript:bad)",
         })
         self.assertIn("err=", invalid.location)
         changed = client.post("/admin/regulatory/statuses", data={
             "csrf_token": "phase6d1-csrf", "action": "set_color", "status_id": blocked_id,
-            "revision": str(blocked_revision), "color_key": "green",
+            "revision": str(blocked_revision), "color_hex": "#047857",
         })
         self.assertNotIn("err=", changed.location)
         stale = client.post("/admin/regulatory/statuses", data={
             "csrf_token": "phase6d1-csrf", "action": "set_color", "status_id": blocked_id,
-            "revision": str(blocked_revision), "color_key": "purple",
+            "revision": str(blocked_revision), "color_hex": "#6D28D9",
         })
         self.assertIn("err=", stale.location)
         allowed = client.post("/admin/regulatory/statuses", data={
             "csrf_token": "phase6d1-csrf", "action": "set_color", "status_id": allowed_id,
-            "revision": str(allowed_revision), "color_key": "red",
+            "revision": str(allowed_revision), "color_hex": "#B91C1C",
         })
         self.assertNotIn("err=", allowed.location)
 
         rows = client.get("/search", query_string={"query": "COLOR-"}).get_json()["results"]
         by_code = {row["Code"]: row for row in rows}
-        self.assertEqual(by_code["COLOR-BLOCK"]["Compliance_Css"], "regulatory-color-green")
+        self.assertEqual(by_code["COLOR-BLOCK"]["Compliance_Css"], "regulatory-color-custom")
+        self.assertEqual(by_code["COLOR-BLOCK"]["Compliance_Color"], "#047857")
+        self.assertGreaterEqual(contrast_ratio(
+            by_code["COLOR-BLOCK"]["Compliance_Bg"],
+            by_code["COLOR-BLOCK"]["Compliance_Fg"],
+        ), 4.5)
         self.assertEqual(by_code["COLOR-BLOCK"]["Compliance_Export_Policy"], "BLOCK")
-        self.assertEqual(by_code["COLOR-ALLOW"]["Compliance_Css"], "regulatory-color-red")
+        self.assertEqual(by_code["COLOR-ALLOW"]["Compliance_Css"], "regulatory-color-custom")
+        self.assertEqual(by_code["COLOR-ALLOW"]["Compliance_Color"], "#B91C1C")
         self.assertEqual(by_code["COLOR-ALLOW"]["Compliance_Export_Policy"], "ALLOW")
         manual = client.get("/search", query_string={"query": "COLOR-MANUAL"}).get_json()["results"][0]
         self.assertEqual((manual["Compliance_Status"], manual["Compliance_Css"],
                           manual["Compliance_Export_Policy"]),
-                         ("Được bán", "regulatory-color-red", "ALLOW"))
+                         ("Được bán", "regulatory-color-custom", "ALLOW"))
         found = client.post("/find_code_batch", data={"codes": "COLOR-BLOCK"}).get_json()["results"][0]
-        self.assertEqual(found["Compliance_Css"], "regulatory-color-green")
+        self.assertEqual(found["Compliance_Css"], "regulatory-color-custom")
         checked = client.post("/check_cas_batch", data={"cas": "50-00-0"}).get_json()["results"][0]
-        self.assertEqual(checked["Compliance_Css"], "regulatory-color-green")
+        self.assertEqual(checked["Compliance_Css"], "regulatory-color-custom")
+        checked_single = client.get("/check_cas", query_string={"cas": "50-00-0"}).get_json()
+        self.assertEqual(checked_single["Compliance_Color"], "#047857")
         quote = client.post("/api/quote-assistant/match", json={
             "rows": [{"code": "COLOR-BLOCK"}, {"code": "COLOR-ALLOW"}],
             "selection_strategy": "LOWEST_UNIT_PRICE",
         }).get_json()["results"]
         self.assertEqual(quote[0]["candidates"][0]["ineligible_reason"], "COMPLIANCE_BLOCKED")
+        self.assertEqual(quote[0]["candidates"][0]["compliance_color"], "#047857")
+        self.assertEqual(quote[0]["candidates"][0]["compliance_css"], "regulatory-color-custom")
         self.assertNotEqual(quote[1]["candidates"][0]["ineligible_reason"], "COMPLIANCE_BLOCKED")
         with self.conn.cursor() as cur:
             cur.execute("SELECT xmin::text FROM products ORDER BY code")
@@ -409,7 +434,7 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
                                    SET is_admin=true,account_status='ACTIVE',auth_version=1
                                    WHERE id=%s""", (self.admin_id,))
                     cur.execute("""UPDATE regulatory_statuses
-                                   SET color_key='red',updated_at=clock_timestamp()
+                                   SET color_hex=NULL,updated_at=clock_timestamp()
                                    WHERE stable_key='CAM_NHAP' RETURNING id,updated_at""")
                     status_id, revision = cur.fetchone()
                     cur.execute("DELETE FROM regulatory_status_events WHERE status_id=%s", (status_id,))
@@ -432,7 +457,7 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
                         "/admin/regulatory/statuses",
                         data={"csrf_token": "phase6d1-csrf", "action": "set_color",
                               "status_id": status_id, "revision": str(revision),
-                              "color_key": "purple"},
+                              "color_hex": "#6D28D9"},
                     )
 
                 thread = threading.Thread(target=request_color_change)
@@ -458,8 +483,8 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
                 self.assertFalse(thread.is_alive(), "request hung after regulatory lock release")
                 self.assertEqual(result["response"].status_code, 403)
                 with self.conn.cursor() as cur:
-                    cur.execute("SELECT color_key FROM regulatory_statuses WHERE id=%s", (status_id,))
-                    self.assertEqual(cur.fetchone()[0], "red")
+                    cur.execute("SELECT color_hex FROM regulatory_statuses WHERE id=%s", (status_id,))
+                    self.assertIsNone(cur.fetchone()[0])
                     cur.execute("SELECT count(*) FROM regulatory_status_events WHERE status_id=%s",
                                 (status_id,))
                     self.assertEqual(cur.fetchone()[0], 0)
@@ -471,24 +496,24 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
             status_id, revision = cur.fetchone()
         response = self._real_admin_client().post("/admin/regulatory/statuses", data={
             "csrf_token": "phase6d1-csrf", "action": "set_color", "status_id": status_id,
-            "revision": str(revision), "color_key": "purple",
+            "revision": str(revision), "color_hex": "#6D28D9",
         })
         self.assertEqual(response.status_code, 302)
         with self.conn.cursor() as cur:
-            cur.execute("SELECT color_key FROM regulatory_statuses WHERE id=%s", (status_id,))
-            self.assertEqual(cur.fetchone()[0], "purple")
+            cur.execute("SELECT color_hex FROM regulatory_statuses WHERE id=%s", (status_id,))
+            self.assertEqual(cur.fetchone()[0], "#6D28D9")
             cur.execute("""SELECT count(*) FROM regulatory_status_events
                            WHERE status_id=%s AND event='color_changed'""", (status_id,))
             self.assertEqual(cur.fetchone()[0], 1)
 
     def test_set_color_requires_csrf_and_admin_session(self):
         with self.conn.cursor() as cur:
-            cur.execute("SELECT id,color_key,updated_at FROM regulatory_statuses WHERE stable_key='CAM_NHAP'")
+            cur.execute("SELECT id,color_hex,updated_at FROM regulatory_statuses WHERE stable_key='CAM_NHAP'")
             status_id, original_color, revision = cur.fetchone()
         admin = self._real_admin_client()
         missing_csrf = admin.post("/admin/regulatory/statuses", data={
             "action": "set_color", "status_id": status_id,
-            "revision": str(revision), "color_key": "purple",
+            "revision": str(revision), "color_hex": "#6D28D9",
         })
         self.assertEqual(missing_csrf.status_code, 400)
         marker = secrets.token_hex(4)
@@ -507,11 +532,11 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
                         team_id=team_id,username=f"color_guard_{marker}",csrf_token="staff-csrf")
         nonadmin = staff.post("/admin/regulatory/statuses", data={
             "csrf_token": "staff-csrf", "action": "set_color", "status_id": status_id,
-            "revision": str(revision), "color_key": "purple",
+            "revision": str(revision), "color_hex": "#6D28D9",
         })
         self.assertEqual(nonadmin.status_code, 403)
         with self.conn.cursor() as cur:
-            cur.execute("SELECT color_key FROM regulatory_statuses WHERE id=%s", (status_id,))
+            cur.execute("SELECT color_hex FROM regulatory_statuses WHERE id=%s", (status_id,))
             self.assertEqual(cur.fetchone()[0], original_color)
 
     def test_color_metadata_is_redacted_without_compliance_permission(self):
@@ -536,7 +561,9 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
             raw = response.get_data(as_text=True)
             self.assertIn("Visible product note", raw)
             for forbidden in ("Compliance_Color", "compliance_color", "Compliance_Css",
-                              "compliance_css", "regulatory-color-amber", "PHU_LUC_II"):
+                              "compliance_css", "Compliance_Bg", "compliance_bg",
+                              "Compliance_Fg", "compliance_fg", "regulatory-color-amber",
+                              "regulatory-color-custom", "PHU_LUC_II"):
                 self.assertNotIn(forbidden, raw)
         self.assertEqual(client.get("/check_cas", query_string={"cas": "50-00-0"}).status_code, 403)
 
@@ -703,6 +730,27 @@ class Phase6D1PureTests(unittest.TestCase):
     def test_text_identity_preserves_accents(self):
         self.assertNotEqual(normalized_identity("Hóa chất"), normalized_identity("Hoa chat"))
 
+    def test_custom_color_is_canonical_and_contrast_is_readable_for_edge_seeds(self):
+        self.assertEqual(normalize_color_hex("#6d28d9"), "#6D28D9")
+        for invalid in ("#FFF", "#11223344", "112233", "#12GG00", "white",
+                        "url(javascript:bad)", "#000000; color:red"):
+            with self.assertRaises(ValueError, msg=invalid):
+                normalize_color_hex(invalid)
+        for seed in ("#000000", "#FFFFFF", "#FFFF00") + tuple(
+                item[0] for item in REGULATORY_SWATCHES):
+            background, foreground = color_pair(seed)
+            self.assertGreaterEqual(contrast_ratio(background, foreground), 4.5, seed)
+
+    def test_legacy_palette_pairs_remain_exact_without_custom_override(self):
+        expected = {
+            "gray": ("#F1F5F9", "#334155"), "red": ("#FEE2E2", "#991B1B"),
+            "amber": ("#FEF3C7", "#854D0E"), "teal": ("#CCFBF1", "#115E59"),
+            "green": ("#DCFCE7", "#166534"), "blue": ("#DBEAFE", "#1E40AF"),
+            "purple": ("#F3E8FF", "#6B21A8"),
+        }
+        for key, pair in expected.items():
+            self.assertEqual(color_pair(key, "CUSTOM_TEST"), pair)
+
     def test_frontend_uses_api_palette_and_workbook_mapping_excludes_color(self):
         search_js = (ROOT / "static" / "script.js").read_text(encoding="utf-8")
         quote_js = (ROOT / "static" / "quick_quote.js").read_text(encoding="utf-8")
@@ -713,6 +761,20 @@ class Phase6D1PureTests(unittest.TestCase):
         mapping = search._quote_template_mapping_snapshot()["mapping"]
         self.assertNotIn("Compliance_Color", mapping)
         self.assertNotIn("Compliance_Css", mapping)
+        self.assertNotIn("Compliance_Bg", mapping)
+        self.assertNotIn("Compliance_Fg", mapping)
+
+    def test_admin_picker_dom_preview_keyboard_and_mobile_contract(self):
+        template = (ROOT / "templates" / "admin_regulatory.html").read_text(encoding="utf-8")
+        css = (ROOT / "static" / "admin_regulatory.css").read_text(encoding="utf-8")
+        self.assertEqual(len(REGULATORY_SWATCHES), 16)
+        self.assertIn('type="radio" name="color_hex"', template)
+        self.assertIn('type="color"', template)
+        self.assertIn("font-awesome/5.15.2", template)
+        self.assertIn("grid-template-columns:repeat(8", css)
+        self.assertIn(".color-choice:focus-within", css)
+        self.assertIn("grid-template-columns:repeat(4", css)
+        subprocess.run(["node", "tests/admin_regulatory_dom_test.js"], cwd=ROOT, check=True)
 
 
 class Phase6D1LegacyMigrationRehearsal(unittest.TestCase):
@@ -732,7 +794,8 @@ class Phase6D1LegacyMigrationRehearsal(unittest.TestCase):
                     cur.execute(pg_temp_db._MINIMAL_BASE_SCHEMA_SQL)
                     for name in pg_temp_db._FULL_SCHEMA_SQL_FILES:
                         if name in {"migration_026_regulatory_management.sql",
-                                  "migration_027_regulatory_status_colors.sql"}:
+                                  "migration_027_regulatory_status_colors.sql",
+                                  "migration_028_regulatory_custom_colors.sql"}:
                             continue
                         cur.execute(pg_temp_db._read_sql(name))
                     cur.execute("INSERT INTO regulatory_rules(rule_type,rule_label,match_field,match_value,priority,is_active,note) VALUES ('CAM_NHAP','old label','cas','50-00-0',999,true,'keep'),('TON_KHO','TỒN KHO','code','STOCK',1,true,'remove')")
@@ -769,7 +832,8 @@ class Phase6D1LegacyMigrationRehearsal(unittest.TestCase):
                     cur.execute(pg_temp_db._MINIMAL_BASE_SCHEMA_SQL)
                     for name in pg_temp_db._FULL_SCHEMA_SQL_FILES:
                         if name in {"migration_026_regulatory_management.sql",
-                                  "migration_027_regulatory_status_colors.sql"}:
+                                  "migration_027_regulatory_status_colors.sql",
+                                  "migration_028_regulatory_custom_colors.sql"}:
                             continue
                         cur.execute(pg_temp_db._read_sql(name))
                     cur.execute("INSERT INTO products(name,code,brand) VALUES ('P','NO-WRITE','B')")
@@ -812,9 +876,9 @@ class Phase6D1LegacyMigrationRehearsal(unittest.TestCase):
                                     is_admin=True, username="pre027-admin", csrf_token="pre027-csrf")
                     response = client.post("/admin/regulatory/statuses", data={
                         "csrf_token": "pre027-csrf", "action": "set_color",
-                        "status_id": status_id, "revision": str(pre027_revision), "color_key": "blue",
+                        "status_id": status_id, "revision": str(pre027_revision), "color_hex": "#1D4ED8",
                     })
-                    self.assertIn("migration+027", response.location)
+                    self.assertIn("migration+028", response.location)
                 with conn.cursor() as cur:
                     cur.execute(MIGRATION_027)
                     cur.execute("""SELECT stable_key,color_key FROM regulatory_statuses
@@ -833,6 +897,54 @@ class Phase6D1LegacyMigrationRehearsal(unittest.TestCase):
                     with self.assertRaises(psycopg2.errors.CheckViolation):
                         with conn.cursor() as invalid_cur:
                             invalid_cur.execute("UPDATE regulatory_statuses SET color_key='raw-css' WHERE stable_key='CAM_NHAP'")
+            conn.close()
+        finally:
+            pg_temp_db.drop_temp_db(db_name)
+
+    @unittest.skipUnless(pg_temp_db.probe_postgres_reachable(), "isolated local PostgreSQL required")
+    def test_028_runs_twice_from_027_preserving_choices_without_product_writes(self):
+        db_name = pg_temp_db._TEST_DB_PREFIX + "phase6d11_custom_color_" + secrets.token_hex(4)
+        dsn = pg_temp_db.dsn_for(db_name)
+        maint = psycopg2.connect(pg_temp_db.maintenance_dsn())
+        maint.autocommit = True
+        with maint.cursor() as cur:
+            cur.execute(f'CREATE DATABASE "{db_name}"')
+        maint.close()
+        try:
+            conn = psycopg2.connect(dsn)
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                cur.execute(pg_temp_db._MINIMAL_BASE_SCHEMA_SQL)
+                for name in pg_temp_db._FULL_SCHEMA_SQL_FILES:
+                    if name in {"migration_026_regulatory_management.sql",
+                                "migration_027_regulatory_status_colors.sql",
+                                "migration_028_regulatory_custom_colors.sql"}:
+                        continue
+                    cur.execute(pg_temp_db._read_sql(name))
+                cur.execute("INSERT INTO products(name,code,brand) VALUES ('P','NO-028-WRITE','B')")
+                cur.execute(MIGRATION_026)
+                cur.execute(MIGRATION_027)
+                cur.execute("UPDATE regulatory_statuses SET color_key='purple' WHERE stable_key='CAM_NHAP'")
+                cur.execute("SELECT xmin::text FROM products WHERE code='NO-028-WRITE'")
+                product_version = cur.fetchone()[0]
+                fingerprint_027 = catalog_fingerprint(cur)
+                cur.execute(MIGRATION_028)
+                cur.execute(MIGRATION_028)
+                self.assertEqual(catalog_fingerprint(cur), fingerprint_027)
+                cur.execute("SELECT color_key,color_hex FROM regulatory_statuses WHERE stable_key='CAM_NHAP'")
+                self.assertEqual(cur.fetchone(), ("purple", None))
+                cur.execute("UPDATE regulatory_statuses SET color_hex='#123ABC' WHERE stable_key='CAM_NHAP'")
+                self.assertNotEqual(catalog_fingerprint(cur), fingerprint_027)
+                cur.execute(MIGRATION_028)
+                cur.execute("UPDATE regulatory_statuses SET label='Tên mới' WHERE stable_key='CAM_NHAP'")
+                cur.execute(MIGRATION_028)
+                cur.execute("SELECT label,color_key,color_hex FROM regulatory_statuses WHERE stable_key='CAM_NHAP'")
+                self.assertEqual(cur.fetchone(), ("Tên mới", "purple", "#123ABC"))
+                cur.execute("SELECT xmin::text FROM products WHERE code='NO-028-WRITE'")
+                self.assertEqual(cur.fetchone()[0], product_version)
+                for invalid in ("#fff", "#abcdef", "#12345678", "red", "url(bad)", "#000000;"):
+                    with self.assertRaises(psycopg2.errors.CheckViolation, msg=invalid):
+                        cur.execute("UPDATE regulatory_statuses SET color_hex=%s WHERE stable_key='CAM_NHAP'", (invalid,))
             conn.close()
         finally:
             pg_temp_db.drop_temp_db(db_name)

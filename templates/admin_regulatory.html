@@ -6,10 +6,11 @@
   <title>Quy tắc quản lý</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260910d2') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260909d1') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='admin_regulatory.css', v='20260910d2') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_regulatory.css', v='20260910e1') }}">
   <script defer src="{{ url_for('static', filename='admin_ux.js', v='20260909d1') }}"></script>
-  <script defer src="{{ url_for('static', filename='admin_regulatory.js', v='20260910d2') }}"></script>
+  <script defer src="{{ url_for('static', filename='admin_regulatory.js', v='20260910e1') }}"></script>
 </head>
 <body class="admin-page regulatory-page">
 {% include '_user_nav.html' %}
@@ -76,7 +77,7 @@
       </form>
       <ol class="status-list">
       {% for status in statuses %}
-        <li class="regulatory-row {{ status.color_css }}" data-status-color-preview>
+        <li class="regulatory-row {{ status.color_css }}" data-status-color-preview style="--reg-bg:{{ status.color_bg }};--reg-fg:{{ status.color_fg }}">
           <div class="status-summary"><span class="priority">{{ loop.index }}</span><div><strong class="compliance-badge {{ status.color_css }}">{{ status.label }}</strong>
             <span>{{ status.rule_count }} quy tắc · {{ 'Chặn xuất' if status.export_policy == 'BLOCK' else 'Cho xuất' }}</span></div></div>
           <div class="status-actions">
@@ -85,9 +86,24 @@
             <details><summary>Đổi tên</summary><form method="post" action="{{ url_for('regulatory_status_action') }}" data-submit-once><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="status_id" value="{{ status.id }}"><input type="hidden" name="revision" value="{{ status.updated_at }}"><input type="hidden" name="action" value="rename"><input name="label" value="{{ status.label }}" maxlength="120" required><button type="submit">Lưu tên</button></form></details>
             <details class="color-editor"><summary>Đổi màu</summary><form method="post" action="{{ url_for('regulatory_status_action') }}" data-submit-once data-color-form>
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="status_id" value="{{ status.id }}"><input type="hidden" name="revision" value="{{ status.updated_at }}"><input type="hidden" name="action" value="set_color">
-              <fieldset><legend>Bảng màu cho {{ status.label }}</legend><div class="color-palette">
-                {% for key, color in regulatory_colors.items() %}<label class="color-choice" title="{{ color[1] }}"><input type="radio" name="color_key" value="{{ key }}" data-color-css="regulatory-color-{{ key }}"{{ ' checked' if status.color_key == key else '' }}><span class="color-swatch regulatory-color-{{ key }}" aria-hidden="true"></span><span>{{ color[0] }}</span></label>{% endfor %}
-              </div></fieldset><button type="submit">Lưu màu</button>
+              <fieldset><legend>Chọn màu cho {{ status.label }}</legend>
+                <p class="color-help">Chọn một màu gợi ý hoặc dùng bộ chọn “Màu khác…”. Hệ thống tự tạo nền nhạt và màu chữ dễ đọc.</p>
+                <div class="color-palette" role="group" aria-label="16 màu gợi ý">
+                {% for swatch in regulatory_swatches %}
+                  <label class="color-choice" title="{{ swatch.label }}">
+                    <input type="radio" name="color_hex" value="{{ swatch.hex }}" data-color-seed data-color-bg="{{ swatch.bg }}" data-color-fg="{{ swatch.fg }}"{{ ' checked' if status.color_hex == swatch.hex else '' }}{{ ' required' if loop.first else '' }}>
+                    <span class="color-swatch" style="background-color:{{ swatch.hex }}" aria-hidden="true"></span>
+                    <span class="sq-shell-sr">{{ swatch.label }} {{ swatch.hex }}</span>
+                  </label>
+                {% endfor %}
+                </div>
+                <div class="custom-color-row">
+                  <input id="customColorChoice{{ status.id }}" type="radio" name="color_hex" value="{{ status.color_hex or '#64748B' }}" data-custom-color-choice{{ ' checked' if status.color_hex and status.color_hex not in regulatory_swatches|map(attribute='hex')|list else '' }}>
+                  <label for="customColorChoice{{ status.id }}">Màu khác…</label>
+                  <input id="customColorInput{{ status.id }}" type="color" value="{{ status.color_hex or '#64748B' }}" data-custom-color-input aria-label="Chọn màu khác cho {{ status.label }}">
+                  <output for="customColorInput{{ status.id }}" data-color-hex>{{ status.color_hex or status.color_bg }}</output>
+                </div>
+              </fieldset><button type="submit" data-save-color{{ ' disabled' if not status.color_hex else '' }}>Lưu màu</button>
             </form></details>
           </div>
         </li>

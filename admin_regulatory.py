@@ -12,13 +12,16 @@ from psycopg2.extras import Json, RealDictCursor
 from import_engine import ImportProblem, limit
 from regulatory import (
     EXPORT_ALLOW,
-    REGULATORY_COLORS,
+    REGULATORY_SWATCHES,
     acquire_regulatory_lock,
     clean_text,
+    color_pair,
     color_css,
     effective_color_key,
-    normalize_color_key,
+    effective_color_token,
+    normalize_color_hex,
     stable_key_for_label,
+    valid_color_hex,
 )
 import regulatory_import_jobs as jobs
 import session_security
@@ -71,11 +74,20 @@ def _presentation_labels():
     }
 
 
+def _color_swatches():
+    return [
+        {"hex": seed, "label": label, "bg": color_pair(seed)[0], "fg": color_pair(seed)[1]}
+        for seed, label in REGULATORY_SWATCHES
+    ]
+
+
 def _status_snapshot(row):
+    color_hex = valid_color_hex(row.get("color_hex"))
     return {
         "id": row["id"], "stable_key": row["stable_key"], "label": row["label"],
         "priority": row["priority"], "export_policy": row["export_policy"],
         "color_key": effective_color_key(row.get("color_key"), row.get("stable_key")),
+        "color_hex": color_hex or None,
         "updated_at": row["updated_at"].isoformat() if row.get("updated_at") else None,
     }
 
@@ -113,10 +125,18 @@ def register(app, require_admin, actor):
                 )
                 statuses = [dict(row) for row in cur.fetchall()]
                 for status in statuses:
+                    status["color_hex"] = valid_color_hex(status.get("color_hex"))
                     status["color_key"] = effective_color_key(
                         status.get("color_key"), status.get("stable_key")
                     )
-                    status["color_css"] = color_css(status["color_key"])
+                    color_value = status["color_hex"] or status["color_key"]
+                    status["color_token"] = effective_color_token(
+                        color_value, status.get("stable_key")
+                    )
+                    status["color_css"] = color_css(color_value, status.get("stable_key"))
+                    status["color_bg"], status["color_fg"] = color_pair(
+                        color_value, status.get("stable_key")
+                    )
             recent = jobs.list_jobs()
         except Exception:
             statuses, recent = [], []
@@ -130,7 +150,7 @@ def register(app, require_admin, actor):
             error=error,
             message=request.args.get("msg"),
             max_mb=limit("REGULATORY_MAX_BYTES", 16 * 1024**2) // 1024**2,
-            regulatory_colors=REGULATORY_COLORS,
+            regulatory_swatches=_color_swatches(),
             **_presentation_labels(),
         )
 
@@ -189,25 +209,25 @@ def register(app, require_admin, actor):
                     )
                 elif action == "set_color":
                     status_id = int(request.form.get("status_id", "0"))
-                    color_key = normalize_color_key(request.form.get("color_key"))
+                    color_hex = normalize_color_hex(request.form.get("color_hex"))
                     revision = request.form.get("revision", "")
                     cur.execute(
                         """SELECT EXISTS (
                                SELECT 1 FROM information_schema.columns
                                WHERE table_schema=current_schema()
-                                 AND table_name='regulatory_statuses' AND column_name='color_key'
+                                 AND table_name='regulatory_statuses' AND column_name='color_hex'
                            )"""
                     )
                     if not cur.fetchone()["exists"]:
-                        raise ImportProblem("Chưa thể đổi màu: cần chạy migration 027 rồi tải lại trang.")
+                        raise ImportProblem("Chưa thể đổi màu: cần chạy migration 028 rồi tải lại trang.")
                     cur.execute("SELECT * FROM regulatory_statuses WHERE id=%s FOR UPDATE", (status_id,))
                     before = cur.fetchone()
                     if not before or str(before["updated_at"]) != revision:
                         raise ImportProblem("Tình trạng đã thay đổi; hãy tải lại trang.")
                     cur.execute(
                         """UPDATE regulatory_statuses
-                           SET color_key=%s,updated_at=now() WHERE id=%s RETURNING *""",
-                        (color_key, status_id),
+                           SET color_hex=%s,updated_at=now() WHERE id=%s RETURNING *""",
+                        (color_hex, status_id),
                     )
                     after = dict(cur.fetchone())
                     cur.execute(
@@ -313,7 +333,7 @@ def register(app, require_admin, actor):
             events = cur.fetchall()
         return render_template("admin_regulatory.html", statuses=[], jobs=[], job=job, events=events,
                                error=request.args.get("err"), message=None, max_mb=0,
-                               submission_key=str(uuid.uuid4()), regulatory_colors=REGULATORY_COLORS,
+                               submission_key=str(uuid.uuid4()),
                                **_presentation_labels())
 
     @app.get("/admin/regulatory/jobs/<uuid:job_id>/status")

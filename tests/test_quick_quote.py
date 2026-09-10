@@ -2541,7 +2541,7 @@ class QuickQuoteRowPolicyUiTests(unittest.TestCase):
         js_version = re.search(r"quick_quote\.js',\s*v='([^']+)'", html)
         self.assertIsNotNone(css_version)
         self.assertIsNotNone(js_version)
-        self.assertEqual(js_version.group(1), "20260910d2")
+        self.assertEqual(js_version.group(1), "20260910e1")
 
     # ── regression: everything from earlier phases must be untouched ────
 

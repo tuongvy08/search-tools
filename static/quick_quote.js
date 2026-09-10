@@ -2567,7 +2567,22 @@ function qqRenderSummary(counts, totalRows) {
 /* ═══════════════ compliance CSS ═══════════════ */
 
 function qqComplianceClass(value) {
-    return /^regulatory-color-(gray|red|amber|teal|green|blue|purple)$/.test(value || '') ? value : '';
+    return /^regulatory-color-(gray|red|amber|teal|green|blue|purple|custom)$/.test(value || '') ? value : '';
+}
+
+function qqCompliancePair(candidate) {
+    if (!qqField("Compliance")) return null;
+    const bg = String(candidate.Compliance_Bg || candidate.compliance_bg || '').toUpperCase();
+    const fg = String(candidate.Compliance_Fg || candidate.compliance_fg || '').toUpperCase();
+    const valid = /^#[0-9A-F]{6}$/;
+    return valid.test(bg) && valid.test(fg) ? { bg, fg } : null;
+}
+
+function qqApplyCompliancePair(node, candidate) {
+    const pair = qqCompliancePair(candidate);
+    if (!node || !pair) return;
+    node.style.setProperty('--reg-bg', pair.bg);
+    node.style.setProperty('--reg-fg', pair.fg);
 }
 
 /* ═══════════════ result table (product-search style) ═══════════════ */
@@ -3015,10 +3030,14 @@ function qqRenderResultTable(results) {
                 const compBadge = document.createElement('span');
                 compBadge.className = 'compliance-badge';
                 if (compCss) compBadge.classList.add(compCss);
+                qqApplyCompliancePair(compBadge, candidate);
                 compBadge.textContent = compLabel;
                 compTd.appendChild(compBadge);
             }
-            if (compCss) tr.classList.add('regulatory-row', compCss);
+            if (compCss) {
+                tr.classList.add('regulatory-row', compCss);
+                qqApplyCompliancePair(tr, candidate);
+            }
             if (qqField("Compliance")) tr.appendChild(compTd);
 
             if (qqField("Compliance_Note")) qqAppendCell(tr, candidate.Compliance_Note || candidate.compliance_note || '', 'qq-cell-comp-note');

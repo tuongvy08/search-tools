@@ -53,6 +53,7 @@ VERIFIED_FA5_ICONS = {
     "fa-chevron-down", "fa-sign-out-alt",
     "fa-box", "fa-file-import", "fa-users", "fa-user-cog", "fa-network-wired",
     "fa-file-invoice", "fa-money-bill-alt", "fa-shield-alt", "fa-history",
+    "fa-balance-scale",
 }
 
 

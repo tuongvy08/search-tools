@@ -613,6 +613,8 @@ def _product_row_to_result(
         "Compliance_Source": resolved["compliance_source"],
         "Compliance_Export_Policy": resolved["compliance_export_policy"],
         "Compliance_Color": resolved["compliance_color"],
+        "Compliance_Bg": resolved["compliance_bg"],
+        "Compliance_Fg": resolved["compliance_fg"],
         "note": note or "",
         "compliance": resolved["compliance"],
         "compliance_note": resolved["compliance_note"],
@@ -620,6 +622,8 @@ def _product_row_to_result(
         "compliance_source": resolved["compliance_source"],
         "compliance_export_policy": resolved["compliance_export_policy"],
         "compliance_color": resolved["compliance_color"],
+        "compliance_bg": resolved["compliance_bg"],
+        "compliance_fg": resolved["compliance_fg"],
     }
 
 
@@ -1251,9 +1255,13 @@ def _quote_candidate_from_row(row: tuple, rate_map) -> dict:
         "Compliance_Note": resolved["compliance_note"],
         "Compliance_Export_Policy": resolved["compliance_export_policy"],
         "Compliance_Color": resolved["compliance_color"],
+        "Compliance_Bg": resolved["compliance_bg"],
+        "Compliance_Fg": resolved["compliance_fg"],
         "compliance_source": resolved["compliance_source"],
         "compliance_css": resolved["compliance_css"],
         "compliance_color": resolved["compliance_color"],
+        "compliance_bg": resolved["compliance_bg"],
+        "compliance_fg": resolved["compliance_fg"],
         "eligible": eligible,
         "ineligible_reason": ineligible_reason,
         "currency_rate_status": currency_rate_status,
@@ -4796,6 +4804,8 @@ def search_products():
                     "Compliance_Source": resolved["compliance_source"],
                     "Compliance_Export_Policy": resolved["compliance_export_policy"],
                     "Compliance_Color": resolved["compliance_color"],
+                    "Compliance_Bg": resolved["compliance_bg"],
+                    "Compliance_Fg": resolved["compliance_fg"],
                     "note": note or "",
                     "compliance": resolved["compliance"],
                     "compliance_note": resolved["compliance_note"],
@@ -4803,6 +4813,8 @@ def search_products():
                     "compliance_source": resolved["compliance_source"],
                     "compliance_export_policy": resolved["compliance_export_policy"],
                     "compliance_color": resolved["compliance_color"],
+                    "compliance_bg": resolved["compliance_bg"],
+                    "compliance_fg": resolved["compliance_fg"],
                 }
             )
 
@@ -4844,6 +4856,8 @@ def check_cas():
                 "export_policy": row[2],
                 "Compliance_Css": resolved["compliance_css"],
                 "Compliance_Color": resolved["compliance_color"],
+                "Compliance_Bg": resolved["compliance_bg"],
+                "Compliance_Fg": resolved["compliance_fg"],
                 "message": f"CAS {cas} thuộc danh mục {warning}.",
             })
         return jsonify({"warning": False})
@@ -4908,6 +4922,8 @@ def check_cas_batch():
                 results[idx]["Compliance_Note"] = resolved["compliance_note"]
                 results[idx]["Compliance_Css"] = resolved["compliance_css"]
                 results[idx]["Compliance_Color"] = resolved["compliance_color"]
+                results[idx]["Compliance_Bg"] = resolved["compliance_bg"]
+                results[idx]["Compliance_Fg"] = resolved["compliance_fg"]
 
         return jsonify({"results": results})
     finally:
@@ -5005,6 +5021,8 @@ def find_code_batch():
                 "Compliance_Source": "none",
                 "Compliance_Export_Policy": "ALLOW",
                 "Compliance_Color": "",
+                "Compliance_Bg": "",
+                "Compliance_Fg": "",
                 "note": "",
                 "compliance": "",
                 "compliance_note": "",
@@ -5012,6 +5030,8 @@ def find_code_batch():
                 "compliance_source": "none",
                 "compliance_export_policy": "ALLOW",
                 "compliance_color": "",
+                "compliance_bg": "",
+                "compliance_fg": "",
             }
             for original in codes_items
         ]
@@ -5070,12 +5090,16 @@ def find_code_batch():
             results[idx]["Compliance_Source"] = resolved["compliance_source"]
             results[idx]["Compliance_Export_Policy"] = resolved["compliance_export_policy"]
             results[idx]["Compliance_Color"] = resolved["compliance_color"]
+            results[idx]["Compliance_Bg"] = resolved["compliance_bg"]
+            results[idx]["Compliance_Fg"] = resolved["compliance_fg"]
             results[idx]["compliance"] = resolved["compliance"]
             results[idx]["compliance_note"] = resolved["compliance_note"]
             results[idx]["compliance_css"] = resolved["compliance_css"]
             results[idx]["compliance_source"] = resolved["compliance_source"]
             results[idx]["compliance_export_policy"] = resolved["compliance_export_policy"]
             results[idx]["compliance_color"] = resolved["compliance_color"]
+            results[idx]["compliance_bg"] = resolved["compliance_bg"]
+            results[idx]["compliance_fg"] = resolved["compliance_fg"]
 
             # Unit price chỉ tính nếu có đủ số
             try:

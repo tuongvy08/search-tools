@@ -17,7 +17,8 @@ const EXPORT_COLUMNS = [
     { key: 'Compliance_Note', label: 'Ghi chú quản lý', resolve: productComplianceNote },
 ].filter((col) => TeamPermissions.field(col.key));
 
-const REGULATORY_CLASS_RE = /^regulatory-color-(gray|red|amber|teal|green|blue|purple)$/;
+const REGULATORY_CLASS_RE = /^regulatory-color-(gray|red|amber|teal|green|blue|purple|custom)$/;
+const REGULATORY_HEX_RE = /^#[0-9A-F]{6}$/;
 
 const AJAX_LONG_TIMEOUT_MS = 180000;
 
@@ -328,6 +329,25 @@ function productComplianceCss(product) {
     return REGULATORY_CLASS_RE.test(fromApi) ? fromApi : '';
 }
 
+function productCompliancePair(product) {
+    if (!TeamPermissions.field('Compliance')) return null;
+    const bg = String(product.Compliance_Bg || product.compliance_bg || '').toUpperCase();
+    const fg = String(product.Compliance_Fg || product.compliance_fg || '').toUpperCase();
+    return REGULATORY_HEX_RE.test(bg) && REGULATORY_HEX_RE.test(fg) ? { bg, fg } : null;
+}
+
+function applyCompliancePair(node, product) {
+    const pair = productCompliancePair(product);
+    if (!node || !pair) return;
+    node.style.setProperty('--reg-bg', pair.bg);
+    node.style.setProperty('--reg-fg', pair.fg);
+}
+
+function complianceStyleAttribute(product) {
+    const pair = productCompliancePair(product);
+    return pair ? ` style="--reg-bg:${pair.bg};--reg-fg:${pair.fg}"` : '';
+}
+
 function setTextCell(row, text, className) {
     const cell = row.insertCell(-1);
     if (className) {
@@ -351,6 +371,7 @@ function setComplianceBadgeCell(row, product) {
     if (cssClass) {
         span.classList.add(cssClass);
     }
+    applyCompliancePair(span, product);
     span.textContent = label;
     cell.appendChild(span);
     return cell;
@@ -409,6 +430,7 @@ function displayResults(products) {
         if (cssClass) {
             row.classList.add('regulatory-row');
             row.classList.add(cssClass);
+            applyCompliancePair(row, product);
         }
         if (isSelected) {
             row.classList.add('row-selected');
@@ -788,10 +810,11 @@ $(document).ready(function() {
                         const status = item.Compliance_Status || '';
                         const note = item.Compliance_Note || '';
                         const cssClass = REGULATORY_CLASS_RE.test(item.Compliance_Css || '') ? item.Compliance_Css : '';
-                        const statusBadge = status ? `<span class="compliance-badge ${cssClass}">${$('<div/>').text(status).html()}</span>` : '';
+                        const colorStyle = complianceStyleAttribute(item);
+                        const statusBadge = status ? `<span class="compliance-badge ${cssClass}"${colorStyle}>${$('<div/>').text(status).html()}</span>` : '';
                         if (status) warnCount += 1;
                         rowsHtml += `
-                          <tr class="${cssClass ? `regulatory-row ${cssClass}` : ''}">
+                          <tr class="${cssClass ? `regulatory-row ${cssClass}` : ''}"${colorStyle}>
                             ${TeamPermissions.field('Cas') ? `<td>${$('<div/>').text(item.Cas || '').html()}</td>` : ''}
                             <td>${statusBadge}</td>
                             ${TeamPermissions.field('Compliance_Note') ? `<td class="cell-compliance-note">${$('<div/>').text(note).html()}</td>` : ''}

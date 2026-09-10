@@ -70,10 +70,9 @@ class ManualComplianceValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Dòng 2"):
             validate_product_import_rows(rows, {HEADER_COMPLIANCE, HEADER_NOTE})
 
-    def test_unknown_compliance_rejected_with_row(self):
-        rows = [{HEADER_COMPLIANCE: "Banned forever", HEADER_NOTE: ""}]
-        with self.assertRaisesRegex(ValueError, "Dòng 2"):
-            validate_product_import_rows(rows, {HEADER_COMPLIANCE, HEADER_NOTE})
+    def test_dynamic_compliance_label_is_accepted_for_catalog_validation_later(self):
+        rows = [{"code": "DYNAMIC-STATUS", HEADER_COMPLIANCE: "Banned forever", HEADER_NOTE: ""}]
+        validate_product_import_rows(rows, {HEADER_COMPLIANCE, HEADER_NOTE})
 
     def test_canonical_normalization(self):
         self.assertEqual(normalize_manual_compliance_value("  cấm nhập "), "Cấm nhập")
@@ -287,7 +286,7 @@ class ManualComplianceImportIntegrationTests(unittest.TestCase):
             ]
         )
         manual_c, manual_n = self._fetch_manual(product_id)
-        self.assertEqual(manual_c, "Cấm nhập")
+        self.assertEqual(manual_c, "CẤM NHẬP")
         self.assertEqual(manual_n, "keep me")
 
     def test_valid_import_updates_and_normalizes(self):
@@ -469,7 +468,7 @@ class ManualComplianceImportIntegrationTests(unittest.TestCase):
                     HEADER_NOTE,
                 },
             )
-        self.assertEqual(self._fetch_manual(product_id), ("Cấm nhập", "stay"))
+            self.assertEqual(self._fetch_manual(product_id), ("CẤM NHẬP", "stay"))
 
     def test_no_cas_with_code_and_manual_compliance_succeeds(self):
         with self.conn.cursor() as cur:

@@ -17,8 +17,8 @@ ghi bất kỳ thay đổi nào xuống DB:
     toàn phạm vi (`inspect_replace_by_brand_scopes` /
     `resolve_replace_by_brand_target_ids`) mà `/admin/imports/apply` dùng,
     từ chối xóa toàn bộ canonical brand khi thiếu source_brand scope.
-  - Dùng cùng advisory lock (`acquire_products_import_lock`) mà mọi đường
-    ghi products khác trong app phải xin trước khi mutate.
+  - Dùng cùng thứ tự advisory lock products rồi danh mục tình trạng như
+    worker web; cả hai khóa được giữ đến commit/rollback.
   - Không in credential/DSN ra log/stdout/stderr.
 
 Chế độ:
@@ -50,6 +50,7 @@ sys.path.insert(0, _SCRIPTS)
 from db import get_connection
 from brand_gateway import acquire_products_import_lock
 from import_engine import ImportProblem, workbook_rows, create_stage, fill_stage, build_plan, apply_plan
+from regulatory import acquire_regulatory_lock
 
 
 def main():
@@ -68,6 +69,7 @@ def main():
             create_stage(cur)
             fill_stage(cur, workbook_rows(args.xlsx_path))
             acquire_products_import_lock(cur)
+            acquire_regulatory_lock(cur)
             plan = build_plan(cur, mode, apply=not args.dry_run)
             if args.dry_run:
                 print(f"[DRY-RUN] {plan['row_count']} dòng; sẽ chèn {plan['inserted']}, cập nhật {plan['updated']}, xóa {plan['deleted']}.")

@@ -154,7 +154,18 @@ def _validated_product(cur, form, *, current_source_brand: str | None = None) ->
         source_input = current_source_brand
     canonical_brand, source_brand = _canonical_brand(cur, raw_brand, source_input or None)
 
+    status_id_raw = _clean(form.get("manual_compliance_status_id"), "Tình trạng quản lý")
     compliance_raw = _clean(form.get("manual_compliance"), "Tình trạng quản lý")
+    if status_id_raw:
+        try:
+            status_id = int(status_id_raw)
+        except ValueError:
+            raise ValueError("Tình trạng quản lý không hợp lệ.") from None
+        cur.execute("SELECT label FROM regulatory_statuses WHERE id=%s", (status_id,))
+        status_row = cur.fetchone()
+        if not status_row:
+            raise ValueError("Tình trạng quản lý không còn tồn tại; hãy tải lại trang.")
+        compliance_raw = status_row[0]
     compliance_note = normalize_manual_compliance_note(
         _clean(form.get("manual_compliance_note"), "Ghi chú quản lý", MAX_LONG_FIELD_CHARS)
     )
@@ -282,6 +293,7 @@ def _fingerprint_sql(table: str, where_sql: str, *, backup: bool = False) -> str
     xmin_col = "original_xmin" if backup else "xmin::text::bigint"
     field = lambda name: f"COALESCE({name},'')"
     values = [f"{id_col}::text", f"{xmin_col}::text"] + [field(name) for name in PRODUCT_COLUMNS]
+    values.append("COALESCE(manual_compliance_status_id::text,'')")
     row_text = "concat_ws(chr(31)," + ",".join(values) + ")"
     return f"""
         SELECT COUNT(*)::bigint,
@@ -393,7 +405,8 @@ def register(app, require_admin, actor):
         cur.execute(
             """
             SELECT id,name,code,cas,brand,size,ship,price,note,manual_compliance,
-                   manual_compliance_note,preparation_type,source_brand,xmin::text AS revision
+                   manual_compliance_note,manual_compliance_status_id,preparation_type,source_brand,
+                   xmin::text AS revision
             FROM products WHERE id=%s
             """ + suffix,
             (product_id,),
@@ -466,7 +479,10 @@ def register(app, require_admin, actor):
             _require_current_admin(cur)
             cur.execute("SELECT name FROM brand_master WHERE is_active=true ORDER BY normalized_name")
             brands = [row["name"] for row in cur.fetchall()]
-        return render_template("admin_product_form.html", product=None, brands=brands, error=request.args.get("error"))
+            cur.execute("SELECT id,label FROM regulatory_statuses ORDER BY priority,id")
+            regulatory_statuses = cur.fetchall()
+        return render_template("admin_product_form.html", product=None, brands=brands,
+                               regulatory_statuses=regulatory_statuses, error=request.args.get("error"))
 
     @app.get("/admin/products/<int:product_id>", endpoint="admin_product_detail")
     def detail(product_id):
@@ -480,6 +496,8 @@ def register(app, require_admin, actor):
                 abort(404)
             cur.execute("SELECT name FROM brand_master WHERE is_active=true ORDER BY normalized_name")
             brands = [row["name"] for row in cur.fetchall()]
+            cur.execute("SELECT id,label FROM regulatory_statuses ORDER BY priority,id")
+            regulatory_statuses = cur.fetchall()
             cur.execute(
                 """
                 SELECT action,actor,row_count,created_at,metadata_json
@@ -491,6 +509,7 @@ def register(app, require_admin, actor):
             events = cur.fetchall()
         return render_template(
             "admin_product_form.html", product=product, brands=brands, events=events,
+            regulatory_statuses=regulatory_statuses,
             error=request.args.get("error"), message=request.args.get("message"),
         )
 
@@ -683,15 +702,18 @@ def register(app, require_admin, actor):
                     WITH locked AS MATERIALIZED (
                         SELECT p.id,p.xmin::text::bigint AS source_xmin,
                                p.name,p.code,p.cas,p.brand,p.size,p.ship,p.price,p.note,
-                               p.manual_compliance,p.manual_compliance_note,p.preparation_type,p.source_brand
+                               p.manual_compliance,p.manual_compliance_status_id,
+                               p.manual_compliance_note,p.preparation_type,p.source_brand
                         FROM products p WHERE {where}
                         FOR UPDATE OF p
                     )
                     INSERT INTO product_deleted_rows
                         (batch_id,original_product_id,original_xmin,name,code,cas,brand,size,ship,
-                         price,note,manual_compliance,manual_compliance_note,preparation_type,source_brand)
+                         price,note,manual_compliance,manual_compliance_status_id,
+                         manual_compliance_note,preparation_type,source_brand)
                     SELECT %s,id,source_xmin,name,code,cas,brand,size,ship,price,note,
-                           manual_compliance,manual_compliance_note,preparation_type,source_brand
+                           manual_compliance,manual_compliance_status_id,
+                           manual_compliance_note,preparation_type,source_brand
                     FROM locked
                     """,
                     (*params, str(batch_id)),
@@ -746,6 +768,18 @@ def register(app, require_admin, actor):
                     raise ValueError("Không tìm thấy bản khôi phục.")
                 if batch["restored_at"] is not None:
                     raise ValueError("Bản này đã được khôi phục trước đó.")
+                cur.execute(
+                    """SELECT 1 FROM product_deleted_rows
+                       WHERE batch_id=%s
+                         AND NULLIF(btrim(COALESCE(manual_compliance,'')),'') IS NOT NULL
+                         AND manual_compliance_status_id IS NULL LIMIT 1""",
+                    (str(batch_id),),
+                )
+                if cur.fetchone():
+                    raise ValueError(
+                        "Bản khôi phục cũ không lưu định danh tình trạng quản lý; "
+                        "không thể tự đối chiếu theo tên. Hãy xử lý thủ công."
+                    )
                 if batch["scope_type"] == "brand":
                     cur.execute("SELECT count(*) FROM products WHERE brand=%s", (batch["canonical_brand"],))
                     if cur.fetchone()[0]:
@@ -757,7 +791,8 @@ def register(app, require_admin, actor):
                     cur.execute(
                         """
                         SELECT original_product_id AS id,name,code,cas,brand,size,ship,price,note,
-                               manual_compliance,manual_compliance_note,preparation_type,source_brand
+                               manual_compliance,manual_compliance_status_id,
+                               manual_compliance_note,preparation_type,source_brand
                         FROM product_deleted_rows
                         WHERE batch_id=%s AND original_product_id=%s
                         """,
@@ -771,9 +806,10 @@ def register(app, require_admin, actor):
                     """
                     INSERT INTO products
                         (id,name,code,cas,brand,size,ship,price,note,manual_compliance,
-                         manual_compliance_note,preparation_type,source_brand)
+                         manual_compliance_status_id,manual_compliance_note,preparation_type,source_brand)
                     SELECT original_product_id,name,code,cas,brand,size,ship,price,note,
-                           manual_compliance,manual_compliance_note,preparation_type,source_brand
+                           manual_compliance,manual_compliance_status_id,
+                           manual_compliance_note,preparation_type,source_brand
                     FROM product_deleted_rows WHERE batch_id=%s ORDER BY original_product_id
                     """,
                     (str(batch_id),),

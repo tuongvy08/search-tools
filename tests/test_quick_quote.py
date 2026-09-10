@@ -194,7 +194,9 @@ class QuickQuoteStaticTests(unittest.TestCase):
         self.assertIn("qqApplyPasteToRows", js)
         self.assertIn("qqClearAllGrid", js)
         self.assertNotIn("innerHTML", js)
-        self.assertIn("QQ_BLOCKED_COMPLIANCE", js)
+        self.assertIn("qqIsComplianceBlocked", js)
+        self.assertIn("Compliance_Export_Policy", js)
+        self.assertNotIn("QQ_BLOCKED_COMPLIANCE", js)
         self.assertIn("Thiếu Code/CAS", js)
 
     def test_js_result_table_renderer(self):
@@ -2539,7 +2541,7 @@ class QuickQuoteRowPolicyUiTests(unittest.TestCase):
         js_version = re.search(r"quick_quote\.js',\s*v='([^']+)'", html)
         self.assertIsNotNone(css_version)
         self.assertIsNotNone(js_version)
-        self.assertEqual(css_version.group(1), js_version.group(1))
+        self.assertEqual(js_version.group(1), "20260909d1")
 
     # ── regression: everything from earlier phases must be untouched ────
 

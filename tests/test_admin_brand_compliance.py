@@ -263,7 +263,7 @@ class AdminBrandComplianceTests(unittest.TestCase):
 
         row = self._search_row(client)
         self.assertEqual(row["compliance"], "CẤM NHẬP")
-        self.assertEqual(row["compliance_source"], "legacy")
+        self.assertEqual(row["compliance_source"], "automatic")
 
         self._post_toggle(client, brand_norm=self.BRAND_NORM, action="enable")
         row = self._search_row(client)
@@ -274,7 +274,7 @@ class AdminBrandComplianceTests(unittest.TestCase):
         self._post_toggle(client, brand_norm=self.BRAND_NORM, action="disable")
         row = self._search_row(client)
         self.assertEqual(row["compliance"], "CẤM NHẬP")
-        self.assertEqual(row["compliance_source"], "legacy")
+        self.assertEqual(row["compliance_source"], "automatic")
 
     def test_brand_list_query_is_single_scan(self):
         with self.conn.cursor() as cur:

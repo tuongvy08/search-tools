@@ -139,8 +139,8 @@ class SearchDisplayResolverTests(unittest.TestCase):
             legacy_compliance_note="",
             cas="",
         )
-        self.assertEqual(resolved["compliance"], "Chưa xác định")
-        self.assertEqual(resolved["compliance_css"], "warning-chua-xac-dinh")
+        self.assertEqual(resolved["compliance"], "")
+        self.assertEqual(resolved["compliance_css"], "")
 
     def test_nonmatching_cas_is_neutral_not_approval(self):
         resolved = resolve_compliance_precedence(
@@ -151,8 +151,8 @@ class SearchDisplayResolverTests(unittest.TestCase):
             legacy_compliance_note="",
             cas="999-99-9",
         )
-        self.assertEqual(resolved["compliance"], "Không phát hiện hạn chế")
-        self.assertEqual(resolved["compliance_css"], "warning-khong-phat-hien")
+        self.assertEqual(resolved["compliance"], "")
+        self.assertEqual(resolved["compliance_css"], "")
 
 
 class SearchDisplayCopyTests(unittest.TestCase):

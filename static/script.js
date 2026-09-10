@@ -410,7 +410,11 @@ function displayResults(products) {
 
         EXPORT_COLUMNS.forEach((col) => {
             if (col.key === 'Compliance') setComplianceBadgeCell(row, product);
-            else setTextCell(row, col.resolve ? col.resolve(product) : product[col.key] || '');
+            else setTextCell(
+                row,
+                col.resolve ? col.resolve(product) : product[col.key] || '',
+                col.key === 'Compliance_Note' ? 'cell-compliance-note' : ''
+            );
         });
 
         const cssClass = productComplianceCss(product);
@@ -799,7 +803,7 @@ $(document).ready(function() {
                           <tr>
                             ${TeamPermissions.field('Cas') ? `<td>${$('<div/>').text(item.Cas || '').html()}</td>` : ''}
                             <td>${$('<div/>').text(status).html()}</td>
-                            ${TeamPermissions.field('Compliance_Note') ? `<td>${$('<div/>').text(note).html()}</td>` : ''}
+                            ${TeamPermissions.field('Compliance_Note') ? `<td class="cell-compliance-note">${$('<div/>').text(note).html()}</td>` : ''}
                           </tr>
                         `;
                     });

@@ -495,7 +495,7 @@ h1 {
   min-width: 120px;
   word-break: break-word;
   overflow-wrap: anywhere;
-  white-space: normal;
+  white-space: pre-line;
   vertical-align: top;
 }
 
@@ -1922,7 +1922,8 @@ tr.is-missing-identifier .qq-grid-input {
 .qq-result-table .qq-cell-size    { white-space: nowrap; }
 .qq-result-table .qq-cell-price   { white-space: nowrap; text-align: right; }
 .qq-result-table .qq-cell-note    { max-width: 160px; }
-.qq-result-table .qq-cell-comp-note { max-width: 160px; }
+.qq-result-table .qq-cell-comp-note { max-width: 160px; white-space: pre-line; }
+.cell-compliance-note { white-space: pre-line; }
 .qq-result-table .qq-cell-match-mode { min-width: 110px; }
 .qq-result-table .qq-cell-status  { color: #64748b; font-style: italic; }
 

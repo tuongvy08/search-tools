@@ -4,7 +4,10 @@ const qqField = (key) => typeof TeamPermissions === 'undefined' || TeamPermissio
 
 const QQ_MAX_ROWS = 2000;
 const QQ_AJAX_TIMEOUT_MS = 180000;
-const QQ_BLOCKED_COMPLIANCE = new Set(['CẤM NHẬP', 'Cấm nhập']);
+function qqIsComplianceBlocked(candidate) {
+    if (!candidate) return false;
+    return (candidate.Compliance_Export_Policy || candidate.compliance_export_policy || '') === 'BLOCK';
+}
 
 const QQ_LIFECYCLE_SELECTED = 'SELECTED';
 const QQ_LIFECYCLE_REVIEW = 'REVIEW';
@@ -741,8 +744,7 @@ function qqBuildMatchPayload(rows, policy, sizeText, strategy, equivDefault) {
 
 function qqIsSelectableCandidate(candidate) {
     if (!candidate || candidate.eligible === false) return false;
-    const compliance = candidate.Compliance || candidate.compliance || '';
-    return !QQ_BLOCKED_COMPLIANCE.has(compliance);
+    return !qqIsComplianceBlocked(candidate);
 }
 
 /** Resolve the request_id for a result, preferring backend-provided identity. */
@@ -872,7 +874,7 @@ function qqGetRequestLifecycle(result, resultIndex) {
             const hasEligible = candidates.some(qqIsSelectableCandidate);
             if (!hasEligible) {
                 const allBlocked = candidates.every((c) =>
-                    c.ineligible_reason === 'COMPLIANCE_BLOCKED' || QQ_BLOCKED_COMPLIANCE.has(c.Compliance || c.compliance)
+                    c.ineligible_reason === 'COMPLIANCE_BLOCKED' || qqIsComplianceBlocked(c)
                 );
                 if (allBlocked) {
                     return {
@@ -923,7 +925,7 @@ function qqGetRequestLifecycle(result, resultIndex) {
         const hasEligible = candidates.some(qqIsSelectableCandidate);
         if (!hasEligible) {
             const allBlocked = candidates.every((c) =>
-                c.ineligible_reason === 'COMPLIANCE_BLOCKED' || QQ_BLOCKED_COMPLIANCE.has(c.Compliance || c.compliance)
+                c.ineligible_reason === 'COMPLIANCE_BLOCKED' || qqIsComplianceBlocked(c)
             );
             if (allBlocked) {
                 return {
@@ -2615,13 +2617,13 @@ function qqFallbackTierEntries(result) {
         const cands = result.candidates || [];
         const eligibleCount = cands.filter(qqIsSelectableCandidate).length;
         const complianceCount = cands.filter(
-            (c) => c.ineligible_reason === 'COMPLIANCE_BLOCKED' || QQ_BLOCKED_COMPLIANCE.has(c.Compliance || c.compliance)
+            (c) => c.ineligible_reason === 'COMPLIANCE_BLOCKED' || qqIsComplianceBlocked(c)
         ).length;
         const noPriceCount = cands.filter(
             (c) => !qqIsSelectableCandidate(c)
                 && (c.Unit_Price_Value || 0) <= 0
                 && c.ineligible_reason !== 'COMPLIANCE_BLOCKED'
-                && !QQ_BLOCKED_COMPLIANCE.has(c.Compliance || c.compliance)
+                && !qqIsComplianceBlocked(c)
         ).length;
         entries.push({
             tierIndex: matchedIdx,
@@ -3516,7 +3518,7 @@ if (typeof window !== 'undefined') {
         QQ_LIFECYCLE_EXPORTED,
         QQ_LIFECYCLE_LABELS,
         QQ_REASON_CODE_LABELS,
-        QQ_BLOCKED_COMPLIANCE,
+        qqIsComplianceBlocked,
         QQ_REASON_LABELS,
         QQ_MATCH_MODE_LABELS,
         QQ_WARNING_LABELS,

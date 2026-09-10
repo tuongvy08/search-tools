@@ -112,7 +112,9 @@ class VietnameseTemplateUiTests(unittest.TestCase):
             "'Fallback global active'", ">Kích hoạt<",
         ):
             self.assertNotIn(raw_label, combined)
-        self.assertNotIn("'Chưa xác định'", quick_js.split("const QQ_BLOCKED_COMPLIANCE", 1)[1].split(";", 1)[0])
+        self.assertIn("qqIsComplianceBlocked", quick_js)
+        self.assertIn("=== 'BLOCK'", quick_js)
+        self.assertNotIn("QQ_BLOCKED_COMPLIANCE", quick_js)
 
     def test_mobile_desktop_layout_and_font_awesome_5_icons(self):
         html = (ROOT / "templates" / "admin_quote_templates.html").read_text(encoding="utf-8")

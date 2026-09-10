@@ -8,7 +8,10 @@ from jinja2 import Environment, nodes
 
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE_VERSION = '20260908c2'
-ASSET_VERSIONS = {'admin_quote_templates.js': '20260909c4'}
+ASSET_VERSIONS = {
+    'admin_quote_templates.js': '20260909c4', 'quick_quote.js': '20260909d1',
+    'script.js': '20260910d1', 'styles.css': '20260910d1',
+}
 CAPABILITY_ASSETS = {
     'script.js', 'quick_quote.js', 'styles.css',
     'team_permissions.js', 'admin_team_permissions.js', 'admin_teams.css',

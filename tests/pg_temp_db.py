@@ -77,6 +77,7 @@ _FULL_SCHEMA_SQL_FILES = (
     "migration_003_regulatory_rules.sql",
     "migration_011_manual_compliance.sql",
     "migration_012_product_preparation_type.sql",
+    "migration_026_regulatory_management.sql",
 )
 
 # Same minimal pre-014 base `test_admin_pg_integration.py` /
@@ -279,6 +280,12 @@ def _docker_compose_db_available():
     HUONG_DAN_LOCAL.md -- for every local migration file).
     """
     if shutil.which("docker") is None:
+        return False
+    # A compose-local psql process can only reach databases hosted by that
+    # compose service. Do not advertise it as a runner when the release gate
+    # deliberately points at a separate localhost container/port.
+    configured = urlparse(os.environ.get("DATABASE_URL", ""))
+    if configured.port not in (None, 5432):
         return False
     try:
         proc = subprocess.run(

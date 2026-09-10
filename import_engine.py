@@ -245,11 +245,39 @@ def catalog_fingerprint(cur):
     cur.execute('CLOSE import_fingerprint')
     cur.execute('SELECT raw_brand,raw_source,brand,source FROM import_brand_map ORDER BY 1,2')
     digest.update(json.dumps(cur.fetchall(), ensure_ascii=False).encode())
+    # Manual compliance intent is status-ID based. Bind preview validity to the
+    # whole status catalog so rename + old-label reuse cannot redirect apply.
+    cur.execute(
+        """SELECT id,stable_key,label,priority,export_policy,updated_at::text
+           FROM regulatory_statuses ORDER BY id"""
+    )
+    digest.update(json.dumps(cur.fetchall(), ensure_ascii=False).encode())
     return digest.hexdigest()
 
 
 def build_plan(cur, mode, apply=False):
     scopes, new = resolve_stage(cur, apply)
+    cur.execute("""SELECT DISTINCT data->>'manual_compliance'
+                   FROM import_resolved
+                   WHERE COALESCE((data->>'_manual')::boolean,false)
+                     AND NULLIF(trim(data->>'manual_compliance'),'') IS NOT NULL
+                     AND NOT EXISTS (
+                       SELECT 1 FROM regulatory_statuses s
+                       WHERE upper(trim(s.label))=upper(trim(data->>'manual_compliance'))
+                     ) LIMIT 1""")
+    unknown_manual = cur.fetchone()
+    if unknown_manual:
+        raise ImportProblem(
+            f"Tình trạng quản lý thủ công không có trong danh mục: {unknown_manual[0]}."
+        )
+    cur.execute(
+        """UPDATE import_resolved r
+           SET data=r.data || jsonb_build_object('_manual_status_id',s.id)
+           FROM regulatory_statuses s
+           WHERE COALESCE((r.data->>'_manual')::boolean,false)
+             AND NULLIF(trim(r.data->>'manual_compliance'),'') IS NOT NULL
+             AND upper(trim(s.label))=upper(trim(r.data->>'manual_compliance'))"""
+    )
     fingerprint = catalog_fingerprint(cur)
     deleted = 0
     scope_details = []
@@ -310,12 +338,13 @@ def build_plan(cur, mode, apply=False):
 
 def apply_plan(cur, plan, expected=None, progress=lambda *_: None):
     if expected is not None and plan['fingerprint'] != expected['fingerprint']:
-        raise ImportProblem('Dữ liệu/Brand Gateway đã thay đổi từ lúc xem trước. Hãy xem trước lại rồi xác nhận.')
+        raise ImportProblem('Dữ liệu, Brand Gateway hoặc danh mục tình trạng đã thay đổi từ lúc xem trước. Hãy xem trước lại rồi xác nhận.')
     # Preserve optional controls on replacements only when exact identity is
     # unambiguous. Never copy another catalog/size's compliance override.
     cur.execute("""CREATE TEMP TABLE import_preserved ON COMMIT DROP AS
         SELECT upper(trim(p.brand)) b,upper(trim(p.code)) c,upper(trim(p.source_brand)) s,
                upper(trim(COALESCE(p.size,''))) z,min(p.manual_compliance) mc,
+               min(p.manual_compliance_status_id) msid,
                min(p.manual_compliance_note) mn,min(p.preparation_type) pt
         FROM products p JOIN import_targets t ON t.id=p.id WHERE COALESCE(trim(p.code),'')<>''
         GROUP BY 1,2,3,4 HAVING count(*)=1""")
@@ -324,6 +353,8 @@ def apply_plan(cur, plan, expected=None, progress=lambda *_: None):
     assignments = ','.join(f"{c}=s.data->>'{c}'" for c in COLUMNS[:9])
     cur.execute(f"""UPDATE products p SET {assignments},
         manual_compliance=CASE WHEN (s.data->>'_manual')::boolean THEN s.data->>'manual_compliance' ELSE p.manual_compliance END,
+        manual_compliance_status_id=CASE WHEN (s.data->>'_manual')::boolean
+            THEN NULLIF(s.data->>'_manual_status_id','')::bigint ELSE p.manual_compliance_status_id END,
         manual_compliance_note=CASE WHEN (s.data->>'_manual')::boolean THEN s.data->>'manual_compliance_note' ELSE p.manual_compliance_note END,
         preparation_type=CASE WHEN (s.data->>'_preparation')::boolean THEN s.data->>'preparation_type' ELSE p.preparation_type END
         FROM import_resolved s JOIN import_matches m ON m.n=s.n WHERE p.id=m.id""")
@@ -333,9 +364,10 @@ def apply_plan(cur, plan, expected=None, progress=lambda *_: None):
     lo, hi = cur.fetchone()
     for start in range(lo, hi+1, limit('CHUNK_ROWS', 2000)):
         expressions = ','.join(f"s.data->>'{c}'" for c in COLUMNS[:9])
-        cur.execute(f"""INSERT INTO products ({','.join(COLUMNS)})
+        cur.execute(f"""INSERT INTO products ({','.join(COLUMNS[:10])},manual_compliance_status_id,{','.join(COLUMNS[10:])})
             SELECT {expressions},
             CASE WHEN (s.data->>'_manual')::boolean THEN s.data->>'manual_compliance' ELSE old.mc END,
+            CASE WHEN (s.data->>'_manual')::boolean THEN NULLIF(s.data->>'_manual_status_id','')::bigint ELSE old.msid END,
             CASE WHEN (s.data->>'_manual')::boolean THEN s.data->>'manual_compliance_note' ELSE old.mn END,
             CASE WHEN (s.data->>'_preparation')::boolean THEN s.data->>'preparation_type' ELSE old.pt END
             FROM import_resolved s LEFT JOIN import_matches m ON m.n=s.n

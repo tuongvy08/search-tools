@@ -11,6 +11,7 @@ import threading
 import time
 import unittest
 import uuid
+import sys
 from unittest import mock
 import zipfile
 
@@ -21,6 +22,7 @@ from werkzeug.datastructures import FileStorage
 
 import search
 import import_jobs as jobs
+from scripts import import_excel
 from import_engine import ImportProblem, inspect_workbook, workbook_rows
 from brand_gateway import acquire_products_import_lock
 from tests.pg_temp_db import create_full_schema_temp_db, drop_temp_db, probe_postgres_reachable, apply_brand_master_and_currency_migrations, apply_dynamic_brand_currency_migration
@@ -110,6 +112,16 @@ class ImportCenterPgTests(unittest.TestCase):
         patch.start();self.addCleanup(patch.stop);self.addCleanup(self.directory.cleanup)
         with self.conn.cursor() as cur:
             cur.execute('DELETE FROM product_import_jobs');cur.execute('DELETE FROM products')
+            cur.execute("DELETE FROM regulatory_rules")
+            cur.execute("DELETE FROM regulatory_statuses WHERE stable_key LIKE 'CUSTOM_%'")
+            cur.execute("""UPDATE regulatory_statuses SET
+                label=CASE stable_key WHEN 'CAM_NHAP' THEN 'CẤM NHẬP'
+                  WHEN 'PHU_LUC_II' THEN 'Phụ lục II' WHEN 'PHU_LUC_III' THEN 'Phụ lục III'
+                  WHEN 'DUOC_BAN' THEN 'Được bán' WHEN 'CAN_GIAY_PHEP' THEN 'Cần giấy phép'
+                  ELSE 'Chưa xác định' END,
+                priority=CASE stable_key WHEN 'CAM_NHAP' THEN 10 WHEN 'PHU_LUC_II' THEN 20
+                  WHEN 'PHU_LUC_III' THEN 30 WHEN 'DUOC_BAN' THEN 40
+                  WHEN 'CAN_GIAY_PHEP' THEN 50 ELSE 60 END""")
             cur.execute('UPDATE app_users SET is_admin=true,auth_version=1 WHERE id=%s',(self.uid,))
         self.client=search.app.test_client()
         with self.client.session_transaction() as s:
@@ -242,6 +254,115 @@ class ImportCenterPgTests(unittest.TestCase):
         self.assertEqual(self.apply(b)['status'],'failed')
         with self.conn.cursor() as cur:cur.execute('SELECT name FROM products');self.assertEqual(cur.fetchone()[0],'first')
 
+    def test_manual_status_preview_is_id_bound_and_catalog_change_is_fenced(self):
+        with self.conn.cursor() as cur:
+            cur.execute("""INSERT INTO brand_master(name,normalized_name,currency_code)
+                           VALUES ('Empty regulated brand','EMPTY REGULATED BRAND',NULL)
+                           ON CONFLICT (normalized_name) DO NOTHING""")
+        headers=('brand','code','name','Compliance','Compliance_Note')
+        rows=[{'brand':'Empty regulated brand','code':'REG-1','name':'Regulated',
+              'Compliance':'CẤM NHẬP','Compliance_Note':'manual block'}]
+        job_id=jobs.submit(
+            FileStorage(xlsx(rows,headers),filename='regulated.xlsx',
+                        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'), 'upsert',
+            'user:'+str(self.uid),self.uid,1,str(uuid.uuid4()),
+        )
+        self.assertTrue(jobs.run_once(job_id))
+        preview=self.state(job_id)['preview']
+        self.assertEqual(self.state(job_id)['status'],'completed',self.state(job_id)['errors'])
+        jobs.control(job_id,'apply','qa',preview['fingerprint'],'0')
+
+        lock=psycopg2.connect(self.dsn)
+        with lock.cursor() as cur:
+            from regulatory import acquire_regulatory_lock
+            acquire_regulatory_lock(cur)
+            cur.execute("SELECT id FROM regulatory_statuses WHERE stable_key='CAM_NHAP'")
+            blocked_id=cur.fetchone()[0]
+            cur.execute("UPDATE regulatory_statuses SET label='Không được nhập',updated_at=now() WHERE id=%s",(blocked_id,))
+            cur.execute("""INSERT INTO regulatory_statuses(stable_key,label,priority,export_policy)
+                           SELECT 'CUSTOM_REUSED_OLD_LABEL','CẤM NHẬP',max(priority)+10,'ALLOW'
+                           FROM regulatory_statuses""")
+
+        result={}
+        thread=threading.Thread(target=lambda:result.setdefault('worked',jobs.run_once(job_id)))
+        thread.start();thread.join(.2)
+        self.assertTrue(thread.is_alive(),'product import did not wait for the regulatory catalog lock')
+        lock.commit();lock.close();thread.join(10)
+        self.assertFalse(thread.is_alive())
+        state=self.state(job_id)
+        self.assertEqual(state['status'],'failed',state['errors'])
+        self.assertIn('danh mục tình trạng',state['errors'][0])
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM products WHERE code='REG-1'")
+            self.assertEqual(cur.fetchone()[0],0)
+
+    def test_cli_holds_regulatory_lock_from_plan_through_existing_product_update(self):
+        self.seed(brand='Sigma',source='Sigma',code='CLI-REG',name='Before')
+        with self.conn.cursor() as cur:
+            cur.execute("""UPDATE products SET manual_compliance='CẤM NHẬP',
+                           manual_compliance_note='before' WHERE code='CLI-REG'
+                           RETURNING id,manual_compliance_status_id""")
+            product_id,blocked_id=cur.fetchone()
+
+        workbook_path=Path(self.directory.name)/'cli-regulatory-race.xlsx'
+        workbook_path.write_bytes(xlsx([{
+            'brand':'Sigma','source_brand':'Sigma','code':'CLI-REG','name':'After',
+            'Compliance':'CẤM NHẬP','Compliance_Note':'from cli',
+        }],('brand','source_brand','code','name','Compliance','Compliance_Note')).getvalue())
+
+        planned=threading.Event();allow_apply=threading.Event();mutation_acquired=threading.Event()
+        outcome={}
+        real_apply=import_excel.apply_plan
+
+        def paused_apply(cur,plan,expected=None,progress=lambda *_:None):
+            cur.execute("SELECT (data->>'_manual_status_id')::bigint FROM import_resolved WHERE n=2")
+            outcome['planned_status_id']=cur.fetchone()[0]
+            planned.set()
+            if not allow_apply.wait(5):
+                raise AssertionError('timed out waiting to continue CLI apply')
+            return real_apply(cur,plan,expected,progress)
+
+        def run_cli():
+            try:
+                with mock.patch.object(import_excel,'apply_plan',side_effect=paused_apply), \
+                     mock.patch.object(sys,'argv',['import_excel.py',str(workbook_path),'--upsert']):
+                    import_excel.main()
+                outcome['cli']='ok'
+            except BaseException as exc:
+                outcome['cli_error']=repr(exc)
+
+        def rename_and_reuse():
+            conn=psycopg2.connect(self.dsn)
+            try:
+                with conn,conn.cursor() as cur:
+                    from regulatory import acquire_regulatory_lock
+                    acquire_regulatory_lock(cur)
+                    mutation_acquired.set()
+                    cur.execute("UPDATE regulatory_statuses SET label='Không được nhập',updated_at=now() WHERE id=%s",(blocked_id,))
+                    cur.execute("UPDATE products SET manual_compliance='Không được nhập' WHERE manual_compliance_status_id=%s",(blocked_id,))
+                    cur.execute("""INSERT INTO regulatory_statuses(stable_key,label,priority,export_policy)
+                                   SELECT 'CUSTOM_CLI_REUSED_LABEL','CẤM NHẬP',max(priority)+10,'ALLOW'
+                                   FROM regulatory_statuses""")
+            finally:
+                conn.close()
+
+        cli_thread=threading.Thread(target=run_cli)
+        cli_thread.start();self.assertTrue(planned.wait(5),outcome)
+        mutation_thread=threading.Thread(target=rename_and_reuse)
+        mutation_thread.start();mutation_thread.join(.2)
+        self.assertTrue(mutation_thread.is_alive(),'status mutation bypassed the CLI regulatory lock')
+        self.assertFalse(mutation_acquired.is_set())
+        allow_apply.set();cli_thread.join(10);mutation_thread.join(10)
+        self.assertFalse(cli_thread.is_alive());self.assertFalse(mutation_thread.is_alive())
+        self.assertEqual(outcome.get('cli'),'ok',outcome)
+        self.assertEqual(outcome.get('planned_status_id'),blocked_id)
+        with self.conn.cursor() as cur:
+            cur.execute("""SELECT p.id,p.name,p.manual_compliance_status_id,p.manual_compliance,
+                                  s.export_policy
+                           FROM products p JOIN regulatory_statuses s ON s.id=p.manual_compliance_status_id
+                           WHERE p.code='CLI-REG'""")
+            self.assertEqual(cur.fetchone(),(product_id,'After',blocked_id,'Không được nhập','BLOCK'))
+
     def test_quick_delete_requires_fresh_exact_count_confirmation(self):
         self.seed()
         data={'csrf_token':'qa-csrf','brand':'TRC','code':'A'}
@@ -260,16 +381,10 @@ class ImportCenterPgTests(unittest.TestCase):
         response=self.client.post('/admin/imports/preview',data={'csrf_token':'qa-csrf','dataset':'regulatory_rules','mode':'upsert',
             'file':(xlsx([dict(zip(headers,('TON_KHO','Stock','code','X',100,True,'')))],headers),'rules.xlsx')})
         self.assertEqual(response.status_code,302)
-        self.assertIn('preview=',response.location)
-        page=self.client.get(response.location);self.assertEqual(page.status_code,200)
-        self.assertIn('Stock',page.get_data(as_text=True))
-        from urllib.parse import parse_qs,urlparse
-        token=parse_qs(urlparse(response.location).query)['preview'][0]
-        applied=self.client.post('/admin/imports/apply',data={'csrf_token':'qa-csrf','preview_token':token})
-        self.assertEqual(applied.status_code,302);self.assertIn('msg=',applied.location)
+        self.assertIn('/admin/regulatory',response.location)
         with self.conn.cursor() as cur:
-            cur.execute("SELECT priority,is_active FROM regulatory_rules WHERE match_value='X'")
-            self.assertEqual(cur.fetchone(),(100,True))
+            cur.execute("SELECT 1 FROM regulatory_rules WHERE match_value='X'")
+            self.assertIsNone(cur.fetchone())
 
     def test_expiry_cleanup_payload_and_upload_removed_audit_retained(self):
         jid=self.preview([{'brand':'TRC'}]);path=jobs.upload_path(jid)

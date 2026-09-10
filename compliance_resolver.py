@@ -1,44 +1,31 @@
-"""Pure compliance precedence resolver shared by search response builders."""
+"""Pure response adapter for the shared database regulatory resolver."""
 
 from __future__ import annotations
 
 from typing import Any, Optional
 
-from product_import_manual import normalize_manual_compliance_value
+from regulatory import EXPORT_ALLOW, EXPORT_BLOCK, policy_css, resolved_result
 
 
-LEGACY_NO_CAS_STATUS = "Chưa xác định"
-LEGACY_NO_MATCH_STATUS = "Không phát hiện hạn chế"
-
-
-def compliance_css_type(label: Optional[str]) -> Optional[str]:
-    if label == "CẤM NHẬP":
-        return "warning-cam-nhap"
+def compliance_css_type(label: Optional[str], export_policy: Optional[str] = None) -> Optional[str]:
+    """Compatibility helper; runtime policy must be supplied by stable status."""
+    if export_policy:
+        return policy_css(export_policy) or None
+    # Legacy-only adapter retained for pre-026 unit tests/data tooling. Runtime
+    # quote eligibility never calls this label branch.
+    if label in {"CẤM NHẬP", "Cấm nhập"}:
+        return policy_css(EXPORT_BLOCK) or None
     if label == "Phụ lục II":
         return "warning-phu-luc-ii"
     if label == "Phụ lục III":
         return "warning-phu-luc-iii"
-    if label == "TỒN KHO":
-        return "warning-ton-kho"
     if label == "Được bán":
         return "warning-duoc-ban"
-    if label == LEGACY_NO_CAS_STATUS:
-        return "warning-chua-xac-dinh"
-    if label == LEGACY_NO_MATCH_STATUS:
-        return "warning-khong-phat-hien"
     return None
 
 
 def _blank(value: Any) -> bool:
     return value is None or str(value).strip() == ""
-
-
-def _canonical_manual_compliance(value: Any) -> Optional[str]:
-    try:
-        return normalize_manual_compliance_value(value)
-    except ValueError:
-        text = "" if value is None else str(value).strip()
-        return text or None
 
 
 def resolve_compliance_precedence(
@@ -49,7 +36,11 @@ def resolve_compliance_precedence(
     legacy_compliance: Any,
     legacy_compliance_note: Any,
     cas: Any,
-) -> dict[str, str]:
+    export_policy: Any = None,
+    source: Any = None,
+    stable_key: Any = None,
+    status_id: Any = None,
+) -> dict[str, Any]:
     """
     Resolve final compliance fields without database access.
 
@@ -57,30 +48,30 @@ def resolve_compliance_precedence(
     Product note is deliberately not accepted here so it cannot merge with
     compliance_note.
     """
-    manual_status = _canonical_manual_compliance(manual_compliance)
-    if brand_manual_enabled and manual_status:
-        note = "" if _blank(manual_compliance_note) else str(manual_compliance_note).strip()
-        return {
-            "compliance": manual_status,
-            "compliance_note": note,
-            "compliance_css": compliance_css_type(manual_status) or "",
-            "compliance_source": "manual",
-        }
+    # Post-026 queries already choose manual-vs-automatic in one shared SQL
+    # resolver and supply its stable policy. This adapter must never re-derive
+    # BLOCK/ALLOW from a display label.
+    if export_policy is not None or source is not None or status_id is not None:
+        return resolved_result(
+            legacy_compliance,
+            legacy_compliance_note,
+            export_policy or EXPORT_ALLOW,
+            source,
+            stable_key,
+            status_id,
+        )
 
+    # Compatibility for isolated pure unit tests that do not own a database.
+    # It intentionally returns blank on no match per Phase 6D1. Production
+    # eligibility uses only the stable policy branch above.
+    manual_status = "" if _blank(manual_compliance) else str(manual_compliance).strip()
+    if brand_manual_enabled and manual_status:
+        policy = EXPORT_BLOCK if manual_status in {"CẤM NHẬP", "Cấm nhập"} else EXPORT_ALLOW
+        keys = {"Được bán": "DUOC_BAN", "Phụ lục II": "PHU_LUC_II", "Phụ lục III": "PHU_LUC_III"}
+        return resolved_result(manual_status, manual_compliance_note, policy, "manual", keys.get(manual_status))
     legacy_status = "" if _blank(legacy_compliance) else str(legacy_compliance).strip()
     if legacy_status:
-        note = "" if _blank(legacy_compliance_note) else str(legacy_compliance_note).strip()
-        return {
-            "compliance": legacy_status,
-            "compliance_note": note,
-            "compliance_css": compliance_css_type(legacy_status) or "",
-            "compliance_source": "legacy",
-        }
-
-    unresolved_status = LEGACY_NO_CAS_STATUS if _blank(cas) else LEGACY_NO_MATCH_STATUS
-    return {
-        "compliance": unresolved_status,
-        "compliance_note": "",
-        "compliance_css": compliance_css_type(unresolved_status) or "",
-        "compliance_source": "unresolved",
-    }
+        policy = EXPORT_BLOCK if legacy_status in {"CẤM NHẬP", "Cấm nhập"} else EXPORT_ALLOW
+        keys = {"Phụ lục II": "PHU_LUC_II", "Phụ lục III": "PHU_LUC_III"}
+        return resolved_result(legacy_status, legacy_compliance_note, policy, "automatic", keys.get(legacy_status))
+    return resolved_result()

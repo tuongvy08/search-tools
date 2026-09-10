@@ -171,7 +171,12 @@ async function main() {
     assert.strictEqual(typeof QQ.qqSummarizeResults, 'function', 'qqSummarizeResults must be exported');
 
     const unresRow = { request_id: 'u1', reason: 'MISSING_IDENTIFIER', lifecycle: 'UNRESOLVED', reason_code: 'MISSING_IDENTIFIER', candidates: [] };
-    const blockedCand = { product_id: 999, Compliance: 'CẤM NHẬP', eligible: false };
+    const blockedCand = {
+        product_id: 999,
+        Compliance: 'CẤM NHẬP',
+        Compliance_Export_Policy: 'BLOCK',
+        eligible: false,
+    };
     const blockedRow = { request_id: 'b1', reason: 'MANUAL_REVIEW', lifecycle: 'BLOCKED', reason_code: 'COMPLIANCE_BLOCKED', candidates: [blockedCand] };
     const autoRow = { request_id: 's1', reason: 'SELECTED_LOWEST_OVERALL', lifecycle: 'SELECTED', reason_code: 'AUTO_SELECTED', selected_candidates: [candA], candidates: [candA] };
     const reviewRow = { request_id: 'rv1', reason: 'MANUAL_SELECTION_REQUIRED', lifecycle: 'REVIEW', reason_code: 'MANUAL_SELECTION_REQUIRED', selected_candidates: [], candidates: [candA, candB] };

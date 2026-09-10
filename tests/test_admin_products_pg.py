@@ -51,6 +51,11 @@ class AdminProductsPgTests(unittest.TestCase):
                     cur.execute(transactional)
                     cur.execute(concurrent + ";")
                     cur.execute("DO $$" + postcheck)
+                # create_full_schema_temp_db historically applies 026 before
+                # this module installs 025. Reapply 026 after the deployed
+                # 025 shape so this fixture matches the real 025 -> 026
+                # upgrade order (including the backup status-ID column/FK).
+                cur.execute((ROOT / "sql/migration_026_regulatory_management.sql").read_text())
                 cur.execute("INSERT INTO teams(name,lifecycle_status) VALUES ('Products staff','ACTIVE') RETURNING id")
                 cls.team_id = cur.fetchone()[0]
                 cur.execute(
@@ -87,6 +92,16 @@ class AdminProductsPgTests(unittest.TestCase):
             cur.execute("DELETE FROM product_delete_previews")
             cur.execute("DELETE FROM products")
             cur.execute("DELETE FROM import_jobs")
+            cur.execute("DELETE FROM regulatory_rules")
+            cur.execute("DELETE FROM regulatory_statuses WHERE stable_key LIKE 'CUSTOM_%'")
+            cur.execute("""UPDATE regulatory_statuses SET
+                label=CASE stable_key WHEN 'CAM_NHAP' THEN 'CẤM NHẬP'
+                  WHEN 'PHU_LUC_II' THEN 'Phụ lục II' WHEN 'PHU_LUC_III' THEN 'Phụ lục III'
+                  WHEN 'DUOC_BAN' THEN 'Được bán' WHEN 'CAN_GIAY_PHEP' THEN 'Cần giấy phép'
+                  ELSE 'Chưa xác định' END,
+                priority=CASE stable_key WHEN 'CAM_NHAP' THEN 10 WHEN 'PHU_LUC_II' THEN 20
+                  WHEN 'PHU_LUC_III' THEN 30 WHEN 'DUOC_BAN' THEN 40
+                  WHEN 'CAN_GIAY_PHEP' THEN 50 ELSE 60 END""")
             cur.execute(
                 "UPDATE app_users SET is_admin=(id=%s),account_status='ACTIVE',auth_version=1 WHERE id IN (%s,%s)",
                 (self.admin_id, self.admin_id, self.staff_id),
@@ -268,7 +283,7 @@ class AdminProductsPgTests(unittest.TestCase):
         with self.conn.cursor() as cur:
             cur.execute("SELECT count(*) FROM brand_master"); master_before = cur.fetchone()[0]
             cur.execute("SELECT count(*) FROM brand_aliases"); aliases_before = cur.fetchone()[0]
-            cur.execute("INSERT INTO regulatory_rules(rule_type,rule_label,match_field,match_value) VALUES ('TON_KHO','Keep','code','D-0')")
+            cur.execute("INSERT INTO regulatory_rules(rule_type,rule_label,match_field,match_value) VALUES ('PHU_LUC_II','Keep','code','D-0')")
             cur.execute("INSERT INTO import_jobs(dataset,mode,status,row_count,created_by) VALUES ('products','test','success',3,'qa')")
 
         preview = self.client.post(
@@ -317,6 +332,46 @@ class AdminProductsPgTests(unittest.TestCase):
             rows = cur.fetchall()
             self.assertEqual([row[0] for row in rows], expected)
             self.assertEqual(rows[2][1:], ("note 2", "Được bán", "NEAT", "TRC"))
+
+    def test_restore_uses_stable_status_id_and_refuses_ambiguous_legacy_backup(self):
+        product_id=self._seed(code="RESTORE-ID")
+        with self.conn.cursor() as cur:
+            cur.execute("UPDATE products SET manual_compliance='CẤM NHẬP' WHERE id=%s RETURNING manual_compliance_status_id",(product_id,))
+            blocked_id=cur.fetchone()[0]
+        preview=self.client.post('/admin/products/delete-preview',data={
+            'csrf_token':'qa-csrf','scope_type':'product','product_id':product_id,
+        }).get_json()
+        deleted=self.client.post('/admin/products/delete-apply',data={
+            'csrf_token':'qa-csrf','token':preview['token'],'confirmation':'XOA 1',
+        }).get_json()
+        batch_id=deleted['batch_id']
+        with self.conn.cursor() as cur:
+            cur.execute("UPDATE regulatory_statuses SET label='Không được nhập',updated_at=now() WHERE id=%s",(blocked_id,))
+            cur.execute("""INSERT INTO regulatory_statuses(stable_key,label,priority,export_policy)
+                           SELECT 'CUSTOM_REUSED_RESTORE','CẤM NHẬP',max(priority)+10,'ALLOW'
+                           FROM regulatory_statuses""")
+        restored=self.client.post(f'/admin/products/delete-batches/{batch_id}/restore',data={'csrf_token':'qa-csrf'})
+        self.assertNotIn('error=',restored.location)
+        with self.conn.cursor() as cur:
+            cur.execute("""SELECT p.manual_compliance,p.manual_compliance_status_id,s.export_policy
+                           FROM products p JOIN regulatory_statuses s ON s.id=p.manual_compliance_status_id
+                           WHERE p.id=%s""",(product_id,))
+            self.assertEqual(cur.fetchone(),('Không được nhập',blocked_id,'BLOCK'))
+
+        legacy_id=self._seed(code="RESTORE-LEGACY")
+        legacy_preview=self.client.post('/admin/products/delete-preview',data={
+            'csrf_token':'qa-csrf','scope_type':'product','product_id':legacy_id,
+        }).get_json()
+        legacy_batch=self.client.post('/admin/products/delete-apply',data={
+            'csrf_token':'qa-csrf','token':legacy_preview['token'],'confirmation':'XOA 1',
+        }).get_json()['batch_id']
+        with self.conn.cursor() as cur:
+            cur.execute("UPDATE product_deleted_rows SET manual_compliance_status_id=NULL WHERE batch_id=%s",(legacy_batch,))
+        refused=self.client.post(f'/admin/products/delete-batches/{legacy_batch}/restore',data={'csrf_token':'qa-csrf'})
+        self.assertIn('error=',refused.location)
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM products WHERE id=%s",(legacy_id,))
+            self.assertIsNone(cur.fetchone())
 
     def test_stale_delete_preview_fails_without_partial_delete_or_backup(self):
         first = self._seed(code="S-1")

@@ -133,7 +133,7 @@ function updateSelectionUI() {
         }
     }
 
-    const visibleChecks = Array.from(document.querySelectorAll('#results tbody input.row-select'));
+    const visibleChecks = Array.from(document.querySelectorAll('#results tbody input.row-select:not(:disabled)'));
     const selectAll = document.getElementById('selectAllRows');
     if (!selectAll || !visibleChecks.length) {
         if (selectAll) {
@@ -377,6 +377,73 @@ function setComplianceBadgeCell(row, product) {
     return cell;
 }
 
+function stockText(label, value) {
+    if (value === undefined || value === null || value === '') return '';
+    return `${label}: ${value}`;
+}
+
+function setStockCell(row, product) {
+    const cell = row.insertCell(-1);
+    cell.className = 'cell-stock';
+    const options = Array.isArray(product.Stock_Options) ? product.Stock_Options : [];
+    if (!options.length) {
+        cell.textContent = 'Không có tồn khớp';
+        cell.classList.add('stock-empty');
+        return cell;
+    }
+    const list = document.createElement('div');
+    list.className = 'stock-list';
+    let hasSameCas = false;
+    options.forEach((item) => {
+        const line = document.createElement('div');
+        line.className = `stock-line stock-${item.Stock_State || 'missing'}`;
+        if (Number(item.Stock_Quantity) === 0) line.classList.add('stock-zero');
+
+        const head = document.createElement('div');
+        head.className = 'stock-line-head';
+        const quantity = document.createElement('strong');
+        quantity.textContent = Number(item.Stock_Quantity) === 0 ? 'Hết tồn' : `${Number(item.Stock_Quantity).toLocaleString('vi-VN')} đơn vị`;
+        head.appendChild(quantity);
+        const match = document.createElement('span');
+        match.className = 'stock-match';
+        match.textContent = item.Stock_Match === 'same_cas' ? 'Cùng CAS' : 'Khớp code';
+        hasSameCas = hasSameCas || item.Stock_Match === 'same_cas';
+        head.appendChild(match);
+        line.appendChild(head);
+
+        const identity = [
+            stockText('Brand', item.Brand), stockText('Code', item.Code),
+            stockText('Size', item.Size), stockText('CAS', item.Cas),
+        ].filter(Boolean);
+        if (identity.length) {
+            const meta = document.createElement('div');
+            meta.className = 'stock-meta';
+            meta.textContent = identity.join(' · ');
+            line.appendChild(meta);
+        }
+        const detail = document.createElement('div');
+        detail.className = 'stock-detail';
+        const expiry = item.Stock_Expiry_Label ? `Hạn ${item.Stock_Expiry_Label}` : 'Không có hạn sử dụng';
+        detail.textContent = item.Stock_Price ? `${expiry} · ${item.Stock_Price} chưa VAT` : expiry;
+        line.appendChild(detail);
+        if (item.Stock_State === 'expired' || item.Stock_State === 'near_expiry') {
+            const warning = document.createElement('span');
+            warning.className = 'stock-warning';
+            warning.textContent = item.Stock_Warning || '';
+            line.appendChild(warning);
+        }
+        list.appendChild(line);
+    });
+    cell.appendChild(list);
+    if (hasSameCas) {
+        const note = document.createElement('small');
+        note.className = 'stock-disclaimer';
+        note.textContent = 'Lựa chọn cùng CAS để sales xem xét; không tự thay sản phẩm hoặc suy ra độ tinh khiết/nồng độ tương đương.';
+        cell.appendChild(note);
+    }
+    return cell;
+}
+
 function badgeForCompliance(label, cssClass) {
     if (!label) {
         return '';
@@ -411,6 +478,8 @@ function displayResults(products) {
         checkbox.className = 'row-select';
         checkbox.dataset.rowKey = rowKey;
         checkbox.checked = isSelected;
+        checkbox.disabled = product.Result_Kind === 'stock_only';
+        if (checkbox.disabled) checkbox.title = 'Dòng chỉ có trong tồn kho, không phải sản phẩm catalog để xuất báo giá.';
         checkbox.setAttribute('aria-label', 'Chọn dòng');
         checkbox.addEventListener('change', function() {
             syncRowSelectionFromCheckbox(checkbox);
@@ -425,6 +494,8 @@ function displayResults(products) {
                 col.key === 'Compliance_Note' ? 'cell-compliance-note' : ''
             );
         });
+        setStockCell(row, product);
+        if (product.Result_Kind === 'stock_only') row.classList.add('stock-only-result');
 
         const cssClass = productComplianceCss(product);
         if (cssClass) {
@@ -437,6 +508,7 @@ function displayResults(products) {
         }
 
         row.addEventListener('click', function(event) {
+            if (checkbox.disabled) return;
             if (event.target.closest('input, a, button, label')) {
                 return;
             }
@@ -703,7 +775,7 @@ $(document).ready(function() {
 
     $('#selectAllRows').on('change', function() {
         const checked = this.checked;
-        document.querySelectorAll('#results tbody input.row-select').forEach((cb) => {
+        document.querySelectorAll('#results tbody input.row-select:not(:disabled)').forEach((cb) => {
             cb.checked = checked;
             syncRowSelectionFromCheckbox(cb);
         });
@@ -878,7 +950,7 @@ $(document).ready(function() {
                     updateSizeFilterOptions();
                     displayResults(searchResults);
                     $('#multiInput').val('');
-                    const found = products.filter((p) => (p.Name || p.Cas || p.Brand)).length;
+                    const found = products.filter((p) => (p.Name || p.Cas || p.Brand || (p.Stock_Options || []).length)).length;
                     setOperationStatus(
                         `Hoàn tất: <strong>${products.length}</strong> mã — <strong>${found}</strong> có dữ liệu sản phẩm.`,
                         'success'

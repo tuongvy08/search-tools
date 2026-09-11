@@ -27,6 +27,7 @@ import import_quick_delete
 import import_jobs
 import admin_import_center
 import admin_regulatory
+import admin_stock
 import admin_products
 import admin_google_users
 import admin_lifecycle
@@ -35,6 +36,7 @@ import admin_teams
 import auth_google
 import session_security
 import team_permissions
+from stock import fetch_stock_options, normalized_text as stock_normalized_text, options_for_product
 from compliance_resolver import compliance_css_type, resolve_compliance_precedence
 from regulatory import (
     EXPORT_BLOCK,
@@ -448,6 +450,45 @@ def _visibility_sql(alias: str):
         f"WHERE tb.team_id = %s AND t.lifecycle_status = 'ACTIVE')",
         (tid,),
     )
+
+
+def _load_visible_stock(conn, *, codes=(), cas_values=()):
+    grants = team_permissions.current_permissions()
+    can_lookup_cas = team_permissions.can("SEARCH_BY_CAS")
+    include_same_cas = can_lookup_cas and team_permissions.can("VIEW_CAS")
+    with conn.cursor() as cur:
+        return fetch_stock_options(
+            cur, codes=codes, cas_values=cas_values,
+            is_admin=bool(session.get("is_admin")), team_id=session.get("team_id"),
+            grants=grants, allow_same_cas=can_lookup_cas,
+        ), include_same_cas
+
+
+def _attach_stock_options(results, stock_data, *, include_same_cas):
+    for result in results:
+        result["Stock_Options"] = options_for_product(
+            stock_data, code=result.get("Code"), cas=result.get("Cas"),
+            include_same_cas=include_same_cas,
+        )
+    return results
+
+
+def _stock_only_results(stock_items):
+    results = []
+    for item in stock_items:
+        result = {
+            "product_id": None, "Result_Kind": "stock_only",
+            "Name": item.get("Name", ""), "Code": item.get("Code", ""),
+            "Cas": item.get("Cas", ""), "Brand": item.get("Brand", ""),
+            "Size": item.get("Size", ""), "Unit_Price": "", "Note": "",
+            "Compliance_Status": "", "Compliance_Note": "", "Compliance_Css": "",
+            "Compliance_Source": "none", "Compliance_Export_Policy": "",
+            "note": "", "compliance": "", "compliance_note": "",
+            "compliance_css": "", "compliance_source": "none",
+            "compliance_export_policy": "", "Stock_Options": [dict(item, Stock_Match="exact_code")],
+        }
+        results.append(result)
+    return results
 
 
 def _warning_css_type(label: Optional[str]) -> Optional[str]:
@@ -4817,7 +4858,20 @@ def search_products():
                     "compliance_fg": resolved["compliance_fg"],
                 }
             )
-
+        stock_data, include_same_cas = _load_visible_stock(
+            conn,
+            codes=[result.get("Code") for result in results] + [search_query],
+            cas_values=[result.get("Cas") for result in results] + [search_query],
+        )
+        _attach_stock_options(results, stock_data, include_same_cas=include_same_cas)
+        if not results:
+            direct = stock_data["by_code"].get(stock_normalized_text(search_query), [])
+            if team_permissions.can("SEARCH_BY_CAS"):
+                seen = {item["Stock_Item_Id"] for item in direct}
+                direct = list(direct) + [item for item in stock_data["by_cas"].get(
+                    stock_normalized_text(search_query), []
+                ) if item["Stock_Item_Id"] not in seen]
+            results = _stock_only_results(direct)
         return jsonify({"results": results})
     finally:
         conn.close()
@@ -5122,6 +5176,10 @@ def find_code_batch():
                     currency_status_label_vi(rate_status) if rate_status else ""
                 )
 
+        stock_data, include_same_cas = _load_visible_stock(
+            conn, codes=codes_items, cas_values=[result.get("Cas") for result in results]
+        )
+        _attach_stock_options(results, stock_data, include_same_cas=include_same_cas)
         return jsonify({"results": results})
     finally:
         conn.close()
@@ -6288,6 +6346,7 @@ def results_export():
 
 admin_import_center.register(app, _require_admin_page, _current_actor)
 admin_regulatory.register(app, _require_admin_page, _current_actor)
+admin_stock.register(app, _require_admin_page, _current_actor)
 admin_products.register(app, _require_admin_page, _current_actor)
 
 if __name__ == "__main__":

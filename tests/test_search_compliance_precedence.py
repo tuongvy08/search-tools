@@ -361,9 +361,13 @@ class SearchCompliancePrecedenceTests(unittest.TestCase):
         # path for this pre-migration-017/018 temp DB) + 1 single combined
         # `to_regclass('brand_master'), to_regclass('currency_rates')`
         # schema-detection query (currency_rates.CurrencyRateResolver) +
-        # 1 main search query = 3 total. Still O(1) regardless of result
-        # count -- the point of this test (no N+1 per-row query) still holds.
-        self.assertEqual(len(recorder), 3)
+        # 1 main search query + 1 bulk active-stock query = 4 total. The
+        # stock lookup uses array parameters once for the complete result set,
+        # so this remains O(1) regardless of result count (no per-row query).
+        self.assertEqual(len(recorder), 4)
+        stock_queries = [query for query, _params in recorder if "FROM stock_state state" in query]
+        self.assertEqual(len(stock_queries), 1)
+        self.assertIn("=ANY(%s)", stock_queries[0])
 
     def test_specific_search_plan_uses_trigram_index(self):
         _rows, recorder = self._call_search(f"{self.PREFIX}_MANUAL_CONFLICT")

@@ -42,7 +42,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_stock_items_snapshot_identity
         brand_norm,
         code_norm,
         size_norm,
-        COALESCE(expiry_date::text, '__NULL_EXPIRY__')
+        COALESCE(expiry_date, DATE 'infinity')
     );
 CREATE INDEX IF NOT EXISTS idx_stock_items_snapshot_code
     ON stock_items(snapshot_id, code_norm);

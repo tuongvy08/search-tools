@@ -606,7 +606,7 @@ class Phase6D2StockTests(unittest.TestCase):
     def test_migration_sql_avoids_pg15_only_unique_syntax(self):
         self.assertNotIn("UNIQUE NULLS NOT DISTINCT", MIGRATION_029)
         self.assertIn("CREATE UNIQUE INDEX IF NOT EXISTS uq_stock_items_snapshot_identity", MIGRATION_029)
-        self.assertIn("COALESCE(expiry_date::text, '__NULL_EXPIRY__')", MIGRATION_029)
+        self.assertIn("COALESCE(expiry_date, DATE 'infinity')", MIGRATION_029)
 
     def test_duplicate_null_expiry_stock_item_identities_are_rejected(self):
         snapshot_id = str(uuid.uuid4())

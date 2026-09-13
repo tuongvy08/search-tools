@@ -34,9 +34,16 @@ CREATE TABLE IF NOT EXISTS stock_items (
     CHECK (length(name) BETWEEN 1 AND 500),
     CHECK (length(code) BETWEEN 1 AND 500),
     CHECK (length(brand) BETWEEN 1 AND 180),
-    CHECK (length(size) BETWEEN 1 AND 500),
-    UNIQUE NULLS NOT DISTINCT (snapshot_id, brand_norm, code_norm, size_norm, expiry_date)
+    CHECK (length(size) BETWEEN 1 AND 500)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uq_stock_items_snapshot_identity
+    ON stock_items (
+        snapshot_id,
+        brand_norm,
+        code_norm,
+        size_norm,
+        COALESCE(expiry_date::text, '__NULL_EXPIRY__')
+    );
 CREATE INDEX IF NOT EXISTS idx_stock_items_snapshot_code
     ON stock_items(snapshot_id, code_norm);
 CREATE INDEX IF NOT EXISTS idx_stock_items_snapshot_cas

@@ -23,6 +23,14 @@ INDEX_HTML = ROOT / "templates" / "index.html"
 
 class QuickQuoteStaticTests(unittest.TestCase):
 
+    @staticmethod
+    def _css_block(css, selector):
+        """Return the effective (last) declaration block for an exact selector."""
+        matches = list(re.finditer(re.escape(selector) + r"\s*\{([^}]*)\}", css, re.S))
+        if not matches:
+            raise AssertionError(f"Missing CSS block for {selector}")
+        return matches[-1].group(1)
+
     def test_index_links_to_quick_quote_page(self):
         html = INDEX_HTML.read_text(encoding="utf-8")
         self.assertIn('href="{{ url_for(\'quick_quote\') }}"', html)
@@ -157,6 +165,67 @@ class QuickQuoteStaticTests(unittest.TestCase):
         self.assertNotIn('qq-source-segmented qq-segmented qq-preparation-segmented', html)
         self.assertNotIn('qq-policy-mode-segmented qq-preparation-segmented', html)
         self.assertNotIn('qq-row-policy-mode-segmented qq-preparation-segmented', html)
+
+    def test_visual_tokens_and_action_hierarchy_are_scoped_to_quick_quote(self):
+        css = QUICK_QUOTE_CSS.read_text(encoding="utf-8")
+        tokens = self._css_block(css, ".quick-quote-page")
+        for token in (
+            "--qq-primary", "--qq-neutral-bg", "--qq-danger", "--qq-space-4",
+            "--qq-radius-control", "--qq-border", "--qq-shadow-card", "--qq-focus",
+        ):
+            self.assertIn(token, tokens)
+
+        neutral = self._css_block(
+            css,
+            ".quick-quote-page .nav-button,\n.quick-quote-page .btn-excel-export,\n.quick-quote-page .btn-export",
+        )
+        match = self._css_block(css, ".quick-quote-page #qqMatchBtn")
+        clear = self._css_block(css, ".quick-quote-page #qqClearAllBtn")
+        self.assertIn("background: var(--qq-neutral-bg)", neutral)
+        self.assertIn("background: var(--qq-primary)", match)
+        self.assertIn("background: var(--qq-danger)", clear)
+        self.assertNotIn("#16a34a", neutral + match)
+        self.assertNotIn("green", neutral + match)
+
+    def test_visual_request_grid_and_input_states_are_distinct(self):
+        css = QUICK_QUOTE_CSS.read_text(encoding="utf-8")
+        zebra = self._css_block(css, ".quick-quote-page #qqRequestGrid tbody tr:nth-child(even)")
+        hover = self._css_block(css, ".quick-quote-page #qqRequestGrid tbody tr:hover")
+        empty = self._css_block(
+            css,
+            ".quick-quote-page .qq-grid-input:placeholder-shown,\n.quick-quote-page .qq-brand-search-input:placeholder-shown,\n.quick-quote-page .qq-size-input:placeholder-shown",
+        )
+        filled = self._css_block(
+            css,
+            ".quick-quote-page .qq-grid-input:not(:placeholder-shown),\n.quick-quote-page .qq-brand-search-input:not(:placeholder-shown),\n.quick-quote-page .qq-size-input:not(:placeholder-shown)",
+        )
+        disabled = self._css_block(
+            css,
+            ".quick-quote-page .qq-grid-input:disabled,\n.quick-quote-page .qq-grid-input[readonly],\n.quick-quote-page .qq-brand-search-input:disabled,\n.quick-quote-page .qq-brand-search-input[readonly],\n.quick-quote-page .qq-size-input:disabled,\n.quick-quote-page .qq-size-input[readonly]",
+        )
+        self.assertIn("background: var(--qq-subtle)", zebra)
+        self.assertIn("background: #eef3ff", hover)
+        self.assertIn("background: #fbfcfe", empty)
+        self.assertIn("background: var(--qq-surface)", filled)
+        self.assertIn("background: #eef2f7", disabled)
+
+    def test_visual_styles_leave_no_extra_animation_on_quick_quote_actions(self):
+        css = QUICK_QUOTE_CSS.read_text(encoding="utf-8")
+        visual_section = css.split("/* ─── Phase 6D3: Quick Quote visual hierarchy ───", 1)[1]
+        self.assertNotIn("animation:", visual_section)
+        self.assertNotIn("transition:", visual_section)
+
+    def test_mobile_preparation_segments_reset_row_flex_basis(self):
+        css = QUICK_QUOTE_CSS.read_text(encoding="utf-8")
+        mobile_override = re.search(
+            r"@media screen and \(max-width: 768px\)\s*\{\s*"
+            r"\.quick-quote-page \.qq-preparation-segmented \.qq-segment\s*\{([^}]*)\}",
+            css,
+            re.S,
+        )
+        self.assertIsNotNone(mobile_override)
+        self.assertIn("flex: 0 0 auto", mobile_override.group(1))
+        self.assertIn("min-height: var(--qq-control-min-height)", mobile_override.group(1))
 
     def test_template_has_result_table_and_bottom_copy(self):
         html = QUICK_QUOTE_HTML.read_text(encoding="utf-8")
@@ -2579,6 +2648,7 @@ class QuickQuoteRowPolicyUiTests(unittest.TestCase):
         js_version = re.search(r"quick_quote\.js',\s*v='([^']+)'", html)
         self.assertIsNotNone(css_version)
         self.assertIsNotNone(js_version)
+        self.assertEqual(css_version.group(1), "20260913d3v2")
         self.assertEqual(js_version.group(1), "20260910e1")
 
     # ── regression: everything from earlier phases must be untouched ────

@@ -591,9 +591,10 @@ class Phase6D2StockTests(unittest.TestCase):
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT COUNT(*) FROM pg_indexes WHERE tablename='stock_items' "
-                "AND indexname='uq_stock_items_snapshot_identity'"
+                "AND indexname IN "
+                "('uq_stock_items_snapshot_identity_dated','uq_stock_items_snapshot_identity_no_expiry')"
             )
-            self.assertEqual(cur.fetchone()[0], 1)
+            self.assertEqual(cur.fetchone()[0], 2)
             cur.execute("SELECT active_snapshot_id,revision FROM stock_state WHERE singleton=TRUE")
             before = cur.fetchone()
             cur.execute(MIGRATION_029)
@@ -605,8 +606,11 @@ class Phase6D2StockTests(unittest.TestCase):
 
     def test_migration_sql_avoids_pg15_only_unique_syntax(self):
         self.assertNotIn("UNIQUE NULLS NOT DISTINCT", MIGRATION_029)
-        self.assertIn("CREATE UNIQUE INDEX IF NOT EXISTS uq_stock_items_snapshot_identity", MIGRATION_029)
-        self.assertIn("COALESCE(expiry_date, DATE 'infinity')", MIGRATION_029)
+        self.assertIn("CREATE UNIQUE INDEX IF NOT EXISTS uq_stock_items_snapshot_identity_dated", MIGRATION_029)
+        self.assertIn("CREATE UNIQUE INDEX IF NOT EXISTS uq_stock_items_snapshot_identity_no_expiry", MIGRATION_029)
+        self.assertIn("WHERE expiry_date IS NOT NULL", MIGRATION_029)
+        self.assertIn("WHERE expiry_date IS NULL", MIGRATION_029)
+        self.assertNotIn("COALESCE(expiry_date", MIGRATION_029)
 
     def test_duplicate_null_expiry_stock_item_identities_are_rejected(self):
         snapshot_id = str(uuid.uuid4())
@@ -647,8 +651,18 @@ class Phase6D2StockTests(unittest.TestCase):
                     "brand a", "dup-1", "1g", None,
                 ),
             )
+            cur.execute(
+                """INSERT INTO stock_items
+                   (snapshot_id,name,code,cas,brand,size,stock_price_vnd,quantity,expiry_date,
+                    brand_norm,code_norm,size_norm,cas_norm)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,DATE 'infinity',%s,%s,%s,%s)""",
+                (
+                    snapshot_id, "D", "DUP-1", None, "Brand A", "1g", None, 3,
+                    "brand a", "dup-1", "1g", None,
+                ),
+            )
             cur.execute("SELECT COUNT(*) FROM stock_items WHERE snapshot_id=%s", (snapshot_id,))
-            self.assertEqual(cur.fetchone()[0], 2)
+            self.assertEqual(cur.fetchone()[0], 3)
 
 
 class Phase6D2StaticContracts(unittest.TestCase):

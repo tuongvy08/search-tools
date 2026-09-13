@@ -58,9 +58,11 @@ class QuickQuoteStaticTests(unittest.TestCase):
         self.assertIn('data-preparation-type="NEAT"', html)
         self.assertIn('data-preparation-type="SOLUTION"', html)
         self.assertIn('data-preparation-type="MIXTURE"', html)
+        self.assertIn('data-preparation-type="OTHER"', html)
         self.assertIn("Nguyên chất", html)
         self.assertIn("Dạng dung dịch", html)
         self.assertIn("Hỗn hợp", html)
+        self.assertIn("Khác", html)
         self.assertNotIn('data-unit-group="SOLID"', html)
         self.assertNotIn('data-unit-group="LIQUID"', html)
         # size mode is now a select
@@ -133,6 +135,28 @@ class QuickQuoteStaticTests(unittest.TestCase):
         self.assertIsNotNone(controls_block)
         self.assertNotIn("auto-fit", controls_block.group(0))
         self.assertIn("repeat(3", controls_block.group(0))
+
+    def test_css_preparation_segments_wrap_before_the_mobile_breakpoint(self):
+        css = QUICK_QUOTE_CSS.read_text(encoding="utf-8")
+        html = QUICK_QUOTE_HTML.read_text(encoding="utf-8")
+        segmented = re.search(r"\.qq-preparation-segmented\s*\{[^}]*\}", css, re.S)
+        segment = re.search(r"\.qq-preparation-segmented \.qq-segment\s*\{[^}]*\}", css, re.S)
+        self.assertIsNotNone(segmented)
+        self.assertIsNotNone(segment)
+        self.assertIn('class="qq-segmented qq-preparation-segmented"', html)
+        self.assertIn("flex-wrap: wrap", segmented.group(0))
+        self.assertIn("flex: 1 1 100px", segment.group(0))
+
+    def test_css_preparation_wrap_does_not_change_source_or_brand_policy_segments(self):
+        css = QUICK_QUOTE_CSS.read_text(encoding="utf-8")
+        html = QUICK_QUOTE_HTML.read_text(encoding="utf-8")
+        base = re.search(r"\.qq-segmented\s*\{[^}]*\}", css, re.S)
+        self.assertIsNotNone(base)
+        self.assertIn("display: inline-flex", base.group(0))
+        self.assertNotIn("flex-wrap", base.group(0))
+        self.assertNotIn('qq-source-segmented qq-segmented qq-preparation-segmented', html)
+        self.assertNotIn('qq-policy-mode-segmented qq-preparation-segmented', html)
+        self.assertNotIn('qq-row-policy-mode-segmented qq-preparation-segmented', html)
 
     def test_template_has_result_table_and_bottom_copy(self):
         html = QUICK_QUOTE_HTML.read_text(encoding="utf-8")
@@ -954,6 +978,11 @@ class QuickQuoteHelperMirrorTests(QuickQuoteMirrorHelpers, unittest.TestCase):
         p = self._build_payload(rows, self.ALL_AVAILABLE_POLICY, "", "LOWEST_OVERALL", preparation_type="NEAT")
         self.assertEqual(p["filters"]["preparation_type"], "NEAT")
 
+    def test_payload_preparation_type_other(self):
+        rows = [{"requested_name": "", "code": "C1", "cas": "", "scope": self.SCOPE_DEFAULT}]
+        p = self._build_payload(rows, self.ALL_AVAILABLE_POLICY, "", "LOWEST_OVERALL", preparation_type="OTHER")
+        self.assertEqual(p["filters"]["preparation_type"], "OTHER")
+
     def test_payload_preparation_type_any_omits_filter(self):
         rows = [{"requested_name": "", "code": "C1", "cas": "", "scope": self.SCOPE_DEFAULT}]
         p = self._build_payload(rows, self.ALL_AVAILABLE_POLICY, "", "MANUAL", preparation_type="ANY")
@@ -1283,6 +1312,15 @@ class QuickQuoteRouteTests(unittest.TestCase):
                     "rows": [{"code": "NO_SUCH_CODE"}],
                     "filters": {"preparation_type": "NEAT", "size_mode": "MIN"},
                 },
+            )
+        self.assertEqual(response.status_code, 200)
+
+    def test_quick_quote_api_accepts_other_preparation_type(self):
+        self._auth()
+        with patch.object(search, "get_connection", return_value=self._mock_conn([])):
+            response = self.client.post(
+                "/api/quote-assistant/match",
+                json={"rows": [{"code": "NO_SUCH_CODE"}], "filters": {"preparation_type": "OTHER"}},
             )
         self.assertEqual(response.status_code, 200)
 

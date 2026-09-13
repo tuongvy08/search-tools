@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Quick Quote</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260910f1') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260913d3') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
 </head>
@@ -212,15 +212,16 @@
                 {% endfor %}
             </template>
 
-            <!-- Controls row: Dạng cung cấp / Quy cách / Kết quả -->
+            <!-- Controls row: Dạng sản phẩm / Quy cách / Kết quả -->
             <div class="qq-cond-controls-row">
                 <div class="qq-field">
-                    <span class="qq-label">Dạng cung cấp</span>
-                    <div class="qq-segmented" role="group" aria-label="Dạng cung cấp">
+                    <span class="qq-label">Dạng sản phẩm</span>
+                    <div class="qq-segmented qq-preparation-segmented" role="group" aria-label="Dạng sản phẩm">
                         <button type="button" class="qq-segment is-active" data-preparation-type="ANY">Tất cả</button>
                         <button type="button" class="qq-segment" data-preparation-type="NEAT">Nguyên chất</button>
                         <button type="button" class="qq-segment" data-preparation-type="SOLUTION">Dạng dung dịch</button>
                         <button type="button" class="qq-segment" data-preparation-type="MIXTURE">Hỗn hợp</button>
+                        <button type="button" class="qq-segment" data-preparation-type="OTHER">Khác</button>
                     </div>
                 </div>
 

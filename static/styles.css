@@ -716,6 +716,19 @@ h1 {
   font: inherit;
 }
 
+/* The five preparation choices are the only segmented group that may need
+   to wrap before the mobile layout; source and brand-policy controls retain
+   their previously UAT'd compact behavior. */
+.qq-preparation-segmented {
+  display: flex;
+  flex-wrap: wrap;
+  border-radius: 12px;
+}
+
+.qq-preparation-segmented .qq-segment {
+  flex: 1 1 100px;
+}
+
 .qq-segment.is-active {
   background: #2e45b6;
   color: #fff;

@@ -69,8 +69,8 @@ def normalize_preparation_type_value(raw: Any) -> Optional[str]:
     canonical = _PREPARATION_ALIASES.get(text.upper())
     if canonical is None:
         raise ValueError(
-            f"Giá trị Preparation_Type không hợp lệ: {text!r}. "
-            f"Cho phép: {', '.join(PREPARATION_TYPE_CANONICAL)}."
+            f"Dạng sản phẩm (Preparation_Type) không hợp lệ: {text!r}. "
+            f"Chỉ chấp nhận: {', '.join(PREPARATION_TYPE_CANONICAL)}."
         )
     return canonical
 
@@ -128,7 +128,7 @@ def validate_product_import_rows(rows: list[dict], header_cols: set[str]) -> Non
                 raise ValueError(f"Dòng {row_index}: {e}") from e
         if has_preparation_type:
             if preparation_text and not code_text:
-                raise ValueError(f"Dòng {row_index}: Cần Code khi có Preparation_Type.")
+                raise ValueError(f"Dòng {row_index}: Cần Code khi có Dạng sản phẩm (Preparation_Type).")
             try:
                 normalize_preparation_type_value(preparation_text)
             except ValueError as e:

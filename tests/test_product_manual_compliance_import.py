@@ -94,7 +94,7 @@ class ManualComplianceValidationTests(unittest.TestCase):
         self.assertEqual(normalize_preparation_type_value("khác"), "OTHER")
 
     def test_liquid_is_not_solution_alias(self):
-        with self.assertRaisesRegex(ValueError, "Preparation_Type"):
+        with self.assertRaisesRegex(ValueError, "Dạng sản phẩm"):
             normalize_preparation_type_value("LIQUID")
 
     def test_preparation_type_without_code_rejected(self):

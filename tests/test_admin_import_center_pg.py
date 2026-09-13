@@ -376,6 +376,41 @@ class ImportCenterPgTests(unittest.TestCase):
         self.assertEqual(self.client.post('/admin/imports/quick-product/delete',data=data).status_code,200)
         with self.conn.cursor() as cur:cur.execute('SELECT count(*) FROM products');self.assertEqual(cur.fetchone()[0],0)
 
+    def test_quick_product_preparation_type_write_clear_and_invalid_rollback(self):
+        base = {'csrf_token': 'qa-csrf', 'brand': 'Quick Prep Brand', 'code': 'PREP-1', 'name': 'Quick prep'}
+        created = self.client.post('/admin/imports/quick-product', data={**base, 'preparation_type': 'OTHER'})
+        self.assertEqual(created.status_code, 200, created.get_data(as_text=True))
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT preparation_type FROM products WHERE code='PREP-1'")
+            self.assertEqual(cur.fetchone()[0], 'OTHER')
+
+        changed = self.client.post('/admin/imports/quick-product', data={**base, 'preparation_type': 'SOLUTION'})
+        self.assertEqual(changed.status_code, 200, changed.get_data(as_text=True))
+        cleared = self.client.post('/admin/imports/quick-product', data={**base, 'preparation_type': ''})
+        self.assertEqual(cleared.status_code, 200, cleared.get_data(as_text=True))
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT preparation_type FROM products WHERE code='PREP-1'")
+            self.assertIsNone(cur.fetchone()[0])
+            cur.execute("SELECT count(*) FROM products")
+            products_before = cur.fetchone()[0]
+            cur.execute("SELECT count(*) FROM import_jobs")
+            audits_before = cur.fetchone()[0]
+
+        invalid = self.client.post(
+            '/admin/imports/quick-product',
+            data={'csrf_token': 'qa-csrf', 'brand': 'Invalid Prep Brand', 'code': 'PREP-BAD',
+                  'name': 'Invalid prep', 'preparation_type': 'LIQUID'},
+        )
+        self.assertEqual(invalid.status_code, 400)
+        self.assertIn('Dạng sản phẩm', invalid.get_json()['message'])
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM products")
+            self.assertEqual(cur.fetchone()[0], products_before)
+            cur.execute("SELECT count(*) FROM import_jobs")
+            self.assertEqual(cur.fetchone()[0], audits_before)
+            cur.execute("SELECT count(*) FROM brand_master WHERE normalized_name='INVALID PREP BRAND'")
+            self.assertEqual(cur.fetchone()[0], 0)
+
     def test_rules_preview_remains_durable_and_csrf_protected(self):
         headers=('rule_type','rule_label','match_field','match_value','priority','is_active','note')
         response=self.client.post('/admin/imports/preview',data={'csrf_token':'qa-csrf','dataset':'regulatory_rules','mode':'upsert',

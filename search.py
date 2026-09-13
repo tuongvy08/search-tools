@@ -70,6 +70,7 @@ from product_import_manual import (
     classify_manual_compliance_headers,
     fetch_manual_compliance_snapshot,
     fetch_preparation_type_snapshot,
+    normalize_preparation_type_value,
     resolve_preparation_type_for_write,
     resolve_manual_fields_for_write,
     validate_product_import_rows,
@@ -693,11 +694,13 @@ QUOTE_PREPARATION_ANY = "ANY"
 QUOTE_PREPARATION_NEAT = "NEAT"
 QUOTE_PREPARATION_SOLUTION = "SOLUTION"
 QUOTE_PREPARATION_MIXTURE = "MIXTURE"
+QUOTE_PREPARATION_OTHER = "OTHER"
 QUOTE_PREPARATION_TYPES = {
     QUOTE_PREPARATION_ANY,
     QUOTE_PREPARATION_NEAT,
     QUOTE_PREPARATION_SOLUTION,
     QUOTE_PREPARATION_MIXTURE,
+    QUOTE_PREPARATION_OTHER,
 }
 QUOTE_SIZE_MODE_ANY = "ANY"
 QUOTE_SIZE_MODE_EXACT = "EXACT"
@@ -1159,7 +1162,7 @@ def _quote_parse_payload(payload: dict) -> tuple[list[dict], dict, str]:
         max_len=20,
     ).upper()
     if preparation_type not in QUOTE_PREPARATION_TYPES:
-        raise ValueError("filters.preparation_type không hợp lệ.")
+        raise ValueError("Dạng sản phẩm không hợp lệ. Chỉ chấp nhận: NEAT, SOLUTION, MIXTURE, OTHER hoặc ANY.")
     size_mode = _quote_text(filters.get("size_mode") or payload.get("size_mode") or QUOTE_SIZE_MODE_ANY, max_len=20).upper()
     if size_mode not in QUOTE_SIZE_MODES:
         raise ValueError("filters.size_mode không hợp lệ.")
@@ -3526,6 +3529,12 @@ def _upsert_single_product(cur, row: dict) -> tuple[str, str, list[dict]]:
     canonical_brand = resolved_row["brand"]
     source_brand = resolved_row["source_brand"]
     size = _norm(row.get("size"))
+    has_preparation_type = "preparation_type" in row
+    preparation_type = (
+        normalize_preparation_type_value(row.get("preparation_type"))
+        if has_preparation_type
+        else None
+    )
 
     vals = (
         _norm(row.get("name")),
@@ -3556,6 +3565,8 @@ def _upsert_single_product(cur, row: dict) -> tuple[str, str, list[dict]]:
             include_manual=False,
             manual_c=None,
             manual_n=None,
+            include_preparation=has_preparation_type,
+            preparation_type=preparation_type,
             source_brand=source_brand,
             has_source_brand=has_source_brand,
         )
@@ -3567,6 +3578,8 @@ def _upsert_single_product(cur, row: dict) -> tuple[str, str, list[dict]]:
         include_manual=False,
         manual_c=None,
         manual_n=None,
+        include_preparation=has_preparation_type,
+        preparation_type=preparation_type,
         source_brand=source_brand,
         has_source_brand=has_source_brand,
     )

@@ -347,6 +347,7 @@
             <div class="field"><span class="lbl">Size</span><input type="text" name="size" placeholder="vd. 100mg" /></div>
             <div class="field"><span class="lbl">Ship</span><input type="text" name="ship" placeholder="Hệ số ship" /></div>
             <div class="field"><span class="lbl">Price</span><input type="text" name="price" placeholder="Đơn giá" /></div>
+            <div class="field"><label class="lbl" for="quickPreparationType">Dạng sản phẩm</label><select id="quickPreparationType" name="preparation_type"><option value="">Chưa phân loại</option><option value="NEAT">NEAT · nguyên chất</option><option value="SOLUTION">SOLUTION · dung dịch</option><option value="MIXTURE">MIXTURE · hỗn hợp</option><option value="OTHER">OTHER · khác</option></select></div>
             <div class="field field-wide"><span class="lbl">Note</span><textarea name="note" placeholder="Ghi chú"></textarea></div>
           </div>
           <div class="quick-actions">
@@ -362,7 +363,7 @@
       <h2><span class="badge">↓</span> File mẫu Excel</h2>
       <p class="hint">Tải mẫu, điền dữ liệu, giữ nguyên tên cột dòng đầu (tiếng Anh, chữ thường như mẫu). File phải là <strong>Excel Workbook (.xlsx)</strong> thật (File → Save As), không đổi đuôi CSV/HTML thành .xlsx. Có thể upload thêm <strong>.csv</strong> (UTF-8 hoặc Excel Việt Nam) với cùng tên cột.</p>
       <div class="tpl-links">
-        <p><a href="/admin/templates/products.xlsx">products_import_template.xlsx</a> — <code>name, code, cas, brand, size, ship, price, note</code></p>
+        <p><a href="/admin/templates/products.xlsx">products_import_template.xlsx</a> — <code>name, code, cas, brand, size, ship, price, note, Preparation_Type</code> (tùy chọn: <code>NEAT</code>, <code>SOLUTION</code>, <code>MIXTURE</code>, <code>OTHER</code>)</p>
         <p><a href="{{ url_for('admin_regulatory') }}">Mẫu và import quy tắc CAS / Code / Tên nằm trong module Quy tắc quản lý →</a></p>
       </div>
     </div>

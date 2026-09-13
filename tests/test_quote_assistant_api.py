@@ -665,6 +665,16 @@ class QuoteAssistantApiTests(unittest.TestCase):
         row = response.get_json()["results"][0]
         self.assertEqual([c["Name"] for c in row["candidates"]], ["Prep Mixture"])
 
+        response, _recorder = self._call_api(
+            {
+                "rows": [{"cas": self.CAS_PREP}],
+                "filters": {"brands": [self.BRAND_ALLOW], "preparation_type": "OTHER"},
+            }
+        )
+        row = response.get_json()["results"][0]
+        self.assertEqual([c["Name"] for c in row["candidates"]], ["Prep Other"])
+        self.assertEqual(row["candidates"][0]["preparation_type"], "OTHER")
+
     def test_invalid_preparation_filter_rejected(self):
         response, _recorder = self._call_api(
             {"rows": [{"code": self.CODE_MULTI}], "filters": {"preparation_type": "LIQUID"}}

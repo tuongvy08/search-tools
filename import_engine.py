@@ -161,8 +161,12 @@ def workbook_rows(path, progress=lambda *_: None):
                     row['manual_compliance'], row['manual_compliance_note'] = parse_manual_compliance_row(row)
                 if 'preparation_type' in headers:
                     row['preparation_type'] = parse_preparation_type_row(row)
-            except ValueError:
-                raise ImportProblem(f'Dòng {line}: Compliance, Compliance_Note hoặc Preparation_Type không hợp lệ.') from None
+            except ValueError as exc:
+                # validate_product_import_rows starts its one-row validation at
+                # Excel row 2. Preserve its Vietnamese, field-specific message,
+                # but report the actual workbook row currently being parsed.
+                detail = str(exc).replace('Dòng 2:', f'Dòng {line}:', 1)
+                raise ImportProblem(detail) from None
             row['_manual'] = 'compliance' in headers
             row['_preparation'] = 'preparation_type' in headers
             count += 1

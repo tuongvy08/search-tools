@@ -716,6 +716,19 @@ h1 {
   font: inherit;
 }
 
+/* The five preparation choices are the only segmented group that may need
+   to wrap before the mobile layout; source and brand-policy controls retain
+   their previously UAT'd compact behavior. */
+.qq-preparation-segmented {
+  display: flex;
+  flex-wrap: wrap;
+  border-radius: 12px;
+}
+
+.qq-preparation-segmented .qq-segment {
+  flex: 1 1 100px;
+}
+
 .qq-segment.is-active {
   background: #2e45b6;
   color: #fff;
@@ -2322,3 +2335,219 @@ tr.is-missing-identifier .qq-grid-input {
 }
 .cell-stock{min-width:290px;max-width:430px}.stock-list{display:grid;gap:7px}.stock-line{padding:8px 9px;border-left:3px solid #2d7a67;background:#f3faf7;border-radius:5px}.stock-line.stock-expired{border-left-color:#b4233d;background:#fff3f4}.stock-line.stock-near_expiry{border-left-color:#d97706;background:#fff8e8}.stock-line.stock-zero{opacity:.72}.stock-line-head{display:flex;justify-content:space-between;align-items:center;gap:8px}.stock-match{padding:2px 6px;border-radius:999px;background:#e2e8f0;color:#334155;font-size:.72rem;font-weight:700}.stock-meta,.stock-detail{font-size:.78rem;color:#405566;margin-top:3px}.stock-warning{display:inline-block;margin-top:4px;color:#9f1239;font-size:.76rem;font-weight:700}.stock-disclaimer{display:block;margin-top:7px;color:#607087;line-height:1.35}.stock-empty{color:#7b8c96;font-size:.82rem}.stock-only-result{background:#f8fafc}.stock-only-result .col-select{cursor:not-allowed}
 @media(max-width:600px){.cell-stock{min-width:260px}.stock-line-head{align-items:flex-start}}
+
+/* ─── Phase 6D3: Quick Quote visual hierarchy ───
+   Scoped to the page so shared Search/Admin button styles retain their UAT'd
+   appearance. The existing DOM and interaction states are intentionally
+   reused; this section only changes presentation. */
+.quick-quote-page {
+  --qq-primary: #2e45b6;
+  --qq-primary-hover: #243994;
+  --qq-primary-active: #1f327f;
+  --qq-neutral-bg: #f8fafc;
+  --qq-neutral-hover: #e9eef7;
+  --qq-neutral-text: #334155;
+  --qq-danger: #b4233d;
+  --qq-danger-hover: #8f1d32;
+  --qq-surface: #ffffff;
+  --qq-subtle: #f6f8fc;
+  --qq-border: #d8e0eb;
+  --qq-border-strong: #b8c5d6;
+  --qq-text: #172033;
+  --qq-muted: #64748b;
+  --qq-focus: #7c9cff;
+  --qq-space-2: 8px;
+  --qq-space-3: 12px;
+  --qq-space-4: 16px;
+  --qq-radius-control: 8px;
+  --qq-radius-card: 12px;
+  --qq-control-min-height: 40px;
+  --qq-shadow-card: 0 1px 2px rgba(15, 23, 42, 0.05);
+}
+
+.quick-quote-page .qq-layout {
+  gap: var(--qq-space-4);
+}
+
+.quick-quote-page .qq-card {
+  border-color: var(--qq-border);
+  border-radius: var(--qq-radius-card);
+  padding: calc(var(--qq-space-4) + 2px);
+  box-shadow: var(--qq-shadow-card);
+}
+
+.quick-quote-page .qq-card-title {
+  color: var(--qq-primary);
+  margin-bottom: var(--qq-space-2);
+}
+
+.quick-quote-page .qq-grid-toolbar,
+.quick-quote-page .qq-actions {
+  gap: var(--qq-space-2);
+  margin-bottom: var(--qq-space-3);
+}
+
+/* All non-destructive Quick Quote actions begin neutral. Specific primary
+   and destructive affordances below intentionally win by ID. */
+.quick-quote-page .nav-button,
+.quick-quote-page .btn-excel-export,
+.quick-quote-page .btn-export {
+  appearance: none;
+  background: var(--qq-neutral-bg);
+  border: 1px solid var(--qq-border-strong);
+  border-radius: var(--qq-radius-control);
+  box-shadow: none;
+  color: var(--qq-neutral-text);
+  font-weight: 650;
+}
+
+.quick-quote-page .nav-button:hover:not(:disabled):not(.is-soft-disabled),
+.quick-quote-page .btn-excel-export:hover:not(:disabled):not(.is-soft-disabled),
+.quick-quote-page .btn-export:hover:not(:disabled):not(.is-soft-disabled) {
+  background: var(--qq-neutral-hover);
+  border-color: var(--qq-primary);
+  color: var(--qq-text);
+}
+
+.quick-quote-page #qqMatchBtn {
+  background: var(--qq-primary);
+  border-color: var(--qq-primary);
+  box-shadow: 0 2px 5px rgba(46, 69, 182, 0.22);
+  color: #fff;
+}
+
+.quick-quote-page #qqMatchBtn:hover:not(:disabled):not(.is-soft-disabled) {
+  background: var(--qq-primary-hover);
+  border-color: var(--qq-primary-hover);
+  color: #fff;
+}
+
+.quick-quote-page #qqMatchBtn:active:not(:disabled):not(.is-soft-disabled) {
+  background: var(--qq-primary-active);
+  border-color: var(--qq-primary-active);
+}
+
+.quick-quote-page #qqClearAllBtn {
+  background: var(--qq-danger);
+  border-color: var(--qq-danger);
+  color: #fff;
+}
+
+.quick-quote-page #qqClearAllBtn:hover:not(:disabled) {
+  background: var(--qq-danger-hover);
+  border-color: var(--qq-danger-hover);
+  color: #fff;
+}
+
+.quick-quote-page .nav-button:focus-visible,
+.quick-quote-page .qq-segment:focus-visible,
+.quick-quote-page .qq-grid-input:focus-visible,
+.quick-quote-page .qq-scope-select:focus-visible,
+.quick-quote-page .qq-cond-select:focus-visible,
+.quick-quote-page .qq-brand-search-input:focus-visible,
+.quick-quote-page .qq-size-input:focus-visible,
+.quick-quote-page .qq-equiv-toggle-field input:focus-visible {
+  outline: 3px solid var(--qq-focus);
+  outline-offset: 2px;
+}
+
+.quick-quote-page .nav-button.is-soft-disabled,
+.quick-quote-page .btn-excel-export.is-soft-disabled,
+.quick-quote-page .btn-export.is-soft-disabled,
+.quick-quote-page .nav-button:disabled,
+.quick-quote-page .btn-excel-export:disabled,
+.quick-quote-page .btn-export:disabled {
+  background: var(--qq-neutral-bg);
+  border-color: var(--qq-border);
+  box-shadow: none;
+  color: var(--qq-muted);
+  opacity: 0.72;
+}
+
+.quick-quote-page #qqMatchBtn.is-soft-disabled,
+.quick-quote-page #qqMatchBtn:disabled {
+  background: var(--qq-primary);
+  border-color: var(--qq-primary);
+  color: #fff;
+  opacity: 0.5;
+}
+
+/* Request grid: lighter dividers plus scan-friendly stripes and hover. */
+.quick-quote-page #qqRequestGrid th,
+.quick-quote-page #qqRequestGrid td {
+  border-color: var(--qq-border);
+  padding: 10px;
+}
+
+.quick-quote-page #qqRequestGrid td.qq-grid-cell {
+  padding: 8px 10px;
+}
+
+.quick-quote-page #qqRequestGrid tbody tr:nth-child(even) {
+  background: var(--qq-subtle);
+}
+
+.quick-quote-page #qqRequestGrid tbody tr:hover {
+  background: #eef3ff;
+}
+
+/* Empty fields read as prompts, while completed and unavailable fields have
+   clearly different surfaces without touching selects or checkboxes. */
+.quick-quote-page .qq-grid-input,
+.quick-quote-page .qq-brand-search-input,
+.quick-quote-page .qq-size-input {
+  border-color: var(--qq-border-strong);
+  border-radius: var(--qq-radius-control);
+  background: var(--qq-surface);
+  color: var(--qq-text);
+}
+
+.quick-quote-page .qq-grid-input::placeholder,
+.quick-quote-page .qq-brand-search-input::placeholder,
+.quick-quote-page .qq-size-input::placeholder {
+  color: #8390a3;
+  opacity: 1;
+}
+
+.quick-quote-page .qq-grid-input:placeholder-shown,
+.quick-quote-page .qq-brand-search-input:placeholder-shown,
+.quick-quote-page .qq-size-input:placeholder-shown {
+  background: #fbfcfe;
+  color: var(--qq-muted);
+}
+
+.quick-quote-page .qq-grid-input:not(:placeholder-shown),
+.quick-quote-page .qq-brand-search-input:not(:placeholder-shown),
+.quick-quote-page .qq-size-input:not(:placeholder-shown) {
+  background: var(--qq-surface);
+  color: var(--qq-text);
+}
+
+.quick-quote-page .qq-grid-input:disabled,
+.quick-quote-page .qq-grid-input[readonly],
+.quick-quote-page .qq-brand-search-input:disabled,
+.quick-quote-page .qq-brand-search-input[readonly],
+.quick-quote-page .qq-size-input:disabled,
+.quick-quote-page .qq-size-input[readonly] {
+  background: #eef2f7;
+  border-color: #dfe6ee;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.quick-quote-page .qq-cond-select,
+.quick-quote-page .qq-scope-select {
+  border-color: var(--qq-border-strong);
+  border-radius: var(--qq-radius-control);
+  color: var(--qq-text);
+}
+
+/* At the existing mobile column breakpoint, flex-basis must not become the
+   preparation button height. Source and brand-policy segmented controls keep
+   their established mobile rules unchanged. */
+@media screen and (max-width: 768px) {
+  .quick-quote-page .qq-preparation-segmented .qq-segment {
+    flex: 0 0 auto;
+    min-height: var(--qq-control-min-height);
+  }
+}

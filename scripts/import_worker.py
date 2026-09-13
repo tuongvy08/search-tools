@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from import_jobs import run_once, cleanup
 import regulatory_import_jobs
+import stock_import_jobs
 
 
 def main():
@@ -24,6 +25,8 @@ def main():
             worked=run_once()
             if not worked:
                 worked=regulatory_import_jobs.run_once()
+            if not worked:
+                worked=stock_import_jobs.run_once()
         except Exception:
             print('Import worker: lỗi kết nối/cấu hình; sẽ thử lại.',file=sys.stderr)
             worked=False

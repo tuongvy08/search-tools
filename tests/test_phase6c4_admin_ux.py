@@ -11,7 +11,7 @@ ADMIN_TEMPLATES = (
     "admin_brand_compliance.html", "admin_import_center.html",
     "admin_quote_templates.html", "admin_exchange_rates.html",
     "admin_login_history.html", "admin_products.html", "admin_product_form.html",
-    "admin_imports.html",
+    "admin_imports.html", "admin_stock.html",
 )
 
 

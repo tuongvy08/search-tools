@@ -53,7 +53,7 @@ VERIFIED_FA5_ICONS = {
     "fa-chevron-down", "fa-sign-out-alt",
     "fa-box", "fa-file-import", "fa-users", "fa-user-cog", "fa-network-wired",
     "fa-file-invoice", "fa-money-bill-alt", "fa-shield-alt", "fa-history",
-    "fa-balance-scale",
+    "fa-balance-scale", "fa-boxes",
 }
 
 
@@ -74,7 +74,7 @@ class NavShellStaticTests(unittest.TestCase):
         self.assertIn('aria-expanded="false"', tag)  # closed by default on page load
         self.assertIn('aria-controls="sqAdminMenu"', tag)
 
-    def test_panel_contains_all_nine_admin_endpoints_exactly_once(self):
+    def test_panel_contains_all_admin_endpoints_exactly_once(self):
         # `_sq_admin_links` is the single source of truth the panel's
         # `{% for %}` loop iterates over (`url_for(endpoint)` per row, not
         # a literal call per endpoint) -- so "the panel renders all 9
@@ -86,7 +86,7 @@ class NavShellStaticTests(unittest.TestCase):
         for endpoint in [
             "admin_products", "admin_imports", "admin_teams.index", "admin_users",
             "admin_network", "admin_quote_templates_page",
-            "admin_exchange_rates", "admin_brand_compliance",
+            "admin_exchange_rates", "admin_regulatory", "admin_stock", "admin_brand_compliance",
             "admin_login_history.index",
         ]:
             self.assertEqual(links_list.count(f"('{endpoint}',"), 1, endpoint)
@@ -170,7 +170,7 @@ class NavShellStaticTests(unittest.TestCase):
         # confirms real rendered pages show only the human labels.
         for label in [
             "Sản phẩm", "Nhập dữ liệu", "Team & quyền truy cập", "Người dùng",
-            "Mạng / IP", "Mẫu báo giá", "Tỷ giá", "Quy tắc quản lý",
+            "Mạng / IP", "Mẫu báo giá", "Tỷ giá", "Quy tắc quản lý", "Quản lý tồn kho",
             "Ưu tiên thủ công", "Lịch sử đăng nhập",
         ]:
             self.assertIn(label, NAV_HTML)

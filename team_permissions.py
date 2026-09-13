@@ -53,6 +53,7 @@ ALIASES = {
     'VIEW_BRAND': {'brand', 'brands', 'selected_brand', 'matched_brand', 'effective_brand_policy', 'fallback_path'},
     'VIEW_SIZE': {'size', 'sizes', 'size_parse', 'size_pairs'},
     'VIEW_PRICE': {'price', 'ship', 'unit_price', 'unit_price_value', 'unit_price_available',
+                   'stock_price', 'stock_price_vnd',
                    'currency_rate_status', 'currency_rate_message', 'total', 'total_price'},
     'VIEW_NOTE': {'note'},
     'VIEW_COMPLIANCE': {'compliance', 'compliance_status', 'compliance_css', 'compliance_source',

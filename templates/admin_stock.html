@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Quản lý tồn kho — Search Tools</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260910f1') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260910d2') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_stock.css', v='20260910d2') }}">
+  <script defer src="{{ url_for('static', filename='admin_ux.js', v='20260909d1') }}"></script>
+  <script defer src="{{ url_for('static', filename='admin_stock.js', v='20260910d2') }}"></script>
+</head>
+<body class="admin-page">
+{% include '_user_nav.html' %}
+<main class="stock-shell stock-page">
+  <header class="stock-header">
+    <div><p class="eyebrow">Quản trị · Snapshot riêng</p><h1>Quản lý tồn kho</h1>
+      <p class="lead">Xem trước rồi thay toàn bộ tồn kho. Catalog, giá báo giá và quyền team không bị thay đổi.</p></div>
+    <a class="stock-template-link" href="{{ url_for('stock_template') }}"><i class="fas fa-file-excel" aria-hidden="true"></i> Tải file mẫu</a>
+  </header>
+
+  {% if error %}<div class="state-banner state-error" role="alert">{{ error }}</div>{% endif %}
+  {% if message %}<div class="state-banner state-success" role="status">{{ message }}</div>{% endif %}
+
+  {% if job %}
+  <a class="back-link" href="{{ url_for('admin_stock') }}">← Về Quản lý tồn kho</a>
+  <section class="stock-panel job-panel" data-stock-job data-job-status="{{ job.status }}" data-poll-url="{{ url_for('stock_job_status', job_id=job.id) }}">
+    <div class="section-heading"><div><p class="eyebrow">Tác vụ {{ job.id }}</p><h2>{{ job.filename }}</h2></div>
+      <span class="stock-status status-{{ job.status }}">{{ status_labels.get(job.status, 'Không xác định') }} · {{ phase_labels.get(job.phase, 'Không xác định') }}</span></div>
+    <dl class="stock-metrics">
+      <div><dt>Dòng trong file</dt><dd>{{ job.row_count }}</dd></div>
+      <div><dt>Đã xử lý</dt><dd data-progress-text>{{ job.processed_count }}</dd></div>
+      <div><dt>Snapshot mới</dt><dd>{{ job.inserted_count }}</dd></div>
+      <div><dt>Snapshot cũ</dt><dd>{{ job.deleted_count }}</dd></div>
+    </dl>
+    {% if job.status in ('queued','running') %}<progress aria-label="Tiến độ xử lý" {% if job.row_count %}max="{{ job.row_count }}" value="{{ job.processed_count }}"{% endif %}></progress><p class="muted" data-poll-message>Worker đang xử lý nền; snapshot hiện tại vẫn phục vụ tra cứu.</p>{% endif %}
+    {% if job.errors %}<div class="state-banner state-error" role="alert">{% for item in job.errors %}<p>{{ item }}</p>{% endfor %}</div>{% endif %}
+
+    {% if job.preview %}{% set p=job.preview %}
+    <div class="replace-notice"><strong>Full snapshot:</strong> {{ p.current_rows }} dòng hiện tại sẽ được thay bằng {{ p.total_rows }} dòng trong file, trên toàn bộ brand.</div>
+    <div class="preview-grid">
+      <div><strong>{{ p.total_rows }}</strong><span>tổng dòng mới</span></div>
+      <div><strong>{{ p.brand_count }}</strong><span>brand trong file</span></div>
+      <div><strong>{{ p.added }}</strong><span>định danh mới</span></div>
+      <div><strong>{{ p.changed }}</strong><span>thay đổi</span></div>
+      <div><strong>{{ p.removed }}</strong><span>vắng khỏi snapshot mới</span></div>
+      <div><strong>{{ p.unchanged }}</strong><span>không đổi</span></div>
+    </div>
+    <p><strong>Brand trong file:</strong> {{ p.brands|join(', ') }}</p>
+    {% if p.new_brands %}<div class="state-banner state-notice"><strong>Brand mới:</strong> {{ p.new_brands|join(', ') }}. Chỉ tạo khi apply; không gán tiền tệ và không cấp quyền team.</div>{% endif %}
+    <h3>Mẫu dữ liệu</h3>
+    <div class="table-wrap" tabindex="0"><table><thead><tr><th>Code</th><th>Name</th><th>Brand</th><th>Size</th><th>CAS</th><th>Số lượng</th><th>Giá tồn</th><th>Hạn dùng</th></tr></thead><tbody>
+      {% for row in p.sample %}<tr><td>{{ row.code }}</td><td>{{ row.name }}</td><td>{{ row.brand }}</td><td>{{ row.size }}</td><td>{{ row.cas or '—' }}</td><td>{{ row.quantity }}</td><td>{{ row.stock_price or '—' }}</td><td>{{ row.expiry or '—' }}</td></tr>{% endfor %}
+    </tbody></table></div>
+    {% endif %}
+
+    <div class="job-actions">
+      {% if job.status == 'completed' and job.phase == 'preview' and job.preview_ready %}
+      <form method="post" action="{{ url_for('stock_job_control', job_id=job.id, action='apply') }}" data-submit-once>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="fingerprint" value="{{ job.preview.fingerprint }}">
+        <label for="confirmReplace">Nhập <strong>{{ job.preview.current_rows }}</strong> để xác nhận thay toàn bộ số dòng tồn hiện tại
+          <input id="confirmReplace" name="confirm_replace" inputmode="numeric" pattern="[0-9]+" required autocomplete="off"></label>
+        <button type="submit">Xác nhận tạo và kích hoạt snapshot mới</button>
+      </form>
+      {% elif job.status in ('queued','running') %}
+      <form method="post" action="{{ url_for('stock_job_control', job_id=job.id, action='cancel') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="secondary" type="submit">Hủy tác vụ</button></form>
+      {% elif job.status in ('failed','cancelled') %}
+      <form method="post" action="{{ url_for('stock_job_control', job_id=job.id, action='retry') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="secondary" type="submit">Xem trước lại</button></form>
+      {% endif %}
+    </div>
+    {% if job.status == 'completed' and job.phase == 'apply' %}<div class="state-banner state-success">Snapshot mới đã được kích hoạt nguyên khối.</div>{% endif %}
+    <details class="audit"><summary>Nhật ký tác vụ</summary><ul>{% for event in events %}<li>{{ event.created_at }} · {{ 'Hệ thống' if event.actor == 'worker' else event.actor }} · {{ event_labels.get(event.event, 'Sự kiện hệ thống') }}</li>{% else %}<li>Chưa có sự kiện.</li>{% endfor %}</ul></details>
+  </section>
+  {% else %}
+  <div class="stock-layout">
+    <section class="stock-panel upload-panel">
+      <div class="section-heading"><div><p class="eyebrow">Nhập an toàn</p><h2>Tạo snapshot mới</h2></div><span class="step-mark">01</span></div>
+      <p class="muted">File rỗng, lỗi CAS, trùng định danh hoặc quantity không hợp lệ sẽ dừng trước apply. Trong lúc xử lý, snapshot active hiện tại vẫn đọc được.</p>
+      <form method="post" enctype="multipart/form-data" action="{{ url_for('stock_upload') }}" data-stock-upload data-submit-once>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="submission_key" value="{{ submission_key }}">
+        <label class="file-zone" for="stockWorkbook"><strong>Chọn workbook tồn kho</strong><span>.xlsx · một sheet · tối đa {{ max_mb }} MB</span><input id="stockWorkbook" type="file" name="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required></label>
+        <div class="replace-band"><i class="fas fa-sync-alt" aria-hidden="true"></i><span><strong>Chỉ có chế độ thay toàn bộ.</strong> File đã xác nhận trở thành snapshot active mới; dòng vắng khỏi file sẽ không còn trong tồn hiện hành.</span></div>
+        <button type="submit">Tải lên và xem trước</button><p class="muted" data-upload-status role="status"></p>
+      </form>
+    </section>
+
+    <section class="stock-panel guide-panel">
+      <div class="section-heading"><div><p class="eyebrow">Quy tắc file</p><h2>Kiểm tra nhanh</h2></div><span class="step-mark">02</span></div>
+      <ul class="check-list">
+        <li>Đúng 8 cột theo file mẫu; CAS, giá và hạn dùng được để trống.</li>
+        <li>Quantity bắt buộc là số nguyên ≥ 0; 0 nghĩa là hết tồn.</li>
+        <li>Brand + Code + Size + Hạn dùng phải duy nhất, kể cả hạn trống.</li>
+        <li>Giá tồn là VND chưa VAT, chỉ hiển thị và không đi vào báo giá.</li>
+        <li>Ngày nhận dạng: ô ngày Excel, YYYY-MM-DD hoặc DD/MM/YYYY.</li>
+      </ul>
+    </section>
+  </div>
+
+  <section class="stock-panel history-panel">
+    <div class="section-heading"><h2>Tác vụ gần đây</h2><a href="{{ url_for('admin_stock') }}">Làm mới ↻</a></div>
+    <div class="table-wrap" tabindex="0"><table><thead><tr><th>Workbook</th><th>Giai đoạn</th><th>Trạng thái</th><th>Dòng</th><th>Thời gian</th></tr></thead><tbody>
+      {% for item in jobs %}<tr><td><a href="{{ url_for('stock_job_detail', job_id=item.id) }}">{{ item.filename }}</a><span class="table-sub">{{ item.actor }}</span></td><td>{{ phase_labels.get(item.phase, 'Không xác định') }}</td><td><span class="stock-status status-{{ item.status }}">{{ status_labels.get(item.status, 'Không xác định') }}</span></td><td>{{ item.row_count }}</td><td>{{ item.created_at }}</td></tr>
+      {% else %}<tr><td colspan="5" class="empty-state">Chưa có tác vụ tồn kho.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+
+  <section class="stock-panel snapshots-panel">
+    <div class="section-heading"><div><h2>Lịch sử snapshot</h2><p class="muted">Không tự xóa snapshot. Khôi phục luôn tạo một snapshot mới để giữ audit.</p></div></div>
+    <div class="table-wrap" tabindex="0"><table><thead><tr><th>Trạng thái</th><th>Thời gian</th><th>Dòng</th><th>Nguồn</th><th>Người thực hiện</th><th>Thao tác</th></tr></thead><tbody>
+      {% for item in snapshots %}<tr><td>{% if item.is_active %}<span class="stock-status status-active">Đang dùng</span>{% else %}Lịch sử{% endif %}</td><td>{{ item.created_at }}</td><td>{{ item.row_count }}</td><td>{{ 'Khôi phục' if item.source_kind == 'RESTORE' else 'Import' }}</td><td>{{ item.actor }}</td><td>{% if not item.is_active %}<form method="post" action="{{ url_for('stock_snapshot_restore', snapshot_id=item.id) }}" data-submit-once><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="stock_revision" value="{{ stock_revision }}"><input type="hidden" name="stock_fingerprint" value="{{ stock_fingerprint }}"><button class="secondary compact" type="submit">Khôi phục thành bản mới</button></form>{% else %}—{% endif %}</td></tr>
+      {% else %}<tr><td colspan="6" class="empty-state">Chưa có snapshot; tra cứu tồn hiện trả rỗng.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+  {% endif %}
+</main>
+</body>
+</html>

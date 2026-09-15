@@ -17,7 +17,7 @@ from xml.etree import ElementTree
 from openpyxl import load_workbook
 from psycopg2.extras import Json, execute_values
 
-from brand_gateway import load_brand_gateway, preview_import_rows_brands, register_and_resolve_import_rows, inspect_replace_by_brand_scopes
+from brand_gateway import load_brand_gateway, preview_import_rows_brands, register_and_resolve_import_rows
 from product_import_manual import validate_product_import_rows, parse_manual_compliance_row, parse_preparation_type_row
 
 
@@ -31,6 +31,21 @@ def limit(name, default):
 
 COLUMNS = ('name', 'code', 'cas', 'brand', 'size', 'ship', 'price', 'note', 'source_brand',
            'manual_compliance', 'manual_compliance_note', 'preparation_type')
+PLAN_VERSION = 2
+
+# Excel exports used by the product team label the two manual regulatory
+# controls in Vietnamese. Normalize those user-facing labels to the stable
+# internal column names before validation and parsing. English headers remain
+# supported for backwards compatibility.
+WORKBOOK_HEADER_ALIASES = {
+    'tình trạng quản lý': 'compliance',
+    'ghi chú quản lý': 'compliance_note',
+}
+
+
+def normalize_workbook_header(value):
+    header = re.sub(r'\s+', ' ', str(value or '').strip()).casefold()
+    return WORKBOOK_HEADER_ALIASES.get(header, header)
 
 
 def inspect_workbook(path):
@@ -128,7 +143,7 @@ def workbook_rows(path, progress=lambda *_: None):
         ws.reset_dimensions()  # Do not trust attacker-controlled cached dimensions.
         rows = ws.iter_rows()
         first = next(rows, ())
-        headers = [str(c.value or '').strip().lower() for c in first]
+        headers = [normalize_workbook_header(c.value) for c in first]
         if len(headers) > 32 or len(headers) != len(set(headers)) or 'brand' not in headers:
             raise ImportProblem('Dòng tiêu đề cần cột brand, tối đa 32 cột và không được trùng tên.')
         allowed = set(COLUMNS) - {'manual_compliance', 'manual_compliance_note'} | {'compliance', 'compliance_note'}
@@ -137,7 +152,10 @@ def workbook_rows(path, progress=lambda *_: None):
         try:
             validate_product_import_rows([], set(headers))
         except ValueError:
-            raise ImportProblem('Cần cả Compliance và Compliance_Note, hoặc bỏ cả hai.') from None
+            raise ImportProblem(
+                'Cần cả Tình trạng quản lý và Ghi chú quản lý '
+                '(hoặc Compliance và Compliance_Note), hoặc bỏ cả hai.'
+            ) from None
         count = 0
         for line, cells in enumerate(rows, 2):
             if line > limit('MAX_ROWS', 1000000) + 1:
@@ -287,14 +305,34 @@ def build_plan(cur, mode, apply=False):
     scope_details = []
     cur.execute('CREATE TEMP TABLE import_targets (id BIGINT PRIMARY KEY) ON COMMIT DROP')
     if mode == 'replace_by_brand':
-        gateway = load_brand_gateway(cur)
-        mapping, errors, _ = inspect_replace_by_brand_scopes(cur, scopes, gateway)
-        if errors:
-            raise ImportProblem('Brand có nhiều nguồn catalog. Cần chỉ rõ source_brand hoặc alias trong workbook.')
-        for brand, sources in sorted(mapping.items()):
-            # Same exact source predicate as Brand Gateway target resolver.
-            cur.execute("INSERT INTO import_targets SELECT id FROM products WHERE upper(trim(brand))=upper(trim(%s)) AND upper(trim(source_brand))=ANY(%s)", (brand, [s.upper().strip() for s in sources]))
-            scope_details.append({'brand': brand, 'sources': sorted(sources), 'count': cur.rowcount})
+        # "Replace brand" is intentionally canonical-brand-wide. A workbook
+        # containing an alias replaces every historical source catalog already
+        # mapped to that canonical brand, so old aliases cannot survive beside
+        # the newly imported catalog. Preview fingerprinting and the exact
+        # import_targets snapshot still fence concurrent changes before apply.
+        brand_sources = {}
+        for scope in scopes:
+            brand = str(scope['brand']).strip()
+            source = str(scope.get('source_brand') or brand).strip()
+            brand_sources.setdefault(brand, set()).add(source)
+        brands = sorted(brand_sources, key=str.casefold)
+        cur.execute(
+            'INSERT INTO import_targets SELECT id FROM products WHERE brand=ANY(%s)',
+            (brands,),
+        )
+        cur.execute(
+            """SELECT p.brand,count(*)
+               FROM products p JOIN import_targets t ON t.id=p.id
+               GROUP BY p.brand"""
+        )
+        counts = dict(cur.fetchall())
+        for brand in brands:
+            scope_details.append({
+                'brand': brand,
+                'sources': sorted(brand_sources[brand], key=str.casefold),
+                'all_sources': True,
+                'count': counts.get(brand, 0),
+            })
         cur.execute('SELECT count(*) FROM import_targets')
         deleted = cur.fetchone()[0]
     elif mode == 'replace_all':  # CLI compatibility only; never accepted by web.
@@ -336,13 +374,19 @@ def build_plan(cur, mode, apply=False):
     updated = cur.fetchone()[0]
     cur.execute('SELECT data FROM import_resolved ORDER BY n LIMIT 10')
     sample = [{k:v for k,v in r[0].items() if not k.startswith('_')} for r in cur.fetchall()]
-    return {'fingerprint': fingerprint, 'row_count': count, 'inserted': count-updated, 'updated': updated,
+    return {'plan_version': PLAN_VERSION, 'fingerprint': fingerprint,
+            'row_count': count, 'inserted': count-updated, 'updated': updated,
             'deleted': deleted, 'scopes': scope_details, 'new_brands': [b['name'] for b in new], 'sample': sample}
 
 
 def apply_plan(cur, plan, expected=None, progress=lambda *_: None):
-    if expected is not None and plan['fingerprint'] != expected['fingerprint']:
-        raise ImportProblem('Dữ liệu, Brand Gateway hoặc danh mục tình trạng đã thay đổi từ lúc xem trước. Hãy xem trước lại rồi xác nhận.')
+    guarded_fields = ('plan_version', 'fingerprint', 'row_count', 'inserted', 'updated', 'deleted', 'scopes')
+    if expected is not None and any(plan.get(field) != expected.get(field) for field in guarded_fields):
+        raise ImportProblem(
+            'Dữ liệu, Brand Gateway, danh mục tình trạng hoặc cách xác định '
+            'phạm vi import đã thay đổi từ lúc xem trước. '
+            'Hãy xem trước lại rồi xác nhận.'
+        )
     # Preserve optional controls on replacements only when exact identity is
     # unambiguous. Never copy another catalog/size's compliance override.
     cur.execute("""CREATE TEMP TABLE import_preserved ON COMMIT DROP AS

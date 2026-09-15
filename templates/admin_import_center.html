@@ -12,7 +12,7 @@
 <body class="admin-page">
 {% include '_user_nav.html' %}
 {% set labels={'queued':'Đang chờ','running':'Đang xử lý','completed':'Hoàn tất','failed':'Thất bại','cancelled':'Đã hủy'} %}
-{% set modes={'append':'Chỉ thêm mới','upsert':'Thêm / cập nhật','replace_by_brand':'Thay thế theo brand trong file'} %}
+{% set modes={'append':'Chỉ thêm mới','upsert':'Thêm / cập nhật','replace_by_brand':'Thay thế toàn bộ brand trong file'} %}
 <main class="import-main">
 <div class="heading"><div><p class="eyebrow">QUẢN TRỊ · DỮ LIỆU SẢN PHẨM</p><h1>Trung tâm nhập sản phẩm</h1><p class="muted">Tải workbook, kiểm tra phạm vi, rồi chủ động xác nhận ghi dữ liệu.</p></div>
 <a class="secondary" href="{{ url_for('admin_import_tools') }}">Dữ liệu lẻ ↗</a></div>
@@ -23,8 +23,8 @@
 <form method="post" action="{{ url_for('import_upload') }}" enctype="multipart/form-data" data-upload>
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="submission_key" value="{{ submission_key }}">
 <label class="file-zone" for="workbook"><strong>Chọn workbook sản phẩm</strong><span>Một trang tính · .xlsx · tối đa {{ max_mb }} MB</span><input id="workbook" type="file" name="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required></label>
-<label for="mode">Cách xử lý dữ liệu</label><select id="mode" name="mode"><option value="upsert">Thêm / cập nhật sản phẩm</option><option value="append">Chỉ thêm dòng mới</option><option value="replace_by_brand">Thay thế brand / nguồn brand có trong file</option></select>
-<p class="small muted">Giữ tên cột tiếng Anh trong mẫu. Thay công thức bằng giá trị; bỏ macro và liên kết ngoài. Brand mới được tạo khi áp dụng, chưa gán tiền tệ.</p>
+<label for="mode">Cách xử lý dữ liệu</label><select id="mode" name="mode"><option value="upsert">Thêm / cập nhật sản phẩm</option><option value="append">Chỉ thêm dòng mới</option><option value="replace_by_brand">Thay thế toàn bộ sản phẩm của brand trong file</option></select>
+<p class="small muted">Dùng tên cột trong file mẫu; hai cột quản lý dùng tiếng Việt. Thay công thức bằng giá trị; bỏ macro và liên kết ngoài. Chế độ thay thế sẽ xóa mọi nguồn catalog cũ của từng brand sau bước xem trước và xác nhận. Brand mới được tạo khi áp dụng, chưa gán tiền tệ.</p>
 <button type="submit">Tải lên & chuẩn bị xem trước</button><p class="small muted" data-upload-status role="status"></p>
 </form></section>
 <section class="history" aria-labelledby="history-title"><div class="section-heading"><h2 id="history-title">Tác vụ gần đây</h2><a href="{{ url_for('admin_imports') }}">Làm mới ↻</a></div>
@@ -48,7 +48,7 @@
 <section class="preview" aria-labelledby="preview-title"><span class="step">02</span><h2 id="preview-title">Kiểm tra trước khi ghi</h2>
 <p><strong>{{ '{:,}'.format(p.inserted) }}</strong> dòng sẽ thêm · <strong>{{ '{:,}'.format(p.updated) }}</strong> dòng sẽ cập nhật · <strong>{{ '{:,}'.format(p.deleted) }}</strong> dòng sẽ xóa.</p>
 {% if p.new_brands %}<div class="alert notice"><strong>Brand mới: {{ p.new_brands|join(', ') }}</strong><p>Chỉ được tạo khi ghi dữ liệu. Chưa gán tiền tệ hoặc tỷ giá; chưa cấp quyền cho team. Sau khi hoàn tất, <a href="{{ url_for('admin_exchange_rates') }}">gán tiền tệ trong Tỷ giá</a>.</p></div>{% endif %}
-{% if p.scopes %}<h3>Phạm vi thay thế chính xác</h3><ul class="scopes">{% for scope in p.scopes %}<li><strong>{{ scope.brand }}</strong><span>Nguồn: {{ scope.sources|join(', ') }}</span><b>{{ '{:,}'.format(scope.count) }} dòng sẽ xóa</b></li>{% endfor %}</ul>{% endif %}
+{% if p.scopes %}<h3>Phạm vi thay thế chính xác</h3><ul class="scopes">{% for scope in p.scopes %}<li><strong>{{ scope.brand }}</strong><span>Toàn bộ nguồn catalog{% if scope.sources %} · Nguồn trong file: {{ scope.sources|join(', ') }}{% endif %}</span><b>{{ '{:,}'.format(scope.count) }} dòng sẽ xóa</b></li>{% endfor %}</ul>{% endif %}
 <h3>Mẫu dữ liệu · tối đa 10 dòng</h3><div class="table-scroll" tabindex="0" aria-label="Mẫu sản phẩm"><table><thead><tr><th>Mã</th><th>Tên sản phẩm</th><th>Brand</th><th>Nguồn brand</th><th>Quy cách</th><th>Giá gốc</th></tr></thead><tbody>{% for r in p.sample %}<tr><td>{{ r.code or '—' }}</td><td>{{ r.name or '—' }}</td><td>{{ r.brand }}</td><td>{{ r.source_brand }}</td><td>{{ r.size or '—' }}</td><td>{{ r.price or '—' }}</td></tr>{% endfor %}</tbody></table></div>
 {% if job.mode=='replace_by_brand' %}<details class="confirmation"><summary>Bước 3 — Xác nhận phạm vi xóa & ghi dữ liệu</summary><p>Dữ liệu trong phạm vi trên sẽ bị xóa và nạp lại. Nhập <strong>{{ p.deleted }}</strong> để xác nhận chính xác số dòng xóa.</p>{% endif %}
 <form method="post" action="{{ url_for('import_control',job_id=job.id,action='apply') }}" class="apply-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="fingerprint" value="{{ p.fingerprint }}">

@@ -12,11 +12,10 @@ ghi bất kỳ thay đổi nào xuống DB:
   - source_brand được ghi lại (giá trị alias/brand gốc trong file).
   - Unknown brand được báo trong --dry-run và được tự tạo trong brand_master
     khi apply, chưa gán currency và không tự cấp quyền team.
-  - `--replace-brands-from-file` không còn xóa theo brand text thô của file
-    (đã lỗi thời từ khi products.brand là canonical) -- dùng cùng logic an
-    toàn phạm vi (`inspect_replace_by_brand_scopes` /
-    `resolve_replace_by_brand_target_ids`) mà `/admin/imports/apply` dùng,
-    từ chối xóa toàn bộ canonical brand khi thiếu source_brand scope.
+  - `--replace-brands-from-file` không xóa theo brand text thô của file.
+    Alias/brand trong file được resolve trước; sau đó importer thay thế toàn
+    bộ sản phẩm của canonical brand, gồm mọi source_brand cũ, giống
+    `/admin/imports/apply`.
   - Dùng cùng thứ tự advisory lock products rồi danh mục tình trạng như
     worker web; cả hai khóa được giữ đến commit/rollback.
   - Không in credential/DSN ra log/stdout/stderr.
@@ -25,10 +24,9 @@ Chế độ:
   (mặc định)     Xóa TOÀN BỘ products rồi import (giống import full cũ).
   --append       Chỉ thêm dòng, không xóa.
   --replace-brands-from-file
-                 Xóa trong DB các dòng thuộc đúng phạm vi canonical brand +
-                 source_brand xuất hiện trong file, rồi chèn lại toàn bộ
-                 dòng trong file. Bị từ chối nếu một canonical brand có
-                 nhiều source_brand trong DB nhưng file không chỉ rõ phạm vi.
+                 Xóa trong DB toàn bộ dòng thuộc các canonical brand
+                 xuất hiện trong file (gồm mọi source_brand cũ), rồi chèn
+                 lại toàn bộ dòng trong file.
   --dry-run      Chỉ resolve qua Brand Gateway + đếm số dòng sẽ ghi/xóa,
                  KHÔNG ghi gì vào DB (rollback toàn bộ transaction).
 

@@ -4,10 +4,8 @@
    - unknown brand is registered atomically, with no team grant.
    - alias -> canonical resolution + `source_brand` written correctly.
    - `--dry-run` resolves/counts but writes nothing.
-   - `--replace-brands-from-file` refuses to wipe an entire canonical brand
-     when the file doesn't scope by `source_brand` and the brand has
-     multiple source catalogs in the DB (reuses the same
-     `inspect_replace_by_brand_scopes` safety as `/admin/imports/apply`).
+   - `--replace-brands-from-file` replaces the entire canonical brand,
+     including every historical source catalog, like `/admin/imports/apply`.
    - the products-import advisory lock is acquired before any mutation.
 
 2. `scripts/migrate_sqlite_to_postgres.py` and
@@ -222,7 +220,7 @@ class ImportExcelBrandGatewayCompatibilityTests(unittest.TestCase):
             cur.execute("SELECT COUNT(*) FROM products WHERE code = 'C-DRY'")
             self.assertEqual(cur.fetchone()[0], 0)
 
-    def test_replace_brands_from_file_rejected_without_source_scope_when_multi_source(self):
+    def test_replace_brands_from_file_replaces_every_canonical_source(self):
         # Seed 2 products under canonical "Sigma" but from 2 different source_brands.
         with self.conn.cursor() as cur:
             cur.execute(
@@ -237,12 +235,12 @@ class ImportExcelBrandGatewayCompatibilityTests(unittest.TestCase):
             [{"name": "New Sigma Product", "code": "NEW-1", "cas": "", "brand": "Sigma", "size": "1g", "ship": "1", "price": "100", "note": ""}],
         )
         exit_code = self._run_main([path, "--replace-brands-from-file"])
-        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(exit_code, 0)
         with self.conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM products WHERE code IN ('EX-A', 'EX-B')")
-            self.assertEqual(cur.fetchone()[0], 2, "Ambiguous multi-source canonical brand must not be wiped")
-            cur.execute("SELECT COUNT(*) FROM products WHERE code = 'NEW-1'")
             self.assertEqual(cur.fetchone()[0], 0)
+            cur.execute("SELECT COUNT(*) FROM products WHERE code = 'NEW-1'")
+            self.assertEqual(cur.fetchone()[0], 1)
 
     def test_missing_brand_master_table_blocks_import(self):
         # A database that only has `products` (no brand_master at all).

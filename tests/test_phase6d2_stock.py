@@ -199,9 +199,9 @@ class Phase6D2StockTests(unittest.TestCase):
         path = Path(self.upload_dir) / "parser_alias.xlsx"
         path.write_bytes(workbook_bytes(
             [["A", "C1", "50-00-0", "Brand A", "100 mL", 100000, 1, today + timedelta(days=1)],
-            ["B", "C2", "50-00-1", "Brand A", "100 mL", None, 0, None]],
+            ["B", "C2", "64-17-5", "Brand A", "100 mL", None, 0, None]],
             headers=ENGLISH_ALIAS_HEADERS,
-        ))
+        ).getvalue())
         rows = stock_import_jobs.parse_workbook(path)
         self.assertEqual(len(rows), 2)
         rows = rows[:2]

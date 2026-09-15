@@ -17,7 +17,7 @@ import zipfile
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from werkzeug.datastructures import FileStorage
 
 import search
@@ -47,6 +47,28 @@ class WorkbookSecurityTests(unittest.TestCase):
                 path.write_bytes(xlsx(rows,headers).getvalue())
                 with self.assertRaisesRegex(ImportProblem,expected):
                     list(workbook_rows(path))
+
+    def test_vietnamese_management_headers_are_normalized(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'vietnamese-controls.xlsx'
+            headers=('brand','code','Tình trạng quản lý','Ghi chú quản lý')
+            rows=[{'brand':'TRC','code':'A','Tình trạng quản lý':'Được bán','Ghi chú quản lý':'đã duyệt'}]
+            path.write_bytes(xlsx(rows,headers).getvalue())
+            parsed=list(workbook_rows(path))
+            self.assertEqual(parsed[0][1]['manual_compliance'],'Được bán')
+            self.assertEqual(parsed[0][1]['manual_compliance_note'],'đã duyệt')
+            self.assertTrue(parsed[0][1]['_manual'])
+
+    def test_vietnamese_management_headers_require_pair_and_cannot_duplicate_english(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'bad-controls.xlsx'
+            path.write_bytes(xlsx([{'brand':'TRC'}],('brand','Tình trạng quản lý')).getvalue())
+            with self.assertRaisesRegex(ImportProblem,'Ghi chú quản lý'):
+                list(workbook_rows(path))
+            headers=('brand','Compliance','Tình trạng quản lý','Compliance_Note')
+            path.write_bytes(xlsx([{'brand':'TRC'}],headers).getvalue())
+            with self.assertRaisesRegex(ImportProblem,'trùng tên'):
+                list(workbook_rows(path))
 
     def test_renamed_metadata_part_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -175,6 +197,16 @@ class ImportCenterPgTests(unittest.TestCase):
         self.assertEqual(self.client.get('/admin/imports/jobs/'+jid+'/status').status_code,403)
         self.assertEqual(self.client.post('/admin/imports/upload',data={'csrf_token':'qa-csrf'}).status_code,403)
 
+    def test_product_template_includes_supported_management_headers(self):
+        response=self.client.get('/admin/templates/products.xlsx')
+        self.assertEqual(response.status_code,200)
+        workbook=load_workbook(BytesIO(response.data),read_only=True)
+        try:
+            headers=[cell.value for cell in next(workbook.active.iter_rows())]
+        finally:
+            workbook.close()
+        self.assertEqual(headers[-3:],['Preparation_Type','Tình trạng quản lý','Ghi chú quản lý'])
+
     def test_separate_delete_confirmation_and_same_count_stale_preview(self):
         self.seed()
         jid=self.preview([{'brand':'TRC','code':'A','name':'new','size':'1g'}],'replace_by_brand')
@@ -184,16 +216,40 @@ class ImportCenterPgTests(unittest.TestCase):
         failed=self.apply(jid);self.assertEqual(failed['status'],'failed');self.assertIn('thay đổi',failed['errors'][0])
         with self.conn.cursor() as cur:cur.execute('SELECT name FROM products');self.assertEqual(cur.fetchone()[0],'changed outside preview')
 
-    def test_replace_alias_scope_and_optional_fields_preserved(self):
+    def test_preview_from_older_import_plan_is_rejected_before_delete(self):
+        self.seed()
+        jid=self.preview([{'brand':'TRC','code':'A','name':'new','size':'1g'}],'replace_by_brand')
+        preview=self.state(jid)['preview']
+        with self.conn.cursor() as cur:
+            cur.execute("UPDATE product_import_jobs SET preview=preview-'plan_version' WHERE id=%s",(jid,))
+        jobs.control(jid,'apply','qa',preview['fingerprint'],str(preview['deleted']))
+        self.assertTrue(jobs.run_once(jid))
+        failed=self.state(jid)
+        self.assertEqual(failed['status'],'failed')
+        self.assertIn('phạm vi import',failed['errors'][0])
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT name FROM products WHERE code='A'")
+            self.assertEqual(cur.fetchone()[0],'old')
+
+    def test_replace_alias_replaces_all_sources_and_can_be_repeated(self):
         self.seed('LGC','LGC (Mikromol)');self.seed('LGC','LGC (XRF)',code='B')
         with self.conn.cursor() as cur:cur.execute("UPDATE products SET manual_compliance='Được bán',manual_compliance_note='reviewed',preparation_type='NEAT' WHERE code='A'")
-        jid=self.preview([{'brand':'LGC (Mikromol)','code':'A','name':'new','size':'1g'}],'replace_by_brand')
-        self.assertEqual(self.state(jid)['preview']['deleted'],1)
-        self.assertEqual(self.apply(jid)['deleted_count'],1)
+        rows=[{'brand':'LGC (Mikromol)','code':'A','name':'new','size':'1g'}]
+        jid=self.preview(rows,'replace_by_brand')
+        preview=self.state(jid)['preview']
+        self.assertEqual(preview['deleted'],2)
+        self.assertTrue(preview['scopes'][0]['all_sources'])
+        self.assertEqual(self.apply(jid)['deleted_count'],2)
         with self.conn.cursor() as cur:
             cur.execute("SELECT name,manual_compliance,preparation_type FROM products WHERE code='A'");self.assertEqual(cur.fetchone(),('new','Được bán','NEAT'))
-            cur.execute("SELECT count(*) FROM products WHERE source_brand='LGC (XRF)'");self.assertEqual(cur.fetchone()[0],1)
-        bad=self.preview([{'brand':'LGC','code':'X'}],'replace_by_brand');self.assertEqual(self.state(bad)['status'],'failed')
+            cur.execute("SELECT count(*) FROM products WHERE source_brand='LGC (XRF)'");self.assertEqual(cur.fetchone()[0],0)
+        repeated=self.preview(rows,'replace_by_brand')
+        self.assertEqual(self.state(repeated)['status'],'completed',self.state(repeated)['errors'])
+        self.assertEqual(self.state(repeated)['preview']['deleted'],1)
+        self.assertEqual(self.apply(repeated)['status'],'completed')
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT count(*),count(DISTINCT source_brand) FROM products WHERE brand='LGC'")
+            self.assertEqual(cur.fetchone(),(1,1))
 
     def test_upsert_counts_and_ambiguous_or_duplicate_rejected_atomically(self):
         self.seed()

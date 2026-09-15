@@ -28,6 +28,10 @@ Covers:
   - Login / logout / Google OAuth entry+callback stay reachable
     (endpoint-exact exemption) while a path that merely *resembles* one of
     them (but isn't the same endpoint) is NOT exempted.
+  - Anonymous `/` reaches its canonical `/login` redirect even outside the
+    office allowlist, while no other anonymous route is broadly exempted.
+  - A live admin session (LOCAL or GOOGLE) is role-exempt from IP rules;
+    stale/revoked admin sessions are rejected by session_security first.
   - `_client_ip()` under the app's real one-hop `ProxyFix` config: a
     client-injected LEADING `X-Forwarded-For` value never wins over the
     trusted trailing hop; a single trusted-hop value is still honoured.
@@ -127,6 +131,12 @@ if "_mw_test_probe" not in search.app.view_functions:
     def _mw_test_probe():
         return "OK", 200
 
+if "_mw_test_admin_probe" not in search.app.view_functions:
+    @search.app.route("/__mw_test_admin_probe__")
+    def _mw_test_admin_probe():
+        guard = search._require_admin_page()
+        return guard or ("ADMIN_OK", 200)
+
 # Decoy routes registered ONCE at import time (Flask refuses new
 # `add_url_rule`/`route` calls after the app has handled its first
 # request) -- their PATHS resemble exempt endpoints (Google OAuth, login)
@@ -224,17 +234,31 @@ class InheritModeTests(_MiddlewareTestBase):
         resp = self._get(environ_overrides={"REMOTE_ADDR": "9.9.9.9"})
         self.assertEqual(resp.status_code, 200)
 
-    def test_admin_session_ip_bypass_allowlist_flag_allows(self):
-        # Admin (team_id=None BY DESIGN, not a missing-team error) can
-        # still carry the personal ip_bypass_allowlist exception under
-        # INHERIT.
+    def test_admin_role_always_bypasses_ip_without_personal_flag(self):
+        # Admin access is role-based and provider-independent. It must not
+        # require the legacy personal ip_bypass_allowlist switch.
         self.db.cidrs = ["203.0.113.50/32"]
         start_auth_db_patch(self, user_id=1, auth_version=1)
         self._set_session(authenticated=True, user_id=1, auth_version=1,
                            username="root_admin", is_admin=True, team_id=None,
-                           ip_bypass_allowlist=True)
-        resp = self._get(environ_overrides={"REMOTE_ADDR": "9.9.9.9"})
+                           ip_bypass_allowlist=False)
+        resp = self._get("/__mw_test_admin_probe__", environ_overrides={"REMOTE_ADDR": "9.9.9.9"})
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_data(as_text=True), "ADMIN_OK")
+        # The role exemption runs before any office/team policy read.
+        self.assertEqual(self.db.queries, [])
+
+    def test_google_admin_gets_the_same_role_based_ip_exemption(self):
+        self.db.cidrs = ["203.0.113.50/32"]
+        start_auth_db_patch(self, user_id=2, auth_version=4)
+        self._set_session(authenticated=True, user_id=2, auth_version=4,
+                           username="admin@standards.vn", auth_provider="GOOGLE",
+                           role="admin", is_admin=True, team_id=None,
+                           ip_bypass_allowlist=False)
+        resp = self._get("/__mw_test_admin_probe__", environ_overrides={"REMOTE_ADDR": "9.9.9.9"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_data(as_text=True), "ADMIN_OK")
+        self.assertEqual(self.db.queries, [])
 
 
 # --------------------------------------------------------------------------
@@ -373,8 +397,8 @@ class TeamPolicyUnavailableTests(_MiddlewareTestBase):
 
     def test_valid_inherit_value_is_real_read_not_a_fallback(self):
         # A team genuinely configured with ip_policy='INHERIT' behaves
-        # exactly like the anonymous/admin INHERIT path -- proves this is
-        # a real read, not the removed exception-swallowing fallback.
+        # exactly like the anonymous INHERIT path -- proves this is a real
+        # read, not the removed exception-swallowing fallback.
         self.db.team_policies[1] = "INHERIT"
         self.db.cidrs = ["203.0.113.50/32"]
         self._staff_session(team_id=1)
@@ -383,17 +407,19 @@ class TeamPolicyUnavailableTests(_MiddlewareTestBase):
         resp_denied = self._get(environ_overrides={"REMOTE_ADDR": "9.9.9.9"})
         self.assertEqual(resp_denied.status_code, 403)
 
-    def test_admin_without_team_is_valid_inherit_not_unavailable(self):
-        # Contrast case: admin has team_id=None BY DESIGN (system-wide
-        # scope) -- this must stay a normal, valid INHERIT, not 503.
+    def test_admin_without_team_bypasses_ip_policy(self):
+        # Admin has team_id=None by design and is exempt after session
+        # validation, so neither matching nor non-matching IP needs a
+        # policy/rule read.
         start_auth_db_patch(self, user_id=1, auth_version=1)
         self._set_session(authenticated=True, user_id=1, auth_version=1,
                            username="root_admin", is_admin=True, team_id=None)
         self.db.cidrs = ["203.0.113.50/32"]
         resp = self._get(environ_overrides={"REMOTE_ADDR": "9.9.9.9"})
-        self.assertEqual(resp.status_code, 403)  # valid policy read, IP just not allowed
+        self.assertEqual(resp.status_code, 200)
         resp2 = self._get(environ_overrides={"REMOTE_ADDR": "203.0.113.50"})
         self.assertEqual(resp2.status_code, 200)
+        self.assertEqual(self.db.queries, [])
 
 
 # --------------------------------------------------------------------------
@@ -401,6 +427,17 @@ class TeamPolicyUnavailableTests(_MiddlewareTestBase):
 # --------------------------------------------------------------------------
 
 class SessionOrderingTests(_MiddlewareTestBase):
+    def test_stale_admin_role_is_rejected_before_role_bypass(self):
+        self.db.cidrs = ["203.0.113.50/32"]
+        start_auth_db_patch(self, user_id=41, auth_version=8)
+        self._set_session(authenticated=True, user_id=41, auth_version=7,
+                           username="old_admin", is_admin=True, team_id=None,
+                           ip_bypass_allowlist=False)
+        resp = self._get("/__mw_test_admin_probe__", environ_overrides={"REMOTE_ADDR": "9.9.9.9"})
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/login", resp.headers.get("Location", ""))
+        self.assertEqual(self.db.queries, [])
+
     def test_revoked_session_with_stale_bypass_flag_is_blocked_before_ip_check(self):
         self.db.cidrs = ["203.0.113.50/32"]  # would otherwise deny 9.9.9.9
         # The cookie still carries ip_bypass_allowlist=True and
@@ -445,6 +482,12 @@ class ExemptEndpointTests(_MiddlewareTestBase):
     def test_probe_route_denied_under_this_config(self):
         resp = self.client.get("/__mw_test_probe__", environ_overrides=self.remote)
         self.assertEqual(resp.status_code, 403)
+
+    def test_root_redirects_anonymous_user_to_login_before_ip_check(self):
+        resp = self.client.get("/", environ_overrides=self.remote)
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(resp.headers.get("Location", "").endswith("/login"))
+        self.assertEqual(self.db.queries, [])
 
     def test_login_get_reachable(self):
         resp = self.client.get("/login", environ_overrides=self.remote)

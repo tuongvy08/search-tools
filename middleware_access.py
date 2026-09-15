@@ -19,11 +19,13 @@ tới đây, nên không bao giờ "còn bypass" thật.
 Ba chế độ chính sách IP của TEAM (cột `teams.ip_policy`, migration 015),
 đọc MỚI từ DB mỗi request (không cache trong session) để đổi chính sách
 team có hiệu lực ngay từ request tiếp theo:
-  - INHERIT (mặc định, và luôn áp dụng cho admin / khách chưa đăng nhập):
-    hành vi cũ -- không rule nào (env trống + bảng trống, ĐỌC THÀNH CÔNG
-    và thực sự không có dòng nào) thì không chặn; có rule thì phải khớp,
-    trừ khi có ngoại lệ cá nhân (`ip_bypass_allowlist` hoặc
-    `IP_ALLOWLIST_BYPASS_USERS`).
+  - INHERIT (mặc định cho khách chưa đăng nhập): hành vi cũ -- không rule
+    nào (env trống + bảng trống, ĐỌC THÀNH CÔNG và thực sự không có dòng
+    nào) thì không chặn; có rule thì phải khớp, trừ khi có ngoại lệ cá
+    nhân (`ip_bypass_allowlist` hoặc `IP_ALLOWLIST_BYPASS_USERS`). Riêng
+    admin có session đã được hook `session_security` xác minh thì luôn
+    được miễn IP ở đầu middleware này, không phụ thuộc provider đăng nhập
+    hay cờ ngoại lệ cá nhân.
   - ALLOWLIST_ONLY: chỉ IP khớp rule (env hoặc DB) mới vào được; KHÔNG có
     rule nào (đọc thành công, thực sự 0 dòng) thì từ chối (không ngầm mở
     mọi IP); ngoại lệ cá nhân KHÔNG áp dụng ở mode này.
@@ -53,8 +55,8 @@ QUAN TRỌNG (Fix1) -- phân biệt RÕ hai loại "không có rule":
   Staff (non-admin) không có `team_id` hợp lệ trong session, hoặc
   `team_id` trỏ tới một team đã bị xoá, đều rơi vào nhánh lỗi (2) --
   KHÔNG bao giờ tự động lùi về INHERIT (có thể lỏng hơn ý định) chỉ vì
-  thiếu dữ liệu. Chỉ admin/anonymous mới có INHERIT là một giá trị "mặc
-  định hợp lệ theo model" (họ vốn không có team).
+  thiếu dữ liệu. Anonymous có INHERIT là giá trị mặc định hợp lệ theo
+  model; admin được miễn IP sau khi session đã được xác minh.
 
 Biến môi trường:
   DISABLE_IP_ALLOWLIST=1   — tắt hoàn toàn (khuyên dùng trên máy dev)
@@ -215,12 +217,10 @@ def _load_team_ip_policy(team_id) -> str:
 def _resolve_effective_policy() -> str:
     """Which of the 3 policies applies to the CURRENT request's session.
 
-    - Anonymous (`session["authenticated"]` not True) or admin: always
-      INHERIT -- this IS a valid, final INHERIT (by definition of the
-      team model: neither has a team to look up), never a fallback for a
-      failed read. Admins are never auto-exempt from IP checks just for
-      being admin -- INHERIT itself still enforces whatever env/DB rules
-      are configured.
+    - Anonymous (`session["authenticated"]` not True) or admin: INHERIT.
+      For admin this is only a defensive value for direct callers; the
+      request middleware grants the role-based exemption before calling
+      this function, after `session_security` has validated the session.
     - Authenticated, non-admin, WITH a `team_id`: that team's own
       `ip_policy`, read fresh from DB via `_load_team_ip_policy` (may
       raise `_PolicyUnavailableError`, propagated as-is).
@@ -266,6 +266,21 @@ def register_ip_access_control(app, base_path=None):
         # cuối URL.
         path = (request.path or "").rstrip("/")
         if request.endpoint in PRE_AUTH_EXEMPT_ENDPOINTS or path == "/login":
+            return None
+
+        # `/` owns the canonical anonymous -> /login redirect. Let only
+        # that exact endpoint reach its view before authentication; other
+        # anonymous endpoints remain subject to the existing IP policy.
+        if request.endpoint == "home" and not session.get("authenticated"):
+            return None
+
+        # Role-based admin access is provider-independent: LOCAL and GOOGLE
+        # admins must both work from every IP without a second, mutable
+        # `ip_bypass_allowlist` switch. This is safe only because
+        # session_security's liveness hook is registered first: inactive,
+        # deleted, demoted (auth_version bumped), or otherwise stale sessions
+        # are rejected before reaching this line.
+        if session.get("authenticated") and session.get("is_admin") is True:
             return None
 
         try:

@@ -3007,9 +3007,9 @@ def _preview_hints(dataset, mode, rows, deletable_count=None, ambiguous_count=0)
         hints.append(f"Distinct brands in file: {len(brands)}")
         if mode == "replace_by_brand":
             if deletable_count is not None:
-                hints.append(f"Apply sẽ xóa an toàn {deletable_count:,} sản phẩm theo scope brand/source_brand trong file rồi nạp lại")
+                hints.append(f"Apply sẽ xóa an toàn {deletable_count:,} sản phẩm thuộc toàn bộ canonical brand trong file rồi nạp lại")
             else:
-                hints.append("Apply sẽ xóa an toàn products theo scope brand/source_brand trong file rồi nạp lại")
+                hints.append("Apply sẽ xóa an toàn products thuộc các canonical brand trong file, gồm mọi nguồn catalog cũ, rồi nạp lại")
         elif mode == "upsert":
             hints.append("Upsert key: code + brand (chuẩn hóa qua Brand Master, an toàn va chạm)")
         if ambiguous_count > 0:
@@ -4073,7 +4073,10 @@ def admin_template_products():
     wb = Workbook()
     ws = wb.active
     ws.title = "products"
-    ws.append(["name", "code", "cas", "brand", "size", "ship", "price", "note", "Preparation_Type"])
+    ws.append([
+        "name", "code", "cas", "brand", "size", "ship", "price", "note",
+        "Preparation_Type", "Tình trạng quản lý", "Ghi chú quản lý",
+    ])
     return _xlsx_response(wb, "products_import_template.xlsx")
 
 

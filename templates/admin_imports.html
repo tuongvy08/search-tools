@@ -361,9 +361,9 @@
 
     <div class="card">
       <h2><span class="badge">↓</span> File mẫu Excel</h2>
-      <p class="hint">Tải mẫu, điền dữ liệu, giữ nguyên tên cột dòng đầu (tiếng Anh, chữ thường như mẫu). File phải là <strong>Excel Workbook (.xlsx)</strong> thật (File → Save As), không đổi đuôi CSV/HTML thành .xlsx. Có thể upload thêm <strong>.csv</strong> (UTF-8 hoặc Excel Việt Nam) với cùng tên cột.</p>
+      <p class="hint">Tải mẫu, điền dữ liệu và giữ nguyên tên cột dòng đầu. File phải là <strong>Excel Workbook (.xlsx)</strong> thật (File → Save As), không đổi đuôi CSV/HTML thành .xlsx. Có thể upload thêm <strong>.csv</strong> (UTF-8 hoặc Excel Việt Nam) với cùng tên cột.</p>
       <div class="tpl-links">
-        <p><a href="/admin/templates/products.xlsx">products_import_template.xlsx</a> — <code>name, code, cas, brand, size, ship, price, note, Preparation_Type</code> (tùy chọn: <code>NEAT</code>, <code>SOLUTION</code>, <code>MIXTURE</code>, <code>OTHER</code>)</p>
+        <p><a href="/admin/templates/products.xlsx">products_import_template.xlsx</a> — <code>name, code, cas, brand, size, ship, price, note, Preparation_Type, Tình trạng quản lý, Ghi chú quản lý</code>. Dạng sản phẩm tùy chọn: <code>NEAT</code>, <code>SOLUTION</code>, <code>MIXTURE</code>, <code>OTHER</code>.</p>
         <p><a href="{{ url_for('admin_regulatory') }}">Mẫu và import quy tắc CAS / Code / Tên nằm trong module Quy tắc quản lý →</a></p>
       </div>
     </div>

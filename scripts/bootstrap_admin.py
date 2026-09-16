@@ -30,6 +30,7 @@ def main() -> None:
     conn = get_connection()
     try:
         with conn.cursor() as cur:
+            cur.execute("SELECT pg_advisory_xact_lock(891273465)")
             cur.execute("SELECT COUNT(*) FROM app_users")
             (n,) = cur.fetchone()
             if n > 0:
@@ -37,8 +38,8 @@ def main() -> None:
                 return
             cur.execute(
                 """
-                INSERT INTO app_users (username, password_hash, team_id, is_admin)
-                VALUES (%s, %s, NULL, TRUE)
+                INSERT INTO app_users (username, password_hash, team_id, is_admin, is_super_admin)
+                VALUES (%s, %s, NULL, TRUE, TRUE)
                 """,
                 (username, generate_password_hash(password)),
             )

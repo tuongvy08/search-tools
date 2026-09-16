@@ -63,6 +63,7 @@ import io
 import json
 import multiprocessing
 import os
+from pathlib import Path
 import secrets
 import threading
 import time
@@ -187,6 +188,7 @@ class _RealPgTestBase(unittest.TestCase):
                     cur.execute(_MIGRATION_015_SQL)
                     cur.execute(_MIGRATION_016_SQL)
                     cur.execute(_MIGRATION_020_SQL)
+                    cur.execute(Path(__file__).resolve().parents[1].joinpath("sql/migration_030_admin_menu_permissions.sql").read_text())
                     cur.execute(_MIGRATION_022_SQL)
                     cur.execute(_MIGRATION_023_SQL)
                     cur.execute(_MIGRATION_006_SQL)
@@ -299,9 +301,9 @@ class _RealPgTestBase(unittest.TestCase):
                     cur.execute(
                         """
                         INSERT INTO app_users
-                            (username, password_hash, team_id, is_admin, ip_bypass_allowlist,
+                            (username, password_hash, team_id, is_admin, is_super_admin, ip_bypass_allowlist,
                              auth_provider, google_sub, email, account_status, auth_version)
-                        VALUES (%(username)s, %(password_hash)s, %(team_id)s, %(is_admin)s,
+                        VALUES (%(username)s, %(password_hash)s, %(team_id)s, %(is_admin)s, %(is_admin)s,
                                 FALSE, %(auth_provider)s, %(google_sub)s, %(email)s,
                                 %(account_status)s, %(auth_version)s)
                         RETURNING id
@@ -924,6 +926,7 @@ class PreviewConfirmPgTests(_RealPgTestBase):
         self._insert_product(brand="BrandB", code="C2")
         tid = self._insert_team("Team X", brands=["BrandA"])
         admin_id = self._admin()
+        self._insert_user(username="remaining-super", is_admin=True)
         client = self._client_for(admin_id, is_admin=True)
         token = self._preview(client, team_id=tid, brands=["BrandB"], ip_policy="INHERIT")
 

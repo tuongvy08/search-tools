@@ -117,6 +117,10 @@ class Phase6D2StockTests(unittest.TestCase):
             cur.execute("DELETE FROM brand_aliases")
             cur.execute("DELETE FROM brand_master")
             cur.execute("UPDATE app_users SET is_admin=true,account_status='ACTIVE',auth_version=1 WHERE id=%s", (self.admin_id,))
+        with self.conn.cursor() as cur:
+            cur.execute("INSERT INTO admin_menu_grants(user_id,permission_key) VALUES (%s,%s) ON CONFLICT DO NOTHING", (self.admin_id, 'stock'))
+            cur.execute("UPDATE app_users SET auth_version=1 WHERE id=%s", (self.admin_id,))
+
 
     def _submit_preview(self, rows, filename="stock.xlsx"):
         job_id = stock_import_jobs.submit(

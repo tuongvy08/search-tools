@@ -642,6 +642,8 @@ def confirm_permissions():
                 # token minted for a DIFFERENT admin session matches zero
                 # rows here: not confirmable AND not consumed, leaving the
                 # real owner's row untouched for them to still confirm.
+                acquire_last_admin_lock(cur)
+                revalidate_actor(cur, admin_id, expected_auth_version)
                 record = _pop_preview(cur, token, admin_id)
         if record is None:
             return _redirect_result(err=_ERR_PREVIEW_EXPIRED)

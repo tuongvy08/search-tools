@@ -55,6 +55,8 @@ def register(app, require_admin, actor):
         import import_quick_delete
         try:
             with import_jobs.connection() as conn,conn.cursor() as cur:
+                import admin_permissions
+                admin_permissions.require_request_actor(cur, 'imports')
                 return jsonify(import_quick_delete.preview(cur,kind,request.form))
         except ValueError as exc:
             return jsonify(ok=False,message=str(exc)),400

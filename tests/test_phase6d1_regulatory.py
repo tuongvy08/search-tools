@@ -97,6 +97,10 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
                            priority=CASE stable_key WHEN 'CAM_NHAP' THEN 10 WHEN 'PHU_LUC_II' THEN 20 WHEN 'PHU_LUC_III' THEN 30 WHEN 'DUOC_BAN' THEN 40 WHEN 'CAN_GIAY_PHEP' THEN 50 ELSE 60 END,
                            color_key=CASE stable_key WHEN 'CAM_NHAP' THEN 'red' WHEN 'PHU_LUC_II' THEN 'amber' WHEN 'PHU_LUC_III' THEN 'teal' WHEN 'DUOC_BAN' THEN 'green' WHEN 'CAN_GIAY_PHEP' THEN 'blue' ELSE 'gray' END,
                            color_hex=NULL""")
+        with self.conn.cursor() as cur:
+            cur.execute("INSERT INTO admin_menu_grants(user_id,permission_key) VALUES (%s,%s) ON CONFLICT DO NOTHING", (self.admin_id, 'regulatory'))
+            cur.execute("UPDATE app_users SET auth_version=1 WHERE id=%s", (self.admin_id,))
+
 
     def _status(self, key):
         with self.conn.cursor() as cur:
@@ -361,6 +365,8 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
                            VALUES ('Manual final colour','COLOR-MANUAL','50-00-0','Brand A','1g','1','100','Được bán')""")
             cur.execute("SELECT xmin::text FROM products ORDER BY code")
             product_versions = cur.fetchall()
+            cur.execute("INSERT INTO admin_menu_grants(user_id,permission_key) VALUES (%s,'regulatory') ON CONFLICT DO NOTHING", (self.admin_id,))
+            cur.execute("UPDATE app_users SET auth_version=1 WHERE id=%s", (self.admin_id,))
             cur.execute("SELECT id,updated_at FROM regulatory_statuses WHERE stable_key='CAM_NHAP'")
             blocked_id, blocked_revision = cur.fetchone()
             cur.execute("SELECT id,updated_at FROM regulatory_statuses WHERE stable_key='DUOC_BAN'")
@@ -433,6 +439,8 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
                     cur.execute("""UPDATE app_users
                                    SET is_admin=true,account_status='ACTIVE',auth_version=1
                                    WHERE id=%s""", (self.admin_id,))
+                    cur.execute("INSERT INTO admin_menu_grants(user_id,permission_key) VALUES (%s,'regulatory') ON CONFLICT DO NOTHING", (self.admin_id,))
+                    cur.execute("UPDATE app_users SET auth_version=1 WHERE id=%s", (self.admin_id,))
                     cur.execute("""UPDATE regulatory_statuses
                                    SET color_hex=NULL,updated_at=clock_timestamp()
                                    WHERE stable_key='CAM_NHAP' RETURNING id,updated_at""")
@@ -492,6 +500,8 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
         with self.conn.cursor() as cur:
             cur.execute("""UPDATE app_users SET is_admin=true,account_status='ACTIVE',auth_version=1
                            WHERE id=%s""", (self.admin_id,))
+            cur.execute("INSERT INTO admin_menu_grants(user_id,permission_key) VALUES (%s,'regulatory') ON CONFLICT DO NOTHING", (self.admin_id,))
+            cur.execute("UPDATE app_users SET auth_version=1 WHERE id=%s", (self.admin_id,))
             cur.execute("SELECT id,updated_at FROM regulatory_statuses WHERE stable_key='CAM_NHAP'")
             status_id, revision = cur.fetchone()
         response = self._real_admin_client().post("/admin/regulatory/statuses", data={
@@ -865,6 +875,8 @@ class Phase6D1LegacyMigrationRehearsal(unittest.TestCase):
                                        (username,password_hash,is_admin,account_status,auth_version)
                                    VALUES ('pre027-admin','x',true,'ACTIVE',1) RETURNING id""")
                     pre027_admin_id = cur.fetchone()[0]
+                    cur.execute("UPDATE app_users SET is_super_admin=true WHERE id=%s", (pre027_admin_id,))
+                    cur.execute("UPDATE app_users SET auth_version=1 WHERE id=%s", (pre027_admin_id,))
                     cur.execute("SELECT updated_at FROM regulatory_statuses WHERE id=%s", (status_id,))
                     pre027_revision = cur.fetchone()[0]
                 conn.commit()

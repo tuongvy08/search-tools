@@ -8,11 +8,11 @@
   `.nav`/`<nav class="nav">` link list duplicated inline on every admin
   template (Phase 6A and earlier).
 
-  Visibility rule (unchanged from before Phase 6B1, still backend-enforced
+  Visibility rule (Phase 6D4, still backend-enforced
   independently by each route's own `_require_admin_page()`/blueprint
   guard -- this partial only controls what's SHOWN, never what's ALLOWED):
-  the "Quản trị" control only renders when `session.get('is_admin')` is
-  true. A staff/non-admin session never sees any `/admin/*` link here, and
+  the "Quản trị" control renders for an admin with at least one menu.
+  Each link uses the central endpoint permission registry. A staff/non-admin session never sees any `/admin/*` link here, and
   calling an admin URL directly still hits the real backend guard
   regardless of what this template renders.
 
@@ -90,7 +90,7 @@
         {% endif %}
       </div>
 
-      {% if session.get('is_admin') %}
+      {% if session.get('is_admin') and admin_has_menus %}
       <div class="sq-shell-admin" id="sqAdminWrap">
         {# Desktop-only trigger: hidden on mobile (see admin_nav.css) so the
            mobile hamburger panel below never shows a second, redundant
@@ -109,7 +109,7 @@
            once the hamburger itself is open. #}
         <span class="sq-shell-group-label sq-shell-admin-mobile-label">Quản trị</span>
         <div class="sq-shell-admin-menu" id="sqAdminMenu">
-          {% for endpoint, icon, label in _sq_admin_links %}
+          {% for endpoint, icon, label in _sq_admin_links if admin_can(endpoint) %}
             {% set _sq_link_path = url_for(endpoint) %}
             {% set _sq_link_active = request.path == _sq_link_path or (endpoint == 'admin_products' and request.path.startswith(_sq_link_path + '/')) %}
             <a class="sq-shell-link{{ ' is-active' if _sq_link_active else '' }}"
@@ -124,7 +124,7 @@
 
     <div class="sq-shell-user">
       <span class="sq-shell-username">{{ session.get('username') or 'Người dùng' }}</span>
-      <span class="sq-shell-role">{{ 'Admin' if session.get('is_admin') else 'Staff' }}</span>
+      <span class="sq-shell-role">{{ 'Super Admin' if admin_is_super else ('Admin' if session.get('is_admin') else 'Staff') }}</span>
       <form method="post" action="{{ url_for('session_security.logout') }}" class="sq-shell-logout">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit"><i class="fas fa-sign-out-alt" aria-hidden="true"></i> Đăng xuất</button>

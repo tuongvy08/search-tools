@@ -23,6 +23,8 @@ database rather than the app's actual dev database, and why this file
 never asserts anything about what's currently in `products_local`.
 """
 import os
+from pathlib import Path
+import admin_permissions
 import secrets
 import unittest
 from unittest import mock
@@ -160,6 +162,9 @@ class AccessControlTests(unittest.TestCase):
         patcher = mock.patch.object(session_security, "get_connection", _passthrough_session_connection)
         patcher.start()
         self.addCleanup(patcher.stop)
+        rbac_patch = mock.patch.object(admin_permissions, "current_permissions", lambda: {"is_super_admin": True, "keys": frozenset(admin_permissions.MENU_LABELS)})
+        rbac_patch.start()
+        self.addCleanup(rbac_patch.stop)
         # This class's own contract is "no real DB touched at all" (see
         # module docstring). middleware_access.py's before_request hook
         # would otherwise try to resolve the staff session's real team IP
@@ -226,6 +231,8 @@ class _RealPgTestBase(unittest.TestCase):
                     cur.execute(_MINIMAL_BASE_SCHEMA_SQL)
                     cur.execute(_MIGRATION_014_SQL)
                     cur.execute(_MIGRATION_006_SQL)
+                    cur.execute("ALTER TABLE app_users ADD COLUMN archived_at timestamptz")
+                    cur.execute(Path(__file__).resolve().parents[1].joinpath('sql/migration_030_admin_menu_permissions.sql').read_text())
         finally:
             conn.close()
 
@@ -281,9 +288,9 @@ class _RealPgTestBase(unittest.TestCase):
                     cur.execute(
                         """
                         INSERT INTO app_users
-                            (username, password_hash, is_admin, auth_provider, google_sub, email,
+                            (username, password_hash, is_admin, is_super_admin, auth_provider, google_sub, email,
                              display_name, account_status)
-                        VALUES (%(username)s, 'x', %(is_admin)s, %(auth_provider)s, %(google_sub)s,
+                        VALUES (%(username)s, 'x', %(is_admin)s, %(is_admin)s, %(auth_provider)s, %(google_sub)s,
                                 %(email)s, %(display_name)s, %(account_status)s)
                         RETURNING id
                         """,

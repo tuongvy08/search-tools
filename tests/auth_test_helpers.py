@@ -26,7 +26,9 @@ Whatever fake/real DB a given test wires up for `search.get_connection()`
 by this helper.
 """
 from unittest import mock
+from contextlib import contextmanager
 
+import admin_permissions
 import session_security
 import team_permissions
 
@@ -73,6 +75,11 @@ class _FakeAuthCursor:
             (user_id,) = params
             row = self.db.lookup(user_id)
             self._result = [row] if row is not None else []
+        elif s.startswith("SELECT id, account_status, auth_version, is_admin, is_super_admin"):
+            row = self.db.lookup(params[0])
+            self._result = [(params[0], row[0], row[1], True, True)] if row else []
+        elif s.startswith("SELECT permission_key FROM admin_menu_grants"):
+            self._result = []
         elif "SELECT 1 FROM teams WHERE id = %s AND lifecycle_status = 'ACTIVE'" in s:
             (team_id,) = params
             self._result = [(1,)] if team_id is not None else []
@@ -83,6 +90,9 @@ class _FakeAuthCursor:
             self._result = []
         else:
             raise AssertionError(f"Unexpected SQL against fake auth DB: {s}")
+
+    def fetchall(self):
+        return self._result
 
     def fetchone(self):
         return self._result[0] if self._result else None
@@ -132,9 +142,13 @@ def start_auth_db_patch(
     patcher = mock.patch.object(session_security, "get_connection", lambda: _FakeAuthConnection(db))
     patcher.start()
     testcase.addCleanup(patcher.stop)
+    rbac_patcher = mock.patch.object(admin_permissions, "get_connection", lambda: _FakeAuthConnection(db))
+    rbac_patcher.start()
+    testcase.addCleanup(rbac_patcher.stop)
     return db
 
 
+@contextmanager
 def auth_db_patch(
     *,
     user_id=1,
@@ -146,7 +160,9 @@ def auth_db_patch(
     """Context-manager form of `start_auth_db_patch`, for a single request /
     `with` block instead of a whole test method."""
     db = _build_db(user_id, auth_version, account_status, users, permissive)
-    return mock.patch.object(session_security, "get_connection", lambda: _FakeAuthConnection(db))
+    with mock.patch.object(session_security, "get_connection", lambda: _FakeAuthConnection(db)), \
+         mock.patch.object(admin_permissions, "get_connection", lambda: _FakeAuthConnection(db)):
+        yield db
 
 
 def set_authenticated_session(sess, *, user_id=1, auth_version=DEFAULT_AUTH_VERSION, **extra):

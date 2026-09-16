@@ -1,0 +1,140 @@
+/Volumes/DATA/Development/Search-tools/.venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+test_actor_revoked_while_waiting_for_domain_lock (test_admin_menu_permissions.AdminMenuPgTests) ... ok
+test_actor_row_lock_fences_revocation_until_write_commits (test_admin_menu_permissions.AdminMenuPgTests) ... ok
+test_admin_any_ip_and_staff_still_restricted (test_admin_menu_permissions.AdminMenuPgTests) ... [2026-09-16 15:59:58,738] WARNING in middleware_access: IP denied: 203.0.113.77 path=/
+ok
+test_all_direct_urls_and_apis_denied_local_google (test_admin_menu_permissions.AdminMenuPgTests) ... ok
+test_audit_actor_target_before_after_without_secrets (test_admin_menu_permissions.AdminMenuPgTests) ... ok
+test_concurrent_cross_demotion_leaves_one_active_super (test_admin_menu_permissions.AdminMenuPgTests) ... ok
+test_csrf_required_and_cannot_self_elevate (test_admin_menu_permissions.AdminMenuPgTests) ... ok
+test_delegated_can_manage_staff_both_providers (test_admin_menu_permissions.AdminMenuPgTests) ... ok
+test_delegated_user_admin_cannot_modify_admin_or_promote_staff (test_admin_menu_permissions.AdminMenuPgTests) ... ok
+test_last_super_admin_protected_with_secondary_admin_remaining (test_admin_menu_permissions.AdminMenuPgTests) ... ok
+test_last_super_archive_and_suspend_http_paths (test_admin_menu_permissions.AdminMenuPgTests) ... ok
+test_last_super_race_mixed_suspend_and_archive (test_admin_menu_permissions.AdminMenuPgTests) ... ok
+test_menu_renders_only_granted_links_shared_desktop_mobile (test_admin_menu_permissions.AdminMenuPgTests) ... ok
+test_migration_backfills_every_existing_admin_once (test_admin_menu_permissions.AdminMenuPgTests) ... ok
+test_migration_twice_preserves_downgrades_grants_and_staff (test_admin_menu_permissions.AdminMenuPgTests) ... ok
+test_real_psql_030_twice_preserves_business_data (test_admin_menu_permissions.AdminMenuPgTests) ... ok
+test_revoked_grant_cannot_reappear_on_staff_repromotion (test_admin_menu_permissions.AdminMenuPgTests) ... ok
+test_session_invalidated_immediately_local_google (test_admin_menu_permissions.AdminMenuPgTests) ... ok
+test_single_key_grants_only_its_endpoints (test_admin_menu_permissions.AdminMenuPgTests) ... ok
+test_super_admin_bypass_both_providers (test_admin_menu_permissions.AdminMenuPgTests) ... ok
+test_unknown_grant_rejected_atomically (test_admin_menu_permissions.AdminMenuPgTests) ... ok
+test_upload_size_limits_run_before_csrf_multipart_parsing (test_admin_menu_permissions.AdminMenuPgTests) ... ok
+test_users_page_protects_admin_forms_for_both_providers (test_admin_menu_permissions.AdminMenuPgTests) ... ok
+test_all_admin_routes_explicitly_mapped (test_admin_menu_permissions.RegistryTests) ... /Volumes/DATA/Development/Search-tools/.venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+ok
+test_mapping_applies_without_admin_path (test_admin_menu_permissions.RegistryTests) ... ok
+test_unmapped_admin_route_fails_closed_even_super (test_admin_menu_permissions.RegistryTests) ... ok
+test_archived_team_fails_closed_and_cannot_receive_new_members (test_admin_lifecycle_pg.AdminLifecyclePgTests) ... ok
+test_assignment_lock_race_cannot_leave_member_on_archived_team (test_admin_lifecycle_pg.AdminLifecyclePgTests) ... ok
+test_cannot_archive_self_and_last_admin_survives (test_admin_lifecycle_pg.AdminLifecyclePgTests) ... ok
+test_concurrent_cross_archive_keeps_one_active_admin (test_admin_lifecycle_pg.AdminLifecyclePgTests) ... ok
+test_local_archive_revokes_session_blocks_login_and_restores (test_admin_lifecycle_pg.AdminLifecyclePgTests) ... ok
+test_migration_is_idempotent_and_preserves_existing_rows (test_admin_lifecycle_pg.AdminLifecyclePgTests) ... ok
+test_preview_is_actor_bound_and_wrong_admin_cannot_burn_it (test_admin_lifecycle_pg.AdminLifecyclePgTests) ... ok
+test_preview_is_stale_when_membership_changes (test_admin_lifecycle_pg.AdminLifecyclePgTests) ... ok
+test_preview_token_consumption_is_atomic_across_connections (test_admin_lifecycle_pg.AdminLifecyclePgTests) ... ok
+test_team_archive_reassigns_atomically_preserves_grants_and_restore_is_nonmagical (test_admin_lifecycle_pg.AdminLifecyclePgTests) ... ok
+test_empty_team_sees_nothing_via_preflight (test_team_permissions_pg.CrossCuttingPermissionPgTests) ... ok
+test_export_direct_call_does_not_leak_across_teams (test_team_permissions_pg.CrossCuttingPermissionPgTests) ... ok
+test_export_direct_call_empty_team_sees_nothing (test_team_permissions_pg.CrossCuttingPermissionPgTests) ... ok
+test_ip_middleware_is_actually_active_not_bypassed (test_team_permissions_pg.CrossCuttingPermissionPgTests)
+Sanity check that this class is genuinely exercising the real IP ... ok
+test_local_and_google_same_team_get_equivalent_match_results (test_team_permissions_pg.CrossCuttingPermissionPgTests)
+Real HTTP to /api/quote-assistant/match (not preflight): LOCAL ... ok
+test_local_and_google_same_team_get_equivalent_preflight_results (test_team_permissions_pg.CrossCuttingPermissionPgTests) ... ok
+test_match_does_not_return_out_of_team_candidates (test_team_permissions_pg.CrossCuttingPermissionPgTests)
+Real HTTP to /api/quote-assistant/match: a team's own in-team ... ok
+test_match_empty_team_sees_no_candidates (test_team_permissions_pg.CrossCuttingPermissionPgTests) ... ok
+test_preflight_does_not_leak_across_teams (test_team_permissions_pg.CrossCuttingPermissionPgTests) ... ok
+test_team_brand_change_takes_effect_on_next_request_without_relogin (test_team_permissions_pg.CrossCuttingPermissionPgTests) ... ok
+test_team_ip_policy_change_takes_effect_on_next_request_without_relogin (test_team_permissions_pg.CrossCuttingPermissionPgTests)
+Same "no re-login needed" contract as the brand-change test ... [2026-09-16 16:00:08,923] WARNING in middleware_access: IP denied (ALLOWLIST_ONLY, no rules configured): path=/api/quote-assistant/preflight
+ok
+test_admin_google_users_get_connection_targets_test_db (test_team_permissions_pg.DbConnectionEntrypointPgTests) ... ok
+test_admin_teams_get_connection_targets_test_db (test_team_permissions_pg.DbConnectionEntrypointPgTests) ... ok
+test_db_module_get_connection_targets_test_db (test_team_permissions_pg.DbConnectionEntrypointPgTests) ... ok
+test_middleware_access_get_connection_targets_test_db (test_team_permissions_pg.DbConnectionEntrypointPgTests) ... ok
+test_real_middleware_request_actually_read_from_test_db_not_row_count (test_team_permissions_pg.DbConnectionEntrypointPgTests)
+Complements the above: drives one real HTTP request through the ... ok
+test_search_get_connection_targets_test_db (test_team_permissions_pg.DbConnectionEntrypointPgTests) ... ok
+test_session_security_get_connection_targets_test_db (test_team_permissions_pg.DbConnectionEntrypointPgTests) ... ok
+test_export_allows_in_team_product_and_returns_real_xlsx (test_team_permissions_pg.ExportWorkbookHttpTests)
+Positive control: proves the request genuinely reaches the ... ok
+test_export_denies_out_of_team_product (test_team_permissions_pg.ExportWorkbookHttpTests)
+The actual gap Fix2 left open: a real HTTP POST (not a direct ... ok
+test_export_denies_out_of_team_product_for_admin_of_different_team_scope (test_team_permissions_pg.ExportWorkbookHttpTests)
+Sanity: an admin (full brand scope) CAN export the same product ... ok
+test_old_session_rejected_on_next_request_after_update (test_team_permissions_pg.GoogleUpdatePgTests) ... ok
+test_staff_cannot_call_update_directly (test_team_permissions_pg.GoogleUpdatePgTests) ... ok
+test_update_admin_role_forces_team_id_null_ignoring_payload (test_team_permissions_pg.GoogleUpdatePgTests) ... ok
+test_update_cannot_change_auth_provider_or_google_sub_via_payload (test_team_permissions_pg.GoogleUpdatePgTests) ... ok
+test_update_changes_role_and_team_bumps_auth_version (test_team_permissions_pg.GoogleUpdatePgTests) ... ok
+test_update_rejects_invalid_role (test_team_permissions_pg.GoogleUpdatePgTests) ... ok
+test_update_rejects_non_active_targets (test_team_permissions_pg.GoogleUpdatePgTests) ... ok
+test_update_self_demote_blocked (test_team_permissions_pg.GoogleUpdatePgTests) ... ok
+test_update_staff_requires_existing_team (test_team_permissions_pg.GoogleUpdatePgTests) ... ok
+test_update_touches_old_and_new_team_updated_at (test_team_permissions_pg.GoogleUpdatePgTests) ... ok
+test_wrong_csrf_token_no_mutation (test_team_permissions_pg.GoogleUpdatePgTests) ... ok
+test_running_migration_016_twice_does_not_lose_or_duplicate_data (test_team_permissions_pg.Migration016IdempotencePgTests) ... ok
+test_expired_token_rejected_not_partially_applied (test_team_permissions_pg.MultiWorkerPreviewPgTests)
+A token whose `created_at` is already past the TTL must be ... ok
+test_preview_created_in_one_process_is_confirmed_in_another (test_team_permissions_pg.MultiWorkerPreviewPgTests) ... /Volumes/DATA/Development/Search-tools/.venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+ok
+test_preview_store_is_not_a_process_memory_dict (test_team_permissions_pg.MultiWorkerPreviewPgTests)
+Direct proof the old failure mode's root cause is gone: the ... ok
+test_used_token_cannot_be_replayed_for_partial_reapplication (test_team_permissions_pg.MultiWorkerPreviewPgTests) ... ok
+test_confirm_applies_previewed_brand_and_policy_diff (test_team_permissions_pg.PreviewConfirmPgTests) ... ok
+test_confirm_ignores_client_supplied_brand_and_policy_fields (test_team_permissions_pg.PreviewConfirmPgTests)
+Confirm must apply ONLY the server-stored preview record -- extra ... ok
+test_confirm_rejected_when_actor_no_longer_an_active_admin (test_team_permissions_pg.PreviewConfirmPgTests)
+Lighter proxy for "actor bị thu hồi" than the full lock-wait ... ok
+test_confirm_rejects_stale_after_direct_team_change (test_team_permissions_pg.PreviewConfirmPgTests) ... ok
+test_confirm_rejects_stale_after_membership_change (test_team_permissions_pg.PreviewConfirmPgTests)
+Fix2: a team's *membership* changing (a user moved into/out of ... ok
+test_confirm_rejects_unknown_or_reused_token (test_team_permissions_pg.PreviewConfirmPgTests) ... ok
+test_confirm_rejects_when_confirmed_by_a_different_admin (test_team_permissions_pg.PreviewConfirmPgTests) ... ok
+test_preview_does_not_write (test_team_permissions_pg.PreviewConfirmPgTests) ... ok
+test_staff_cannot_preview_or_confirm (test_team_permissions_pg.PreviewConfirmPgTests) ... ok
+test_two_competing_confirms_for_the_same_team_dont_both_win (test_team_permissions_pg.PreviewConfirmPgTests)
+REAL Postgres, two independent connections/threads: two previews ... ok
+test_wrong_admin_confirm_attempt_does_not_consume_the_real_owners_token (test_team_permissions_pg.PreviewConfirmPgTests)
+Phase 6A -- Local Release Gate finding: a rejected confirm from a ... ok
+test_create_team_allows_zero_brands (test_team_permissions_pg.TeamCrudPgTests) ... ok
+test_create_team_invalid_brand_rejects_whole_request (test_team_permissions_pg.TeamCrudPgTests)
+Fix2: a request naming ONE valid + ONE invalid/forged brand must ... ok
+test_create_team_invalid_ip_policy_rejected (test_team_permissions_pg.TeamCrudPgTests) ... ok
+test_create_team_missing_name_rejected (test_team_permissions_pg.TeamCrudPgTests) ... ok
+test_create_team_persists_name_and_brands (test_team_permissions_pg.TeamCrudPgTests) ... ok
+test_create_team_rejects_duplicate_name_no_partial_write (test_team_permissions_pg.TeamCrudPgTests) ... ok
+test_rename_nonexistent_team_rejected (test_team_permissions_pg.TeamCrudPgTests) ... ok
+test_rename_preserves_id_members_and_brands (test_team_permissions_pg.TeamCrudPgTests) ... ok
+test_rename_rejects_duplicate_name (test_team_permissions_pg.TeamCrudPgTests) ... ok
+test_staff_cannot_create_or_rename_team (test_team_permissions_pg.TeamCrudPgTests) ... ok
+test_clean_run_succeeds_and_temp_tables_are_gone_after_commit (test_migration_017_atomicity_pg.Migration017CleanRunAtomicityTests) ... ok
+test_idempotent_second_run_via_plain_psql_is_stable (test_migration_017_atomicity_pg.Migration017CleanRunAtomicityTests) ... ok
+test_production_shape_without_test_fixtures_preserves_real_id_collision (test_migration_017_atomicity_pg.Migration017CleanRunAtomicityTests)
+Production has no TEST1/TEST2 fixtures and id=1344915 is a real ... ok
+test_forced_failure_leaves_zero_partial_schema_or_data (test_migration_017_atomicity_pg.Migration017ForcedFailureAtomicityTests) ... ok
+test_017_then_018_chain_and_currency_resolver (test_migration_017_atomicity_pg.Migration017Then018ChainTests) ... ok
+test_actor_is_rechecked_after_waiting_for_products_lock (test_admin_products_pg.AdminProductsPgTests) ... ok
+test_admin_csrf_positive_and_negative_boundaries (test_admin_products_pg.AdminProductsPgTests) ... ok
+test_brand_delete_is_durable_one_time_audited_and_fully_restorable (test_admin_products_pg.AdminProductsPgTests) ... ok
+test_create_update_validation_canonical_identity_and_stale_revision (test_admin_products_pg.AdminProductsPgTests) ... ok
+test_invalid_concurrent_index_fails_closed_then_recovers_explicitly (test_admin_products_pg.AdminProductsPgTests) ... ok
+test_keyset_pagination_search_and_canonical_brand_filter (test_admin_products_pg.AdminProductsPgTests) ... ok
+test_migration_runs_via_production_style_psql_and_is_rerunnable (test_admin_products_pg.AdminProductsPgTests) ... ok
+test_restore_uses_stable_status_id_and_refuses_ambiguous_legacy_backup (test_admin_products_pg.AdminProductsPgTests) ... ok
+test_same_code_variants_allow_selected_edit_but_reject_identity_collision (test_admin_products_pg.AdminProductsPgTests) ... ok
+test_single_delete_expiry_and_restore_overlap_fail_closed (test_admin_products_pg.AdminProductsPgTests) ... ok
+test_stale_delete_preview_fails_without_partial_delete_or_backup (test_admin_products_pg.AdminProductsPgTests) ... ok
+
+----------------------------------------------------------------------
+Ran 110 tests in 19.982s
+
+OK

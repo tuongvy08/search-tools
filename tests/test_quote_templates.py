@@ -62,6 +62,11 @@ class FakeTemplateCursor:
     def execute(self, query, params=None):
         self.conn.queries.append((query, params or ()))
         q = " ".join(query.split())
+        if q.startswith("SELECT id, account_status, auth_version, is_admin, is_super_admin"):
+            self.row = (params[0], 'ACTIVE', 1, True, True)
+            return
+        if q.startswith("SELECT set_config('app.rbac_actor'"):
+            return
         if q.startswith("SELECT id, filename, content_sha256"):
             self.rows = [
                 (

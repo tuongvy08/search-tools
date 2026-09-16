@@ -71,6 +71,7 @@ Backward compatibility (pre-migration-017/018 databases):
 from __future__ import annotations
 
 from dataclasses import dataclass
+import admin_permissions
 from decimal import Decimal
 from typing import Callable, Optional
 import re
@@ -458,6 +459,7 @@ def apply_currency_rate_update(conn, currency_code: str, new_rate: Decimal, acto
         raise CurrencyRateError("Tỷ giá phải là số dương lớn hơn 0.")
 
     with conn.cursor() as cur:
+        admin_permissions.require_request_actor(cur, 'exchange_rates')
         cur.execute(
             "SELECT rate_vnd FROM currency_rates WHERE currency_code = %s FOR UPDATE",
             (code,),
@@ -500,6 +502,7 @@ def apply_currency_create(
         raise CurrencyRateError("Tỷ giá phải là số dương lớn hơn 0.")
 
     with conn.cursor() as cur:
+        admin_permissions.require_request_actor(cur, 'exchange_rates')
         cur.execute(
             """
             INSERT INTO currency_rates
@@ -556,6 +559,7 @@ def apply_brand_currency_update(conn, brand_id: int, new_currency_code: str, act
     code = normalize_currency_code(new_currency_code)
 
     with conn.cursor() as cur:
+        admin_permissions.require_request_actor(cur, 'exchange_rates')
         cur.execute("SELECT 1 FROM currency_rates WHERE currency_code = %s", (code,))
         if cur.fetchone() is None:
             raise CurrencyRateError(f"Currency '{code}' chưa tồn tại trong Currency Master.")

@@ -172,14 +172,14 @@ class BrandPickerRenderTests(unittest.TestCase):
                         )
                     cur.execute(
                         "INSERT INTO app_users "
-                        "(username, password_hash, team_id, is_admin, account_status, auth_version, auth_provider) "
-                        "VALUES ('admin1', 'x', NULL, TRUE, 'ACTIVE', 1, 'LOCAL') RETURNING id"
+                        "(username, password_hash, team_id, is_admin, is_super_admin, account_status, auth_version, auth_provider) "
+                        "VALUES ('admin1', 'x', NULL, TRUE, TRUE, 'ACTIVE', 1, 'LOCAL') RETURNING id"
                     )
                     (self.admin_id,) = cur.fetchone()
                     cur.execute(
                         "INSERT INTO app_users "
-                        "(username, password_hash, team_id, is_admin, account_status, auth_version, auth_provider) "
-                        "VALUES ('staff1', 'x', %s, FALSE, 'ACTIVE', 1, 'LOCAL') RETURNING id",
+                        "(username, password_hash, team_id, is_admin, is_super_admin, account_status, auth_version, auth_provider) "
+                        "VALUES ('staff1', 'x', %s, FALSE, FALSE, 'ACTIVE', 1, 'LOCAL') RETURNING id",
                         (self.team_id,),
                     )
                     (self.staff_id,) = cur.fetchone()

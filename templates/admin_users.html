@@ -54,7 +54,7 @@
   <h1 style="margin-top:0;">Quản lý Users</h1>
   <p class="muted">
     Brand hiển thị cho từng user (LOCAL và Google) là brand được gán cho team của họ
-    (xem/chỉnh ở <a href="/admin/teams">trang Team</a>). Trang này chỉ chọn team cho user,
+    (xem/chỉnh ở {% if admin_can('admin_teams.index') %}<a href="/admin/teams">trang Team</a>{% else %}trang Team{% endif %}). Trang này chỉ chọn team cho user,
     không chỉnh brand trực tiếp nữa. Admin nhìn thấy toàn bộ (không cần team).
   </p>
 
@@ -98,19 +98,21 @@
             <td>{{ gu.email or '—' }}</td>
             <td>{{ gu.display_name or '—' }}</td>
             <td>GOOGLE</td>
-            <td>{{ 'Admin' if gu.role == 'admin' else 'Staff' }}</td>
+            <td>{{ 'Super Admin' if (admin_user_roles|default({})).get(gu.id, {}).get('is_super_admin') else ('Admin' if gu.role == 'admin' else 'Staff') }}</td>
             <td>{{ gu.team_name or ('—' if gu.role == 'admin' else 'Chưa gán') }}</td>
             <td>{{ gu.account_status }}</td>
             <td>{{ gu.approved_at or '—' }}</td>
             <td>{{ gu.last_login_at or '—' }}</td>
             <td style="min-width: 220px;">
-              {% if gu.account_status == 'PENDING' %}
+              {% if not admin_is_super and gu.role == 'admin' %}
+                <span class="muted">Chỉ Super Admin được quản lý tài khoản này.</span>
+              {% elif gu.account_status == 'PENDING' %}
                 <form method="post" action="{{ url_for('admin_google_users.approve') }}" class="gu-inline-form">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <input type="hidden" name="user_id" value="{{ gu.id }}">
                   <select name="role" class="gu-approve-role" required>
                     <option value="staff" selected>Staff</option>
-                    <option value="admin">Admin</option>
+                    {% if admin_is_super %}<option value="admin">Admin</option>{% endif %}
                   </select>
                   <select name="team_id" class="gu-approve-team">
                     <option value="">-- Chọn team --</option>
@@ -126,7 +128,7 @@
                   <input type="hidden" name="user_id" value="{{ gu.id }}">
                   <select name="role" class="gu-approve-role" required>
                     <option value="staff" {{ 'selected' if gu.role != 'admin' else '' }}>Staff</option>
-                    <option value="admin" {{ 'selected' if gu.role == 'admin' else '' }}>Admin</option>
+                    {% if admin_is_super %}<option value="admin" {{ 'selected' if gu.role == 'admin' else '' }}>Admin</option>{% endif %}
                   </select>
                   <select name="team_id" class="gu-approve-team">
                     <option value="">-- Chọn team --</option>
@@ -208,7 +210,7 @@
             <label>Role</label>
             <select name="role" class="cu-role">
               <option value="user" selected>User thường</option>
-              <option value="admin">Admin</option>
+              {% if admin_is_super %}<option value="admin">Admin</option>{% endif %}
             </select>
           </div>
           <div class="field">
@@ -241,9 +243,9 @@
     <div class="card">
       <h2 style="margin-top:0;">Lưu ý vận hành</h2>
       <ul class="muted" style="padding-left:18px; margin:10px 0;">
-        <li>Nếu đổi role sang admin: user sẽ xem toàn bộ.</li>
+        <li>Chỉ Super Admin được đổi vai trò quản trị. Admin mới cần được cấp quyền menu bên dưới.</li>
         <li>Nếu đổi role sang user thường: cần chọn 1 team đã tồn tại.</li>
-        <li>Brand mà user thấy được là brand đã gán cho team đó -- chỉnh ở <a href="/admin/teams">trang Team</a>, không chỉnh ở đây.</li>
+        <li>Brand mà user thấy được là brand đã gán cho team đó -- chỉnh ở {% if admin_can('admin_teams.index') %}<a href="/admin/teams">trang Team</a>{% else %}trang Team{% endif %}, không chỉnh ở đây.</li>
       </ul>
       <div class="small" style="margin-top:12px;">
         Username đăng nhập mới có thể dùng luôn ở trang <code>/login</code>.
@@ -276,7 +278,7 @@
           <tr>
             <td>{{ u.id }}</td>
             <td><code>{{ u.username }}</code></td>
-            <td>{{ 'Admin' if u.is_admin else 'User' }}</td>
+            <td>{{ 'Super Admin' if (admin_user_roles|default({})).get(u.id, {}).get('is_super_admin') else ('Admin' if u.is_admin else 'Staff') }}</td>
             <td>{{ 'Có' if u.ip_bypass_allowlist else 'Không' }}</td>
             <td style="min-width: 220px;">
               {% if u.is_admin %}
@@ -289,12 +291,14 @@
                     (<code>{{ u.inherited_brands[:6]|join(', ') }}{% if u.inherited_brands|length > 6 %}, ...{% endif %}</code>)
                   {% endif %}
                 </div>
-                <div class="small muted" style="margin-top:4px;">Chỉnh brand ở <a href="/admin/teams">trang Team</a>.</div>
+                <div class="small muted" style="margin-top:4px;">Chỉnh brand ở {% if admin_can('admin_teams.index') %}<a href="/admin/teams">trang Team</a>{% else %}trang Team{% endif %}.</div>
               {% endif %}
             </td>
             <td>{{ 'Đã lưu trữ' if u.archived_at else 'Đang hoạt động' }}</td>
             <td style="min-width: 320px;">
-              {% if not u.archived_at %}
+              {% if not admin_is_super and u.is_admin %}
+              <span class="muted">Chỉ Super Admin được quản lý tài khoản này.</span>
+              {% elif not u.archived_at %}
               <form id="form_update_{{ u.id }}" method="post" action="/admin/users">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                 <input type="hidden" name="action" value="update_user" />
@@ -304,7 +308,7 @@
                   <label>Role</label>
                   <select name="role" class="uu-role">
                     <option value="user" {{ 'selected' if not u.is_admin else '' }}>User</option>
-                    <option value="admin" {{ 'selected' if u.is_admin else '' }}>Admin</option>
+                    {% if admin_is_super %}<option value="admin" {{ 'selected' if u.is_admin else '' }}>Admin</option>{% endif %}
                   </select>
                 </div>
 
@@ -358,6 +362,36 @@
     </table>
     </div>
   </div>
+
+  {% if admin_is_super %}
+  <section class="card" id="adminAccessPanel">
+    <h2>Quyền menu quản trị</h2>
+    <p class="muted">Super Admin có toàn bộ quyền. Admin chỉ được mở và thao tác các menu đã chọn. Lưu thay đổi sẽ đăng xuất mọi phiên cũ của tài khoản đó.</p>
+    {% for uid, account in admin_user_roles.items() if account.is_admin and account.account_status == 'ACTIVE' %}
+    <details class="card">
+      <summary>{{ account.username }} · {{ account.auth_provider }} · {{ 'Super Admin' if account.is_super_admin else 'Admin' }}</summary>
+      <form method="post" action="{{ url_for('admin_rbac_update') }}" class="admin-access-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="user_id" value="{{ uid }}">
+        <label>Cấp quản trị
+          <select name="admin_level">
+            <option value="admin" {{ 'selected' if not account.is_super_admin else '' }}>Admin</option>
+            <option value="super_admin" {{ 'selected' if account.is_super_admin else '' }}>Super Admin</option>
+          </select>
+        </label>
+        <fieldset><legend>Menu dành cho Admin</legend>
+          {% for key, label in admin_menu_labels.items() %}
+          <label style="display:inline-flex;align-items:center;gap:6px;margin:6px 12px 6px 0;">
+            <input type="checkbox" name="admin_menus" value="{{ key }}" {{ 'checked' if key in account.grants else '' }}> {{ label }}
+          </label>
+          {% endfor %}
+        </fieldset>
+        <button class="primary" type="submit">Lưu quyền quản trị</button>
+      </form>
+    </details>
+    {% endfor %}
+  </section>
+  {% endif %}
 
   <script src="{{ url_for('static', filename='admin_ux.js', v='20260909c4') }}"></script>
   <script>

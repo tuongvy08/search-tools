@@ -60,6 +60,7 @@
     <h2>Thêm CIDR / IP WAN thủ công</h2>
     <p>Nhập <b>IP công khai</b> của văn phòng (xem trên modem, hoặc từ site kiểm tra IP khi đang ở văn phòng). Ví dụ: <code>203.0.113.0/24</code> nếu ISP gán cả dải, hoặc một WAN cụ thể <code>203.0.113.88/32</code>.</p>
     <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="row">
         <label>CIDR <input name="cidr" type="text" placeholder="x.x.x.x/24" required /></label>
         <label>Ghi chú <input name="label" type="text" placeholder="VP chính" /></label>
@@ -72,6 +73,7 @@
     <h2>Ghi nhanh IP WAN hiện tại (sau khi modem đổi IP)</h2>
     <p>Đăng nhập admin, <b>đang dùng mạng văn phòng</b> (Wi‑Fi/LAN, không dùng 4G), mở trang này — số ở mục “IP máy chủ đang thấy” chính là IP WAN chung của văn phòng. Bấm nút để thêm rule <code>…/32</code> (IPv4) hoặc <code>…/128</code> (IPv6). Sau khi ISP cấp IP mới, lặp lại thao tác này (có thể xóa rule cũ trong bảng).</p>
     <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="add_my_ip" value="1" />
       <label>Nhãn (VD VP HN / VP HCM) <input name="my_ip_label" type="text" placeholder="VP HN — sau reset modem 4/2026" /></label>
       <button type="submit">Thêm IP WAN đang dùng (theo phiên hiện tại)</button>
@@ -93,6 +95,7 @@
         <td>{{ r.created_at }}</td>
         <td>
           <form method="post" style="display:inline" onsubmit="return confirm('Xóa rule này?');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="delete_id" value="{{ r.id }}" />
             <button type="submit">Xóa</button>
           </form>

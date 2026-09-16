@@ -62,6 +62,7 @@ class AdminBrandComplianceTests(unittest.TestCase):
             # its own admin-only route guard, not team-scoped brand
             # visibility.
             with cls.conn.cursor() as cur:
+                cur.execute("INSERT INTO app_users(id,username,password_hash,is_admin,is_super_admin) VALUES(1,'brand-admin','x',true,true)")
                 cur.execute(
                     "INSERT INTO teams (name, ip_policy) VALUES ('Brand Compliance Test Team', 'INHERIT') RETURNING id"
                 )

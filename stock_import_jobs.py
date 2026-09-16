@@ -6,6 +6,7 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 import hashlib
 import json
+import admin_permissions
 import os
 from pathlib import Path
 import threading
@@ -104,6 +105,7 @@ def submit(file, actor, user_id, auth_version, submission_key):
         try:
             with conn, conn.cursor() as cur:
                 acquire_stock_lock(cur)
+                admin_permissions.require_job_actor(cur, user_id, auth_version, 'stock')
                 cur.execute(
                     "SELECT id FROM stock_import_jobs WHERE actor_user_id=%s AND submission_key=%s",
                     (user_id, submission_key),
@@ -146,6 +148,7 @@ def control(job_id, action, actor, fingerprint="", confirm_replace=""):
     with connection() as conn, conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute("SELECT * FROM stock_import_jobs WHERE id=%s FOR UPDATE", (str(job_id),))
         job = cur.fetchone()
+        admin_permissions.require_job_request_actor(cur, 'stock')
         if not job:
             raise ImportProblem("Không tìm thấy tác vụ tồn kho.")
         if action == "cancel":
@@ -394,13 +397,7 @@ def _apply(cur, rows, expected, job):
     plan = build_plan(cur, rows)
     if plan["plan_digest"] != expected.get("plan_digest"):
         raise ImportProblem("Nội dung hoặc kế hoạch áp dụng không còn giống bản xem trước.")
-    cur.execute(
-        """SELECT 1 FROM app_users WHERE id=%s AND is_admin AND account_status='ACTIVE'
-           AND auth_version=%s FOR UPDATE""",
-        (job["actor_user_id"], job["actor_auth_version"]),
-    )
-    if not cur.fetchone():
-        raise ImportProblem("Quyền quản trị hoặc phiên đăng nhập đã thay đổi; không áp dụng tồn kho.")
+    admin_permissions.require_job_actor(cur, job['actor_user_id'], job['actor_auth_version'], 'stock')
     prepared, new_brands = _prepare_rows(cur, rows, register=True)
     if sorted(new_brands, key=str.casefold) != sorted(plan["new_brands"], key=str.casefold):
         raise ImportProblem("Danh mục brand đã đổi từ lúc xem trước. Hãy xem trước lại.")
@@ -452,13 +449,7 @@ def restore_snapshot(snapshot_id, actor, actor_user_id, actor_auth_version, expe
         raise ImportProblem("Phiên giao diện đã cũ; hãy làm mới trang rồi thử lại.")
     with connection() as conn, conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
         acquire_stock_lock(cur)
-        cur.execute(
-            """SELECT 1 FROM app_users WHERE id=%s AND is_admin AND account_status='ACTIVE'
-               AND auth_version=%s FOR UPDATE""",
-            (actor_user_id, actor_auth_version),
-        )
-        if not cur.fetchone():
-            raise ImportProblem("Quyền quản trị hoặc phiên đăng nhập đã thay đổi; không khôi phục snapshot.")
+        admin_permissions.require_job_actor(cur, actor_user_id, actor_auth_version, 'stock')
         state = active_snapshot(cur, for_update=True)
         if expected_revision is not None:
             try:
@@ -618,6 +609,7 @@ def run_once(only_id=None):
                     raise ImportProblem("Tác vụ đã bị hủy; snapshot hiện tại được giữ nguyên.")
                 if live_job["phase"] == "preview":
                     with conn.cursor() as cur:
+                        admin_permissions.require_job_actor(cur, live_job['actor_user_id'], live_job['actor_auth_version'], 'stock')
                         plan = build_plan(cur, rows)
                         public_plan = {key: value for key, value in plan.items() if not key.startswith("_")}
                         # Stop the monitor before taking the final job-row lock;

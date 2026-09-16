@@ -116,8 +116,8 @@ class AdminCurrencyRatesIntegrationTests(unittest.TestCase):
                 cur.execute("SELECT id FROM brand_master WHERE name = 'A2S'")
                 cls.a2s_id = cur.fetchone()[0]
                 cur.execute(
-                    "INSERT INTO app_users (username, password_hash, is_admin) "
-                    "VALUES ('admin_exchange_rates_test_user', 'x', TRUE) RETURNING id"
+                    "INSERT INTO app_users (username, password_hash, is_admin, is_super_admin) "
+                    "VALUES ('admin_exchange_rates_test_user', 'x', TRUE, TRUE) RETURNING id"
                 )
                 cls.admin_user_id = cur.fetchone()[0]
         except Exception:

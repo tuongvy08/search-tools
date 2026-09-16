@@ -96,7 +96,7 @@ class NavShellStaticTests(unittest.TestCase):
         panel_start = NAV_HTML.index('id="sqAdminMenu"')
         panel_end = NAV_HTML.index("</div>", panel_start)
         panel = NAV_HTML[panel_start:panel_end]
-        self.assertIn("{% for endpoint, icon, label in _sq_admin_links %}", panel)
+        self.assertIn("{% for endpoint, icon, label in _sq_admin_links if admin_can(endpoint) %}", panel)
         self.assertIn("url_for(endpoint)", panel)
 
     def test_admin_group_still_gated_on_is_admin_session_flag(self):

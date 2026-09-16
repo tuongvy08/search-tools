@@ -35,6 +35,7 @@ import admin_login_history
 import admin_teams
 import auth_google
 import session_security
+import admin_permissions
 import team_permissions
 from stock import fetch_stock_options, normalized_text as stock_normalized_text, options_for_product
 from compliance_resolver import compliance_css_type, resolve_compliance_precedence
@@ -115,6 +116,8 @@ auth_google.init_app(app)
 # confirmed the session's account is still ACTIVE and auth_version still
 # matches (or rejected/cleared it). See middleware_access.py's docstring.
 session_security.init_app(app)
+admin_permissions.init_app(app)
+admin_permissions.register_routes(app)
 team_permissions.init_app(app)
 
 base_path = os.environ.get("ACCESS_CONTROL_BASE_PATH", "/home/deploy/myapps")
@@ -2710,8 +2713,9 @@ def _insert_quote_template(conn, *, filename: str, raw: bytes, mapping: dict, ac
     digest = hashlib.sha256(raw).hexdigest()
     with conn:
         with conn.cursor() as cur:
+            cur.execute("SELECT pg_advisory_xact_lock(%s)", (QUOTE_TEMPLATE_ACTIVE_LOCK_ID,))
+            admin_permissions.require_request_actor(cur, 'quote_templates')
             if activate:
-                cur.execute("SELECT pg_advisory_xact_lock(%s)", (QUOTE_TEMPLATE_ACTIVE_LOCK_ID,))
                 cur.execute("UPDATE quote_templates SET is_active = FALSE WHERE is_active = TRUE AND archived_at IS NULL")
             cur.execute(
                 """
@@ -2744,6 +2748,7 @@ def _activate_quote_template(conn, template_id: int) -> dict:
     with conn:
         with conn.cursor() as cur:
             cur.execute("SELECT pg_advisory_xact_lock(%s)", (QUOTE_TEMPLATE_ACTIVE_LOCK_ID,))
+            admin_permissions.require_request_actor(cur, 'quote_templates')
             cur.execute(
                 """
                 SELECT id
@@ -2866,6 +2871,7 @@ def _list_quote_template_assignments(conn) -> tuple[list[dict], list[dict]]:
 def _assign_quote_template(conn, team_id: int, template_id) -> None:
     with conn:
         with conn.cursor() as cur:
+            admin_permissions.require_request_actor(cur, 'quote_templates')
             cur.execute("SELECT id FROM teams WHERE id=%s AND lifecycle_status='ACTIVE' FOR UPDATE", (team_id,))
             if cur.fetchone() is None:
                 raise QuoteTemplateError("Team không tồn tại hoặc không hoạt động.")
@@ -2888,6 +2894,7 @@ def _archive_quote_template(conn, template_id: int) -> dict:
     """Archive one unused template while serializing activate/assign races."""
     with conn:
         with conn.cursor() as cur:
+            admin_permissions.require_request_actor(cur, 'quote_templates')
             cur.execute(
                 """
                 SELECT is_active, archived_at
@@ -3265,6 +3272,7 @@ def admin_imports_preview():
     with import_jobs.connection() as preview_conn, preview_conn, preview_conn.cursor() as preview_cur:
         preview_cur.execute("DELETE FROM admin_rule_import_previews WHERE expires_at<now()")
         preview_cur.execute("SELECT pg_advisory_xact_lock(62402402)")
+        admin_permissions.require_request_actor(preview_cur, 'imports')
         preview_cur.execute("SELECT count(*) FROM admin_rule_import_previews")
         if preview_cur.fetchone()[0] >= 100:
             return redirect(url_for("admin_import_tools", err="Hàng đợi quy tắc đã đầy. Thử lại sau 30 phút."))
@@ -3285,6 +3293,7 @@ def admin_imports_apply():
     token = request.form.get("preview_token")
     try:
         with import_jobs.connection() as preview_conn, preview_conn, preview_conn.cursor() as preview_cur:
+            admin_permissions.require_request_actor(preview_cur, 'imports')
             preview_cur.execute("DELETE FROM admin_rule_import_previews WHERE token=%s::uuid AND actor=%s AND expires_at>now() RETURNING payload", (token,_current_actor()))
             found = preview_cur.fetchone()
             data = found[0] if found else None
@@ -3309,6 +3318,7 @@ def admin_imports_apply():
         with conn:
             with conn.cursor() as cur:
                 acquire_products_import_lock(cur)
+                admin_permissions.require_request_actor(cur, 'imports')
                 ambiguous_count = 0
                 created_brands = []
                 parsed = []
@@ -3675,6 +3685,7 @@ def admin_imports_quick_product():
                 # apply + quick-product delete) so concurrent single-row edits can
                 # never race a bulk import's candidate scan/mutation.
                 acquire_products_import_lock(cur)
+                admin_permissions.require_request_actor(cur, 'imports')
                 action, label, created_brands = _upsert_single_product(cur, request.values)
                 inserted = 1 if action == "inserted" else 0
                 updated = 1 if action == "updated" else 0
@@ -3779,6 +3790,7 @@ def admin_imports_quick_product_delete():
                 # Same lock as bulk apply / quick-upsert -- a single quick-delete
                 # must never race a concurrent bulk import's scan/mutation.
                 acquire_products_import_lock(cur)
+                admin_permissions.require_request_actor(cur, 'imports')
                 label, deleted = _delete_single_product(cur, request.values)
                 _insert_import_job(
                     cur,
@@ -4228,6 +4240,8 @@ def admin_network():
     if request.method == "POST":
         conn = get_connection()
         try:
+            with conn.cursor() as auth_cur:
+                admin_permissions.require_request_actor(auth_cur, 'network')
             if request.form.get("add_my_ip"):
                 ip_s = _client_ip_from_request()
                 cidr = _host_cidr(ip_s)
@@ -4628,6 +4642,7 @@ def admin_users():
 
     return render_template(
         "admin_users.html",
+        admin_user_roles=admin_permissions.fetch_user_roles(),
         users=users,
         distinct_brands=distinct_brands,
         teams=google_teams,  # [{"id":.., "name":..}], same query shape needed by the LOCAL team-select
@@ -4711,6 +4726,8 @@ def admin_brand_compliance():
         action = _norm(request.form.get("action")).lower()
         conn = get_connection()
         try:
+            with conn.cursor() as auth_cur:
+                admin_permissions.require_request_actor(auth_cur, 'manual_priority')
             if action not in {"enable", "disable"}:
                 err = "Thao tác không hợp lệ."
             elif not brand_norm:
@@ -6364,6 +6381,8 @@ admin_import_center.register(app, _require_admin_page, _current_actor)
 admin_regulatory.register(app, _require_admin_page, _current_actor)
 admin_stock.register(app, _require_admin_page, _current_actor)
 admin_products.register(app, _require_admin_page, _current_actor)
+# Upload-size hooks must run before centralized CSRF parses multipart bodies.
+app.before_request(admin_permissions.enforce_admin_csrf)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5001"))

@@ -109,6 +109,12 @@ class AdminProductsPgTests(unittest.TestCase):
         search.app.testing = True
         self.client = self._client(self.admin_id, True)
 
+        with self.conn.cursor() as cur:
+            cur.execute("INSERT INTO admin_menu_grants(user_id,permission_key) VALUES (%s,%s) ON CONFLICT DO NOTHING", (self.admin_id, 'products'))
+            cur.execute("INSERT INTO admin_menu_grants(user_id,permission_key) VALUES (%s,'imports') ON CONFLICT DO NOTHING", (self.admin_id,))
+            cur.execute("UPDATE app_users SET auth_version=1 WHERE id=%s", (self.admin_id,))
+
+
     @staticmethod
     def _session(client, user_id, is_admin, auth_version=1, team_id=None):
         with client.session_transaction() as sess:

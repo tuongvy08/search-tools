@@ -4,6 +4,10 @@ let displayedProducts = [];
 const selectedProductKeys = new Set();
 const productSelectionKeys = new WeakMap();
 let nextProductSelectionKey = 0;
+let licenseBatchRows = [];
+let licenseVisibleRows = [];
+const selectedLicenseRowKeys = new Set();
+const LICENSE_EMPTY_STATUS = '__EMPTY_STATUS__';
 
 const EXPORT_COLUMNS = [
     { key: 'Name', label: 'Name' },
@@ -195,6 +199,347 @@ async function copySelectedRows() {
     document.execCommand('copy');
     document.body.removeChild(ta);
     done();
+}
+
+function licenseStatus(row) {
+    return String(row.Compliance_Status || '').trim();
+}
+
+function normalizeLicenseFilterText(value) {
+    return String(value ?? '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[đĐ]/g, 'd')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLocaleLowerCase('vi');
+}
+
+function licenseRowKey(row, index) {
+    // The input order is the row identity: duplicate CAS values remain
+    // independently selectable and copyable.
+    return row.__licenseRowKey || `license-${index}`;
+}
+
+function resetLicenseBatchState() {
+    licenseBatchRows = [];
+    licenseVisibleRows = [];
+    selectedLicenseRowKeys.clear();
+    const container = document.getElementById('licenseWarnings');
+    if (container) {
+        container.replaceChildren();
+        container.style.display = 'none';
+    }
+}
+
+function licenseCopyColumns() {
+    const columns = [];
+    if (TeamPermissions.field('Cas')) columns.push({ key: 'Cas', label: 'CAS', value: (row) => row.Cas || '' });
+    columns.push({ key: 'Compliance', label: 'Tình trạng quản lý', value: licenseStatus });
+    if (TeamPermissions.field('Compliance_Note')) {
+        columns.push({ key: 'Compliance_Note', label: 'Ghi chú quản lý', value: (row) => row.Compliance_Note || '' });
+    }
+    return columns;
+}
+
+function licenseTsvCell(value) {
+    let cell = String(value ?? '');
+    // Keep tabs/newlines inside the cell using TSV-compatible quoting, while
+    // retaining spreadsheet formula-injection protection.
+    if (/^[=+\-@]/.test(cell.trimStart())) cell = `'${cell}`;
+    if (/["\t\r\n]/.test(cell)) return `"${cell.replace(/"/g, '""')}"`;
+    return cell;
+}
+
+function licenseSelectedRows() {
+    return licenseBatchRows.filter((row, index) => selectedLicenseRowKeys.has(licenseRowKey(row, index)));
+}
+
+function filterLicenseRows(rows, selectedStatuses, noteQuery) {
+    const statuses = selectedStatuses instanceof Set ? selectedStatuses : new Set(selectedStatuses || []);
+    const normalizedNoteQuery = normalizeLicenseFilterText(noteQuery);
+    return rows.filter((row) => {
+        const status = licenseStatus(row);
+        const statusMatches = statuses.size === 0 || statuses.has(status || LICENSE_EMPTY_STATUS);
+        const noteMatches = !normalizedNoteQuery || normalizeLicenseFilterText(row.Compliance_Note || '').includes(normalizedNoteQuery);
+        return statusMatches && noteMatches;
+    });
+}
+
+function licenseTsv(rows) {
+    const columns = licenseCopyColumns();
+    return [
+        columns.map((column) => licenseTsvCell(column.label)).join('\t'),
+        ...rows.map((row) => columns.map((column) => licenseTsvCell(column.value(row))).join('\t')),
+    ].join('\r\n');
+}
+
+function copyTextWithFallback(text) {
+    const fallback = () => new Promise((resolve, reject) => {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        let copied = false;
+        try { copied = document.execCommand('copy'); } catch (_) { copied = false; }
+        textarea.remove();
+        if (copied) resolve();
+        else reject(new Error('Không thể sao chép vào clipboard. Hãy thử lại hoặc dùng trình duyệt hỗ trợ Clipboard.'));
+    });
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        return navigator.clipboard.writeText(text).catch(() => fallback());
+    }
+    return fallback();
+}
+
+function updateLicenseSelectionUI() {
+    const summary = document.getElementById('licenseBatchCount');
+    if (summary) {
+        summary.textContent = `Đang hiển thị ${licenseVisibleRows.length}/${licenseBatchRows.length} · đã chọn ${selectedLicenseRowKeys.size}`;
+    }
+    const copyButton = document.getElementById('licenseCopySelected');
+    // Keep the action available so an empty selection produces a clear,
+    // accessible message instead of a silent disabled control.
+    if (copyButton) copyButton.disabled = false;
+
+    const selectAll = document.getElementById('licenseSelectAllRows');
+    if (!selectAll) return;
+    const visibleKeys = licenseVisibleRows.map((row) => licenseRowKey(row, licenseBatchRows.indexOf(row)));
+    const selectedVisible = visibleKeys.filter((key) => selectedLicenseRowKeys.has(key)).length;
+    selectAll.disabled = visibleKeys.length === 0;
+    selectAll.checked = visibleKeys.length > 0 && selectedVisible === visibleKeys.length;
+    selectAll.indeterminate = selectedVisible > 0 && selectedVisible < visibleKeys.length;
+    selectAll.setAttribute('aria-label', selectAll.indeterminate ? 'Một phần dòng đang hiển thị đã chọn' : 'Chọn tất cả dòng đang hiển thị');
+}
+
+function createLicenseCell(rowElement, text, className) {
+    const cell = rowElement.insertCell(-1);
+    if (className) cell.className = className;
+    cell.textContent = text || '';
+    return cell;
+}
+
+function createLicenseHeaderCell(rowElement, text, className) {
+    const cell = document.createElement('th');
+    cell.scope = 'col';
+    cell.setAttribute('scope', 'col');
+    if (className) cell.className = className;
+    cell.textContent = text || '';
+    rowElement.appendChild(cell);
+    return cell;
+}
+
+function renderLicenseTable() {
+    const container = document.getElementById('licenseWarnings');
+    if (!container) return;
+    const canCopyLicense = TeamPermissions.can('COPY');
+    if (!canCopyLicense) selectedLicenseRowKeys.clear();
+    container.replaceChildren();
+
+    const warningCount = licenseBatchRows.filter((row) => licenseStatus(row)).length;
+    const summary = document.createElement('div');
+    summary.className = 'hint license-batch-summary';
+    summary.textContent = `Cảnh báo: ${warningCount}/${licenseBatchRows.length}`;
+    container.appendChild(summary);
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'license-toolbar';
+    toolbar.setAttribute('aria-label', 'Bộ lọc và thao tác kết quả Check license');
+
+    const statusField = document.createElement('fieldset');
+    statusField.className = 'license-filter-group';
+    const statusLegend = document.createElement('legend');
+    statusLegend.textContent = 'Tình trạng quản lý';
+    statusField.appendChild(statusLegend);
+    const statusValues = Array.from(new Set(licenseBatchRows.map(licenseStatus).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'vi'));
+    const statusOptions = [];
+    if (licenseBatchRows.some((row) => !licenseStatus(row))) {
+        statusOptions.push({ value: LICENSE_EMPTY_STATUS, label: 'Không có tình trạng' });
+    }
+    statusOptions.push(...statusValues.map((value) => ({ value, label: value })));
+    const statusOptionsWrap = document.createElement('div');
+    statusOptionsWrap.className = 'license-status-options';
+    statusOptions.forEach((option, optionIndex) => {
+        const label = document.createElement('label');
+        label.className = 'license-check-option';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = option.value;
+        checkbox.name = 'license_status';
+        checkbox.id = `license-status-${optionIndex}`;
+        checkbox.addEventListener('change', applyLicenseFilters);
+        label.appendChild(checkbox);
+        const text = document.createElement('span');
+        text.textContent = option.label;
+        label.appendChild(text);
+        statusOptionsWrap.appendChild(label);
+    });
+    statusField.appendChild(statusOptionsWrap);
+    toolbar.appendChild(statusField);
+
+    if (TeamPermissions.field('Compliance_Note')) {
+        const noteLabel = document.createElement('label');
+        noteLabel.className = 'license-note-filter';
+        noteLabel.htmlFor = 'licenseNoteFilter';
+        noteLabel.textContent = 'Lọc ghi chú quản lý';
+        const noteInput = document.createElement('input');
+        noteInput.type = 'search';
+        noteInput.id = 'licenseNoteFilter';
+        noteInput.placeholder = 'Tìm một phần nội dung…';
+        noteInput.autocomplete = 'off';
+        noteInput.addEventListener('input', applyLicenseFilters);
+        noteLabel.appendChild(noteInput);
+        toolbar.appendChild(noteLabel);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'license-toolbar-actions';
+    if (canCopyLicense) {
+        const selectVisible = document.createElement('button');
+        selectVisible.type = 'button';
+        selectVisible.className = 'btn-linkish';
+        selectVisible.id = 'licenseSelectVisible';
+        selectVisible.textContent = 'Chọn tất cả kết quả đang lọc';
+        selectVisible.addEventListener('click', () => {
+            licenseVisibleRows.forEach((row) => selectedLicenseRowKeys.add(licenseRowKey(row, licenseBatchRows.indexOf(row))));
+            renderLicenseTableRows();
+        });
+        actions.appendChild(selectVisible);
+
+        const clear = document.createElement('button');
+        clear.type = 'button';
+        clear.className = 'btn-linkish';
+        clear.id = 'licenseClearSelection';
+        clear.textContent = 'Bỏ chọn tất cả';
+        clear.addEventListener('click', () => {
+            selectedLicenseRowKeys.clear();
+            renderLicenseTableRows();
+        });
+        actions.appendChild(clear);
+
+        const copy = document.createElement('button');
+        copy.type = 'button';
+        copy.className = 'nav-button btn-export license-copy-button';
+        copy.id = 'licenseCopySelected';
+        copy.textContent = 'Copy đã chọn';
+        copy.addEventListener('click', copySelectedLicenseRows);
+        actions.appendChild(copy);
+    }
+    if (canCopyLicense) {
+        toolbar.appendChild(actions);
+        const count = document.createElement('span');
+        count.id = 'licenseBatchCount';
+        count.className = 'license-batch-count';
+        toolbar.appendChild(count);
+    }
+    container.appendChild(toolbar);
+
+    const table = document.createElement('table');
+    table.className = 'license-table';
+    table.id = 'licenseResultsTable';
+    const thead = table.createTHead();
+    const headerRow = thead.insertRow();
+    if (canCopyLicense) {
+        const selectHeader = createLicenseHeaderCell(headerRow, '', 'license-col-select');
+        const selectAll = document.createElement('input');
+        selectAll.type = 'checkbox';
+        selectAll.id = 'licenseSelectAllRows';
+        selectAll.setAttribute('aria-label', 'Chọn tất cả dòng đang hiển thị');
+        selectAll.addEventListener('change', () => {
+            licenseVisibleRows.forEach((row) => {
+                const key = licenseRowKey(row, licenseBatchRows.indexOf(row));
+                if (selectAll.checked) selectedLicenseRowKeys.add(key);
+                else selectedLicenseRowKeys.delete(key);
+            });
+            renderLicenseTableRows();
+        });
+        selectHeader.appendChild(selectAll);
+    }
+    if (TeamPermissions.field('Cas')) createLicenseHeaderCell(headerRow, 'CAS', 'license-cas-cell');
+    createLicenseHeaderCell(headerRow, 'Tình trạng quản lý');
+    if (TeamPermissions.field('Compliance_Note')) createLicenseHeaderCell(headerRow, 'Ghi chú quản lý');
+    table.createTBody();
+    const tableWrap = document.createElement('div');
+    tableWrap.className = 'license-table-wrap';
+    tableWrap.appendChild(table);
+    container.appendChild(tableWrap);
+    renderLicenseTableRows();
+}
+
+function renderLicenseTableRows() {
+    const table = document.getElementById('licenseResultsTable');
+    if (!table) return;
+    const canCopyLicense = TeamPermissions.can('COPY');
+    if (!canCopyLicense) selectedLicenseRowKeys.clear();
+    const tbody = table.tBodies[0];
+    tbody.replaceChildren();
+    licenseVisibleRows.forEach((item) => {
+        const sourceIndex = licenseBatchRows.indexOf(item);
+        const row = tbody.insertRow();
+        const key = licenseRowKey(item, sourceIndex);
+        if (canCopyLicense) {
+            const selectCell = row.insertCell();
+            selectCell.className = 'license-col-select';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'license-row-select';
+            checkbox.dataset.rowKey = key;
+            checkbox.checked = selectedLicenseRowKeys.has(key);
+            checkbox.setAttribute('aria-label', `Chọn dòng kết quả ${sourceIndex + 1}`);
+            checkbox.addEventListener('change', () => {
+                if (checkbox.checked) selectedLicenseRowKeys.add(key);
+                else selectedLicenseRowKeys.delete(key);
+                updateLicenseSelectionUI();
+            });
+            selectCell.appendChild(checkbox);
+        }
+
+        if (TeamPermissions.field('Cas')) createLicenseCell(row, item.Cas || '', 'license-cas-cell');
+        const statusCell = row.insertCell();
+        statusCell.className = 'cell-compliance';
+        const status = licenseStatus(item);
+        if (status) {
+            const badge = document.createElement('span');
+            badge.className = 'compliance-badge';
+            const cssClass = productComplianceCss(item);
+            if (cssClass) badge.classList.add(cssClass);
+            applyCompliancePair(badge, item);
+            badge.textContent = status;
+            statusCell.appendChild(badge);
+        }
+        if (TeamPermissions.field('Compliance_Note')) createLicenseCell(row, item.Compliance_Note || '', 'cell-compliance-note');
+        const cssClass = productComplianceCss(item);
+        if (cssClass) {
+            row.classList.add('regulatory-row', cssClass);
+            applyCompliancePair(row, item);
+        }
+    });
+    updateLicenseSelectionUI();
+}
+
+function applyLicenseFilters() {
+    const selectedStatuses = new Set(Array.from(document.querySelectorAll('#licenseWarnings input[name="license_status"]:checked')).map((input) => input.value));
+    const noteInput = document.getElementById('licenseNoteFilter');
+    licenseVisibleRows = filterLicenseRows(licenseBatchRows, selectedStatuses, noteInput ? noteInput.value : '');
+    renderLicenseTableRows();
+}
+
+async function copySelectedLicenseRows() {
+    if (!TeamPermissions.can('COPY')) return;
+    const rows = licenseSelectedRows();
+    if (!rows.length) {
+        setOperationStatus('Chọn ít nhất một dòng kết quả Check license rồi bấm “Copy đã chọn”.', 'error');
+        return;
+    }
+    try {
+        await copyTextWithFallback(licenseTsv(rows));
+        setOperationStatus(`Đã sao chép <strong>${rows.length}</strong> dòng Check license.`, 'success');
+    } catch (error) {
+        setOperationStatus(error.message, 'error');
+    }
 }
 
 function _excelSafeCell(value) {
@@ -839,6 +1184,7 @@ $(document).ready(function() {
     });
 
     $('#multiCancelBtn').on('click', function() {
+        resetLicenseBatchState();
         $('#multiModePanel').hide();
         $('#licenseWarnings').hide().html('');
         $('#multiInput').val('');
@@ -864,9 +1210,16 @@ $(document).ready(function() {
 
         if (mode === 'license') {
             const nCas = countBatchItems(text);
-            $('#licenseWarnings').show().html(
-                `<div class="batch-inline-loading"><span class="status-spinner"></span> Đang kiểm tra <strong>${nCas}</strong> CAS…</div>`
-            );
+            resetLicenseBatchState();
+            const loading = document.createElement('div');
+            loading.className = 'batch-inline-loading';
+            const spinner = document.createElement('span');
+            spinner.className = 'status-spinner';
+            loading.appendChild(spinner);
+            loading.appendChild(document.createTextNode(` Đang kiểm tra ${nCas} CAS…`));
+            const licenseWarnings = document.getElementById('licenseWarnings');
+            licenseWarnings.replaceChildren(loading);
+            licenseWarnings.style.display = '';
             setBatchRunning(true);
             $.ajax({
                 url: '/check_cas_batch',
@@ -875,47 +1228,23 @@ $(document).ready(function() {
                 timeout: AJAX_LONG_TIMEOUT_MS,
                 success: function(data) {
                     const items = data && data.results ? data.results : [];
-                    let warnCount = 0;
-
-                    let rowsHtml = '';
-                    items.forEach(item => {
-                        const status = item.Compliance_Status || '';
-                        const note = item.Compliance_Note || '';
-                        const cssClass = REGULATORY_CLASS_RE.test(item.Compliance_Css || '') ? item.Compliance_Css : '';
-                        const colorStyle = complianceStyleAttribute(item);
-                        const statusBadge = status ? `<span class="compliance-badge ${cssClass}"${colorStyle}>${$('<div/>').text(status).html()}</span>` : '';
-                        if (status) warnCount += 1;
-                        rowsHtml += `
-                          <tr class="${cssClass ? `regulatory-row ${cssClass}` : ''}"${colorStyle}>
-                            ${TeamPermissions.field('Cas') ? `<td>${$('<div/>').text(item.Cas || '').html()}</td>` : ''}
-                            <td>${statusBadge}</td>
-                            ${TeamPermissions.field('Compliance_Note') ? `<td class="cell-compliance-note">${$('<div/>').text(note).html()}</td>` : ''}
-                          </tr>
-                        `;
+                    licenseBatchRows = items.map((item, index) => {
+                        const row = Object.assign({}, item || {});
+                        Object.defineProperty(row, '__licenseRowKey', { value: `license-${index}` });
+                        return row;
                     });
-
-                    const summary = `<div class="hint" style="margin-bottom:10px; font-weight:600;">Cảnh báo: ${warnCount}/${items.length}</div>`;
-                    const tableHtml = `
-                      <table class="license-table">
-                        <thead>
-                          <tr>
-                            ${TeamPermissions.field('Cas') ? '<th>CAS</th>' : ''}
-                            <th>Tình trạng quản lý</th>
-                            ${TeamPermissions.field('Compliance_Note') ? '<th>Ghi chú quản lý</th>' : ''}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          ${rowsHtml}
-                        </tbody>
-                      </table>
-                    `;
-                    $('#licenseWarnings').html(summary + tableHtml);
+                    licenseVisibleRows = licenseBatchRows.slice();
+                    selectedLicenseRowKeys.clear();
+                    renderLicenseTable();
                     $('#multiInput').val('');
                     setBatchRunning(false);
                 },
                 error: function(xhr) {
                     const msg = formatAjaxError(xhr, 'Kiểm tra CAS thất bại.');
-                    $('#licenseWarnings').html(`<div class="batch-error-msg">${$('<div/>').text(msg).html()}</div>`);
+                    const error = document.createElement('div');
+                    error.className = 'batch-error-msg';
+                    error.textContent = msg;
+                    licenseWarnings.replaceChildren(error);
                     setBatchRunning(false);
                 }
             });

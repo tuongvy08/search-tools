@@ -156,6 +156,12 @@ h1 {
   margin-top: 8px;
 }
 
+.license-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .license-table th,
 .license-table td {
   border: 1px solid #caced1;
@@ -168,6 +174,137 @@ h1 {
 .license-table th {
   background-color: #f4f7fe;
   color: #2e45b6;
+}
+
+.license-batch-summary {
+  margin: 0 0 10px;
+  font-weight: 600;
+}
+
+.license-toolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.2fr) minmax(220px, 1fr);
+  gap: 12px 16px;
+  align-items: end;
+  margin: 0 0 10px;
+  padding: 12px;
+  border: 1px solid #c7d2fe;
+  border-radius: 12px;
+  background: #f8faff;
+}
+
+.license-filter-group {
+  min-width: 0;
+  margin: 0;
+  padding: 8px 10px 10px;
+  border: 1px solid #dbe3f2;
+  border-radius: 8px;
+}
+
+.license-filter-group legend {
+  padding: 0 4px;
+  color: #1e3a8a;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.license-status-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  max-height: 92px;
+  overflow-y: auto;
+}
+
+.license-check-option,
+.license-note-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #334155;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+
+.license-note-filter {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  font-weight: 700;
+  color: #1e3a8a;
+}
+
+.license-note-filter input {
+  width: 100%;
+  min-height: 38px;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid #caced1;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.88rem;
+}
+
+.license-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  grid-column: 1 / -1;
+}
+
+.license-copy-button {
+  margin-left: auto;
+  padding: 8px 16px;
+  font-size: 0.9rem;
+}
+
+.license-batch-count {
+  grid-column: 1 / -1;
+  color: #475569;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.license-col-select {
+  width: 42px;
+  min-width: 42px;
+  text-align: center !important;
+  vertical-align: middle !important;
+}
+
+.license-cas-cell {
+  white-space: nowrap !important;
+}
+
+.license-row-select,
+#licenseSelectAllRows {
+  width: 17px;
+  height: 17px;
+  accent-color: #2e45b6;
+}
+
+.license-table tbody tr:hover {
+  background-color: #e7f0fd;
+}
+
+@media (max-width: 640px) {
+  .license-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .license-toolbar-actions,
+  .license-batch-count {
+    grid-column: auto;
+  }
+
+  .license-copy-button {
+    margin-left: 0;
+  }
+
+  .license-table {
+    min-width: 520px;
+  }
 }
 
 /* Advanced Search panel */

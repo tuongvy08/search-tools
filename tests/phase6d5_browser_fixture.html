@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Phase 6D5 browser fixture</title>
+  <link rel="stylesheet" href="../static/styles.css">
+</head>
+<body class="search-page">
+  <h1>Check license (CAS list)</h1>
+  <main class="multi-panel" style="max-width: 1100px;">
+    <div id="licenseWarnings">
+      <div class="hint license-batch-summary">Cảnh báo: 2/4</div>
+      <div class="license-toolbar" aria-label="Bộ lọc và thao tác kết quả Check license">
+        <fieldset class="license-filter-group">
+          <legend>Tình trạng quản lý</legend>
+          <div class="license-status-options">
+            <label class="license-check-option"><input type="checkbox"> <span>Không có tình trạng</span></label>
+            <label class="license-check-option"><input type="checkbox"> <span>Cấm nhập</span></label>
+            <label class="license-check-option"><input type="checkbox"> <span>Phụ lục II</span></label>
+          </div>
+        </fieldset>
+        <label class="license-note-filter" for="licenseNoteFilter">
+          Lọc ghi chú quản lý
+          <input id="licenseNoteFilter" type="search" placeholder="Tìm một phần nội dung…" value="giay phep">
+        </label>
+        <div class="license-toolbar-actions">
+          <button type="button" class="btn-linkish">Chọn tất cả kết quả đang lọc</button>
+          <button type="button" class="btn-linkish">Bỏ chọn tất cả</button>
+          <button type="button" class="nav-button btn-export license-copy-button">Copy đã chọn</button>
+        </div>
+        <span class="license-batch-count">Đang hiển thị 2/4 · đã chọn 1</span>
+      </div>
+      <div class="license-table-wrap"><table class="license-table" id="licenseResultsTable">
+        <thead><tr>
+          <th class="license-col-select"><input id="licenseSelectAllRows" type="checkbox" aria-label="Một phần dòng đang hiển thị đã chọn"></th>
+          <th class="license-cas-cell">CAS</th><th>Tình trạng quản lý</th><th>Ghi chú quản lý</th>
+        </tr></thead>
+        <tbody>
+          <tr class="regulatory-row warning-cam-nhap">
+            <td class="license-col-select"><input class="license-row-select" type="checkbox" checked aria-label="Chọn dòng kết quả 1"></td>
+            <td class="license-cas-cell">50-00-0</td><td><span class="compliance-badge warning-cam-nhap">Cấm nhập</span></td>
+            <td class="cell-compliance-note">Giấy phép cần kiểm tra trước khi xuất kho.</td>
+          </tr>
+          <tr>
+            <td class="license-col-select"><input class="license-row-select" type="checkbox" aria-label="Chọn dòng kết quả 2"></td>
+            <td class="license-cas-cell">64-17-5</td><td></td><td class="cell-compliance-note">Không có tình trạng quản lý.</td>
+          </tr>
+        </tbody>
+      </table></div>
+    </div>
+  </main>
+</body>
+</html>

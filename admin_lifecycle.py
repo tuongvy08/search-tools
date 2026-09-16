@@ -293,6 +293,8 @@ def confirm_team_archive():
     try:
         with conn:
             with conn.cursor() as cur:
+                acquire_last_admin_lock(cur)
+                revalidate_actor(cur, actor_id, session.get("auth_version"))
                 preview = _pop_preview(cur, token, actor_id)
         if preview is None:
             return _teams_redirect(err=_ERR_PREVIEW_EXPIRED)

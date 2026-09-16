@@ -148,6 +148,10 @@ class ImportCenterPgTests(unittest.TestCase):
         self.client=search.app.test_client()
         with self.client.session_transaction() as s:
             s.update(authenticated=True,is_admin=True,user_id=self.uid,auth_version=1,csrf_token='qa-csrf')
+        with self.conn.cursor() as cur:
+            cur.execute("INSERT INTO admin_menu_grants(user_id,permission_key) VALUES (%s,%s) ON CONFLICT DO NOTHING", (self.uid, 'imports'))
+            cur.execute("UPDATE app_users SET auth_version=1 WHERE id=%s", (self.uid,))
+
 
     def submit(self,rows,mode='upsert',key=None):
         return jobs.submit(FileStorage(xlsx(rows),filename='catalog.xlsx',content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),mode,'user:'+str(self.uid),self.uid,1,key or str(uuid.uuid4()))
@@ -193,9 +197,9 @@ class ImportCenterPgTests(unittest.TestCase):
         jid=self.submit([{'brand':'TRC'}])
         self.assertEqual(self.client.post('/admin/imports/jobs/'+jid+'/cancel').status_code,400)
         with self.conn.cursor() as cur:cur.execute('UPDATE app_users SET is_admin=false WHERE id=%s',(self.uid,))
-        self.assertEqual(self.client.get('/admin/imports').status_code,403)
-        self.assertEqual(self.client.get('/admin/imports/jobs/'+jid+'/status').status_code,403)
-        self.assertEqual(self.client.post('/admin/imports/upload',data={'csrf_token':'qa-csrf'}).status_code,403)
+        self.assertEqual(self.client.get('/admin/imports').status_code,302)
+        self.assertEqual(self.client.get('/admin/imports/jobs/'+jid+'/status').status_code,302)
+        self.assertEqual(self.client.post('/admin/imports/upload',data={'csrf_token':'qa-csrf'}).status_code,302)
 
     def test_product_template_includes_supported_management_headers(self):
         response=self.client.get('/admin/templates/products.xlsx')

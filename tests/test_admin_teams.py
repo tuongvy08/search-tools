@@ -19,6 +19,7 @@ import unittest
 from unittest import mock
 
 import admin_teams
+import admin_permissions
 import search
 import session_security
 
@@ -98,6 +99,9 @@ class _ClientTestCase(unittest.TestCase):
     def setUp(self):
         search.app.testing = True
         self.client = search.app.test_client()
+        rbac_patch = mock.patch.object(admin_permissions, "current_permissions", lambda: {"is_super_admin": True, "keys": frozenset(admin_permissions.MENU_LABELS)})
+        rbac_patch.start()
+        self.addCleanup(rbac_patch.stop)
         # Fix1 collateral: this file only exercises admin_teams' own
         # CSRF/actor/role guards (all of which run and reject BEFORE the
         # IP middleware would matter), not IP policy itself -- disabling

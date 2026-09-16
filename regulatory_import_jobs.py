@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import admin_permissions
 import os
 from pathlib import Path
 import threading
@@ -77,6 +78,7 @@ def submit(file, mode, actor, user_id, auth_version, submission_key):
         try:
             with conn, conn.cursor() as cur:
                 acquire_regulatory_lock(cur)
+                admin_permissions.require_job_actor(cur, user_id, auth_version, 'regulatory')
                 cur.execute(
                     "SELECT id FROM regulatory_import_jobs WHERE actor_user_id=%s AND submission_key=%s",
                     (user_id, submission_key),
@@ -121,6 +123,7 @@ def control(job_id, action, actor, fingerprint="", confirm_delete=""):
     with connection() as conn, conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute("SELECT * FROM regulatory_import_jobs WHERE id=%s FOR UPDATE", (str(job_id),))
         job = cur.fetchone()
+        admin_permissions.require_job_request_actor(cur, 'regulatory')
         if not job:
             raise ImportProblem("Không tìm thấy tác vụ quy tắc.")
         if action == "cancel":
@@ -463,13 +466,7 @@ def run_once(only_id=None):
                 acquire_regulatory_lock(cur)
                 if cancelled.is_set():
                     raise ImportProblem("Tác vụ đã được hủy hoặc vượt thời gian xử lý.")
-                cur.execute(
-                    """SELECT 1 FROM app_users WHERE id=%s AND is_admin=true
-                       AND account_status='ACTIVE' AND auth_version=%s""",
-                    (job["actor_user_id"], job["actor_auth_version"]),
-                )
-                if not cur.fetchone():
-                    raise ImportProblem("Người tải tệp không còn quyền admin hoặc phiên đã bị thu hồi.")
+                admin_permissions.require_job_actor(cur, job['actor_user_id'], job['actor_auth_version'], 'regulatory')
                 cur.execute("DELETE FROM regulatory_import_rows WHERE job_id=%s", (job_id,))
                 execute_values(
                     cur,

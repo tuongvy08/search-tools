@@ -21,6 +21,7 @@ import unittest
 from unittest import mock
 
 import search
+import admin_permissions
 import session_security
 
 
@@ -48,6 +49,11 @@ class _FakeCursor:
             (user_id,) = params
             row = self.db.users.get(user_id)
             self._result = [row] if row is not None else []
+        elif s.startswith("SELECT id, account_status, auth_version, is_admin, is_super_admin"):
+            row = self.db.users.get(params[0])
+            self._result = [(params[0],row[0],row[1],True,True)] if row else []
+        elif s.startswith("SELECT permission_key FROM admin_menu_grants"):
+            self._result = []
         elif "SELECT 1 FROM teams WHERE id = %s AND lifecycle_status = 'ACTIVE'" in s:
             (team_id,) = params
             self._result = [(1,)] if team_id in self.db.active_teams else []
@@ -59,6 +65,9 @@ class _FakeCursor:
             self._result = []
         else:
             raise AssertionError(f"Unexpected SQL in fake DB: {s}")
+
+    def fetchall(self):
+        return self._result
 
     def fetchone(self):
         return self._result[0] if self._result else None
@@ -93,6 +102,9 @@ class _ClientTestCase(unittest.TestCase):
     def setUp(self):
         search.app.testing = True
         self.client = search.app.test_client()
+        rbac_patch = mock.patch.object(admin_permissions, 'get_connection', lambda: session_security.get_connection())
+        rbac_patch.start()
+        self.addCleanup(rbac_patch.stop)
         env_patcher = mock.patch.dict(os.environ, {"DISABLE_IP_ALLOWLIST": "1"})
         env_patcher.start()
         self.addCleanup(env_patcher.stop)

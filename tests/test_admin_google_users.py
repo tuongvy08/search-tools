@@ -12,6 +12,7 @@ from flask import render_template
 from psycopg2 import IntegrityError
 
 import admin_google_users
+import admin_permissions
 import search
 import session_security
 
@@ -112,6 +113,11 @@ class FakeCursor:
             # real locking semantics here, just accept the call.
             self._result = []
 
+        elif s.startswith("SELECT id, account_status, auth_version, is_admin, is_super_admin"):
+            u = db.users.get(params[0])
+            self._result = [(params[0], u["account_status"], u["auth_version"], u["is_admin"], u.get("is_super_admin", u["is_admin"]))] if u else []
+        elif s.startswith("SELECT set_config('app.rbac_actor'"):
+            self._result = []
         elif s.startswith("SELECT account_status, is_admin, auth_version FROM app_users WHERE id = %s"):
             # Phase 5D2B.2: actor revalidation, fresh read of the ACTING
             # admin's own row (never the target's).
@@ -252,6 +258,9 @@ class _ClientTestCase(unittest.TestCase):
         patcher = mock.patch.object(session_security, "get_connection", _passthrough_session_connection)
         patcher.start()
         self.addCleanup(patcher.stop)
+        rbac_patch = mock.patch.object(admin_permissions, "current_permissions", lambda: {"is_super_admin": True, "keys": frozenset(admin_permissions.MENU_LABELS)})
+        rbac_patch.start()
+        self.addCleanup(rbac_patch.stop)
         # This file is about the admin-vs-staff ROLE guard and the Google
         # user actions themselves, not IP/team policy. Some sessions here
         # (e.g. staff without a team_id) would otherwise now be denied by

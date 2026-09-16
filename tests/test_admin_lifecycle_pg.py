@@ -65,10 +65,10 @@ class AdminLifecyclePgTests(unittest.TestCase):
     def insert_user(self, username, *, is_admin=False, team_id=None, password="pw"):
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO app_users (username, password_hash, team_id, is_admin, "
+                "INSERT INTO app_users (username, password_hash, team_id, is_admin, is_super_admin, "
                 "auth_provider, account_status, auth_version) "
-                "VALUES (%s, %s, %s, %s, 'LOCAL', 'ACTIVE', 1) RETURNING id",
-                (username, generate_password_hash(password), team_id, is_admin),
+                "VALUES (%s, %s, %s, %s, %s, 'LOCAL', 'ACTIVE', 1) RETURNING id",
+                (username, generate_password_hash(password), team_id, is_admin, is_admin),
             )
             return cur.fetchone()[0]
 

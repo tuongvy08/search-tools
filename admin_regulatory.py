@@ -52,18 +52,14 @@ def _revalidate_mutation_actor(cur, actor_user_id, expected_auth_version):
     Lock ordering is regulatory advisory lock first, then this actor row.
     User lifecycle/role mutations may hold the shared last-admin lock before
     touching this row, but no such path waits for the regulatory lock, so
-    there is no reverse edge. ``FOR UPDATE`` prevents a valid actor from
+    there is no reverse edge. ``FOR SHARE`` prevents a valid actor from
     being demoted, suspended or version-bumped between this check and commit.
     """
-    cur.execute(
-        """SELECT account_status,is_admin,auth_version
-           FROM app_users WHERE id=%s FOR UPDATE""",
-        (actor_user_id,),
-    )
-    row = cur.fetchone()
-    if (not row or row["account_status"] != "ACTIVE" or not row["is_admin"]
-            or row["auth_version"] != expected_auth_version):
-        raise _MutationAuthorizationError()
+    import admin_permissions
+    try:
+        admin_permissions.require_actor(cur, actor_user_id, expected_auth_version, 'regulatory')
+    except admin_permissions.PermissionDenied:
+        raise _MutationAuthorizationError() from None
 
 
 def _presentation_labels():

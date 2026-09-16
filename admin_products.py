@@ -101,15 +101,11 @@ def _encode_cursor(app, *, query: str, brand: str, page_size: int, anchor: int, 
 
 
 def _require_current_admin(cur) -> None:
-    cur.execute(
-        """
-        SELECT 1 FROM app_users
-        WHERE id=%s AND is_admin=true AND account_status='ACTIVE' AND auth_version=%s
-        """,
-        (session.get("user_id"), session.get("auth_version")),
-    )
-    if not cur.fetchone():
-        raise AdminAuthorizationError()
+    import admin_permissions
+    try:
+        admin_permissions.require_request_actor(cur, 'products')
+    except admin_permissions.PermissionDenied:
+        raise AdminAuthorizationError() from None
 
 
 def _csrf_or_400():

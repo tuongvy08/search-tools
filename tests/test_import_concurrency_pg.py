@@ -76,8 +76,8 @@ class ImportConcurrencyPgTests(unittest.TestCase):
                 # (account_status + auth_version) -- give it one real admin.
                 cur.execute(
                     """
-                    INSERT INTO app_users (username, password_hash, is_admin, account_status, auth_version)
-                    VALUES ('admin1', 'x', TRUE, 'ACTIVE', 1)
+                    INSERT INTO app_users (username, password_hash, is_admin, is_super_admin, account_status, auth_version)
+                    VALUES ('admin1', 'x', TRUE, TRUE, 'ACTIVE', 1)
                     ON CONFLICT (username) DO NOTHING
                     RETURNING id;
                     """

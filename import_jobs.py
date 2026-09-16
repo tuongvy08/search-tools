@@ -12,6 +12,7 @@ from contextlib import contextmanager
 
 from psycopg2.extras import Json, RealDictCursor, execute_values
 
+import admin_permissions
 from db import get_connection
 from brand_gateway import acquire_products_import_lock
 from regulatory import acquire_regulatory_lock
@@ -74,6 +75,7 @@ def submit(file, mode, actor, user_id, auth_version, submission_key):
             with conn, conn.cursor() as cur:
                 # Serializes capacity accounting and same-submission admission.
                 cur.execute('SELECT pg_advisory_xact_lock(62402401)')
+                admin_permissions.require_job_actor(cur, user_id, auth_version, 'imports')
                 cur.execute('SELECT id FROM product_import_jobs WHERE actor_user_id=%s AND submission_key=%s', (user_id, submission_key))
                 old = cur.fetchone()
                 if old:
@@ -119,6 +121,7 @@ def control(job_id, action, actor, fingerprint='', confirm_delete=''):
             raise ImportProblem('Không tìm thấy tác vụ.')
         cur.execute('SELECT * FROM product_import_jobs WHERE id=%s FOR UPDATE', (str(job_id),))
         job = cur.fetchone()
+        admin_permissions.require_job_request_actor(cur, 'imports')
         if action == 'cancel':
             if job['status'] not in ('queued','running') or job['cancel_requested']:
                 return
@@ -269,9 +272,7 @@ def run_once(only_id=None):
                 acquire_regulatory_lock(cur)
                 if cancelled.is_set():
                     raise ImportProblem('Tác vụ đã được hủy.')
-                cur.execute("SELECT 1 FROM app_users WHERE id=%s AND is_admin=true AND account_status='ACTIVE' AND auth_version=%s", (job['actor_user_id'],job['actor_auth_version']))
-                if not cur.fetchone():
-                    raise ImportProblem('Người tải tệp không còn quyền admin hoặc phiên đã bị thu hồi.')
+                admin_permissions.require_job_actor(cur, job['actor_user_id'], job['actor_auth_version'], 'imports')
                 create_stage(cur)
                 cur.execute('INSERT INTO import_stage SELECT row_number,data FROM product_import_rows WHERE job_id=%s', (job_id,))
                 plan = build_plan(cur,job['mode'],apply=job['phase']=='apply')

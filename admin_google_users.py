@@ -103,16 +103,13 @@ def revalidate_actor(cur, admin_id, expected_auth_version) -> None:
     ACTIVE admin or their auth_version no longer matches the session that
     authenticated this request.
     """
-    cur.execute(
-        "SELECT account_status, is_admin, auth_version FROM app_users WHERE id = %s",
-        (admin_id,),
-    )
-    row = cur.fetchone()
-    if row is None:
-        raise _ActionError(_ERR_ACTOR_INVALID)
-    account_status, is_admin, auth_version = row
-    if account_status != "ACTIVE" or not is_admin or auth_version != expected_auth_version:
-        raise _ActionError(_ERR_ACTOR_INVALID)
+    import admin_permissions
+    try:
+        actor = admin_permissions.require_actor(cur, admin_id, expected_auth_version,
+            admin_permissions.ENDPOINT_PERMISSIONS.get(request.endpoint, 'users'))
+        admin_permissions.guard_user_mutation(cur, actor)
+    except admin_permissions.PermissionDenied:
+        raise _ActionError(_ERR_ACTOR_INVALID) from None
 
 
 class _ActionError(Exception):

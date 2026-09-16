@@ -36,6 +36,7 @@ host/port/user, every test in this module is SKIPPED with an explicit
 reason (reported as a blocker), never silently treated as a pass.
 """
 import os
+from pathlib import Path
 import secrets
 import threading
 import unittest
@@ -171,6 +172,7 @@ class _RealPgTestBase(unittest.TestCase):
                     cur.execute(_MIGRATION_014_SQL)
                     cur.execute(_MIGRATION_015_SQL)
                     cur.execute(_MIGRATION_020_SQL)
+                    cur.execute(Path(__file__).resolve().parents[1].joinpath("sql/migration_030_admin_menu_permissions.sql").read_text())
                     cur.execute(_MIGRATION_006_SQL)
         finally:
             conn.close()
@@ -229,9 +231,9 @@ class _RealPgTestBase(unittest.TestCase):
                     cur.execute(
                         """
                         INSERT INTO app_users
-                            (username, password_hash, team_id, is_admin, ip_bypass_allowlist,
+                            (username, password_hash, team_id, is_admin, is_super_admin, ip_bypass_allowlist,
                              auth_provider, google_sub, email, account_status, auth_version)
-                        VALUES (%(username)s, %(password_hash)s, %(team_id)s, %(is_admin)s,
+                        VALUES (%(username)s, %(password_hash)s, %(team_id)s, %(is_admin)s, %(is_admin)s,
                                 FALSE, %(auth_provider)s, %(google_sub)s, %(email)s,
                                 %(account_status)s, %(auth_version)s)
                         RETURNING id
@@ -595,19 +597,9 @@ class RealConcurrencyTests(_RealPgTestBase):
         # waiting" via a third, independent connection/transaction that
         # does NOT itself need the advisory lock (it's not reducing the
         # admin count below the invariant: y remains an ACTIVE admin).
-        third_conn = psycopg2.connect(self.test_dsn)
-        try:
-            with third_conn:
-                with third_conn.cursor() as tcur:
-                    tcur.execute(
-                        "UPDATE app_users SET account_status = 'SUSPENDED', "
-                        "auth_version = auth_version + 1 WHERE id = %s",
-                        (x,),
-                    )
-        finally:
-            third_conn.close()
+        with holder_conn.cursor() as tcur:
+            tcur.execute("UPDATE app_users SET account_status='SUSPENDED', auth_version=auth_version+1 WHERE id=%s", (x,))
 
-        # Release the held lock -> the blocked request can now proceed.
         holder_conn.commit()
         holder_conn.close()
 
@@ -742,17 +734,10 @@ class ActorRevokedWhileWaitingForLockParamTests(_RealPgTestBase):
         t.join(timeout=1.5)
         self.assertTrue(t.is_alive(), "request completed before the lock was released -- not actually blocked")
 
-        third_conn = psycopg2.connect(self.test_dsn)
-        try:
-            with third_conn:
-                with third_conn.cursor() as tcur:
-                    tcur.execute(
-                        "UPDATE app_users SET account_status = 'SUSPENDED', "
-                        "auth_version = auth_version + 1 WHERE id = %s",
-                        (actor_id,),
-                    )
-        finally:
-            third_conn.close()
+        # Keep an independent super admin active, then revoke in the lock holder.
+        self._insert_user(username="remaining_super", is_admin=True)
+        with holder_conn.cursor() as tcur:
+            tcur.execute("UPDATE app_users SET account_status='SUSPENDED', auth_version=auth_version+1 WHERE id=%s", (actor_id,))
 
         holder_conn.commit()
         holder_conn.close()

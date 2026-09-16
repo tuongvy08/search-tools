@@ -14,6 +14,7 @@ import unittest
 from unittest import mock
 
 import admin_google_users
+import admin_permissions
 import search
 import session_security
 
@@ -101,6 +102,11 @@ class FakeCursor:
             u = db.users.get(uid)
             self._result = [(u["username"], u["team_id"], u["is_admin"])] if u and u.get("auth_provider") == "LOCAL" else []
 
+        elif s.startswith("SELECT id, account_status, auth_version, is_admin, is_super_admin"):
+            u = db.users.get(params[0])
+            self._result = [(params[0], u["account_status"], u["auth_version"], u["is_admin"], u.get("is_super_admin", u["is_admin"]))] if u else []
+        elif s.startswith("SELECT set_config('app.rbac_actor'"):
+            self._result = []
         elif s.startswith("SELECT account_status, is_admin, auth_version FROM app_users WHERE id = %s"):
             # Phase 5D2B.2: actor revalidation (shared helper, same query
             # text as admin_google_users.revalidate_actor -- re-reads the
@@ -262,6 +268,12 @@ class _ClientTestCase(unittest.TestCase):
         self.addCleanup(self._ip_patch.stop)
         search.app.testing = True
         self.client = search.app.test_client()
+        roles_patch = mock.patch.object(admin_permissions, "fetch_user_roles", return_value={})
+        roles_patch.start()
+        self.addCleanup(roles_patch.stop)
+        rbac_patch = mock.patch.object(admin_permissions, "current_permissions", lambda: {"is_super_admin": True, "keys": frozenset(admin_permissions.MENU_LABELS)})
+        rbac_patch.start()
+        self.addCleanup(rbac_patch.stop)
 
     def _set_session(self, **kwargs):
         with self.client.session_transaction() as sess:

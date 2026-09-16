@@ -44,7 +44,7 @@ class TeamCapabilitiesPgTests(unittest.TestCase):
                 apply_dynamic_brand_currency_migration(cur)
                 cur.execute("INSERT INTO teams(name) VALUES ('Biology') RETURNING id")
                 cls.team = cur.fetchone()[0]
-                cur.execute("INSERT INTO app_users(username,password_hash,is_admin) VALUES ('admin','x',true),('admin2','x',true) RETURNING id")
+                cur.execute("INSERT INTO app_users(username,password_hash,is_admin,is_super_admin) VALUES ('admin','x',true,true),('admin2','x',true,true) RETURNING id")
                 cls.admin, cls.admin2 = [row[0] for row in cur.fetchall()]
                 cur.execute("INSERT INTO app_users(username,password_hash,team_id,auth_provider,account_status,email,google_sub) VALUES "
                             "('local','x',%s,'LOCAL','ACTIVE',NULL,NULL),"

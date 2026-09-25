@@ -97,7 +97,7 @@ def fetch_stock_options(
     cur.execute(
         f"""
         SELECT i.id,i.name,i.code,i.cas,i.brand,i.size,i.stock_price_vnd,
-               i.quantity,i.expiry_date,i.code_norm,i.cas_norm
+               i.quantity,i.expiry_date,i.code_norm,i.cas_norm,i.stock_note
         FROM stock_state state
         JOIN stock_items i ON i.snapshot_id=state.active_snapshot_id
         WHERE state.singleton=TRUE
@@ -113,7 +113,7 @@ def fetch_stock_options(
     all_items: list[dict] = []
     for row in cur.fetchall():
         (item_id, name, code, cas, brand, size, price, quantity, expiry,
-         code_norm, cas_norm) = row
+         code_norm, cas_norm, note) = row
         state, warning = expiry_state(expiry)
         item = {
             "Stock_Item_Id": int(item_id),
@@ -133,6 +133,8 @@ def fetch_stock_options(
             item["Brand"] = brand or ""
         if "VIEW_SIZE" in grants:
             item["Size"] = size or ""
+        if "VIEW_NOTE" in grants:
+            item["Stock_Note"] = note or ""
         if "VIEW_PRICE" in grants:
             item["Stock_Price"] = format_vnd(price)
             item["Stock_Price_Vnd"] = str(price) if price is not None else ""

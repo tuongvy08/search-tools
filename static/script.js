@@ -771,6 +771,12 @@ function setStockCell(row, product) {
         const expiry = item.Stock_Expiry_Label ? `Hạn ${item.Stock_Expiry_Label}` : 'Không có hạn sử dụng';
         detail.textContent = item.Stock_Price ? `${expiry} · ${item.Stock_Price} chưa VAT` : expiry;
         line.appendChild(detail);
+        if (item.Stock_Note) {
+            const note = document.createElement('div');
+            note.className = 'stock-note';
+            note.textContent = `Ghi chú: ${item.Stock_Note}`;
+            line.appendChild(note);
+        }
         if (item.Stock_State === 'expired' || item.Stock_State === 'near_expiry') {
             const warning = document.createElement('span');
             warning.className = 'stock-warning';

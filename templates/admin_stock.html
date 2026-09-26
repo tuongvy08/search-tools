@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Quản lý tồn kho — Search Tools</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260916d5v1') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260925d5n1') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260910d2') }}">
@@ -51,8 +51,8 @@
     <p><strong>Brand trong file:</strong> {{ p.brands|join(', ') }}</p>
     {% if p.new_brands %}<div class="state-banner state-notice"><strong>Brand mới:</strong> {{ p.new_brands|join(', ') }}. Chỉ tạo khi apply; không gán tiền tệ và không cấp quyền team.</div>{% endif %}
     <h3>Mẫu dữ liệu</h3>
-    <div class="table-wrap" tabindex="0"><table><thead><tr><th>Code</th><th>Name</th><th>Brand</th><th>Size</th><th>CAS</th><th>Số lượng</th><th>Giá tồn</th><th>Hạn dùng</th></tr></thead><tbody>
-      {% for row in p.sample %}<tr><td>{{ row.code }}</td><td>{{ row.name }}</td><td>{{ row.brand }}</td><td>{{ row.size }}</td><td>{{ row.cas or '—' }}</td><td>{{ row.quantity }}</td><td>{{ row.stock_price or '—' }}</td><td>{{ row.expiry or '—' }}</td></tr>{% endfor %}
+    <div class="table-wrap" tabindex="0"><table><thead><tr><th>Code</th><th>Name</th><th>Brand</th><th>Size</th><th>CAS</th><th>Số lượng</th><th>Giá tồn</th><th>Hạn dùng</th><th>Ghi chú</th></tr></thead><tbody>
+      {% for row in p.sample %}<tr><td>{{ row.code }}</td><td>{{ row.name }}</td><td>{{ row.brand }}</td><td>{{ row.size }}</td><td>{{ row.cas or '—' }}</td><td>{{ row.quantity }}</td><td>{{ row.stock_price or '—' }}</td><td>{{ row.expiry or '—' }}</td><td class="stock-note">{{ row.stock_note or '—' }}</td></tr>{% endfor %}
     </tbody></table></div>
     {% endif %}
 
@@ -89,7 +89,8 @@
     <section class="stock-panel guide-panel">
       <div class="section-heading"><div><p class="eyebrow">Quy tắc file</p><h2>Kiểm tra nhanh</h2></div><span class="step-mark">02</span></div>
       <ul class="check-list">
-        <li>Đúng 8 cột theo file mẫu; CAS, giá và hạn dùng được để trống.</li>
+        <li>9 cột theo file mẫu; CAS, giá, hạn dùng và ghi chú được để trống. Vẫn nhận file cũ 8 cột.</li>
+        <li>Ghi chú dạng văn bản, tối đa 2.000 ký tự: ví dụ “Kho A”, “Hàng mẫu”. File cũ 8 cột tạo ghi chú trống trong snapshot mới.</li>
         <li>Quantity bắt buộc là số nguyên ≥ 0; 0 nghĩa là hết tồn.</li>
         <li>Brand + Code + Size + Hạn dùng phải duy nhất, kể cả hạn trống.</li>
         <li>Giá tồn là VND chưa VAT, chỉ hiển thị và không đi vào báo giá.</li>

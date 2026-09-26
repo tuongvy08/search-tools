@@ -32,6 +32,7 @@ from stock import STOCK_LOCK_KEY, acquire_stock_lock, active_snapshot, normalize
 STOCK_JOB_LOCK_NAMESPACE = 624029
 HEADERS = (
     "name", "code", "cas", "brand", "size", "giá tồn kho", "số lượng tồn", "hạn sử dụng",
+    "ghi chú",
 )
 
 HEADER_ALIASES = {
@@ -46,9 +47,12 @@ HEADER_ALIASES = {
     "stock price": "giá tồn kho",
     "qty": "số lượng tồn",
     "expiry": "hạn sử dụng",
+    "ghi chú": "ghi chú",
+    "note": "ghi chú",
+    "notes": "ghi chú",
 }
 
-_HEADER_REQUIRES = "Name | Code | Cas | Brand | Size | Giá tồn kho | Số lượng tồn | Hạn sử dụng."
+_HEADER_REQUIRES = "Name | Code | Cas | Brand | Size | Giá tồn kho | Số lượng tồn | Hạn sử dụng | Ghi chú (cột cuối được bỏ qua với file cũ)."
 
 
 def connection():
@@ -261,7 +265,7 @@ def parse_workbook(path: Path, progress=lambda *_: None):
         headers = [
             _clean(cell.value, "Header", 80).casefold() for cell in header_cells
         ]
-        if len(headers) != len(HEADERS):
+        if len(headers) not in (len(HEADERS) - 1, len(HEADERS)):
             raise ImportProblem(f"Header phải đúng thứ tự: {_HEADER_REQUIRES}")
         normalized = []
         for header in headers:
@@ -271,7 +275,7 @@ def parse_workbook(path: Path, progress=lambda *_: None):
             normalized.append(mapped)
         if len(set(normalized)) != len(normalized):
             raise ImportProblem(f"Header phải đúng thứ tự: {_HEADER_REQUIRES}")
-        if tuple(normalized) != tuple(HEADER_ALIASES.get(h, h) for h in HEADERS):
+        if tuple(normalized) != HEADERS[:len(headers)]:
             raise ImportProblem(
                 f"Header phải đúng thứ tự: {_HEADER_REQUIRES}"
             )
@@ -280,7 +284,7 @@ def parse_workbook(path: Path, progress=lambda *_: None):
         for row_number, cells in enumerate(iterator, start=2):
             if row_number > limit("STOCK_MAX_ROWS", 100000) + 1:
                 raise ImportProblem("File tồn kho vượt giới hạn số dòng.")
-            values = [cell.value for cell in cells[:len(HEADERS)]]
+            values = [cell.value for cell in cells[:len(headers)]]
             values.extend([None] * (len(HEADERS) - len(values)))
             if not any(_clean(value, "Giá trị", 4000, required=False) for value in values):
                 continue
@@ -299,6 +303,7 @@ def parse_workbook(path: Path, progress=lambda *_: None):
                     "stock_price_vnd": _price(values[5]),
                     "quantity": _quantity(values[6]),
                     "expiry_date": _expiry(values[7]),
+                    "stock_note": _clean(values[8], "Ghi chú", 2000, required=False),
                 })
             except (ImportProblem, ValueError) as exc:
                 errors.append(f"Dòng {row_number}: {exc}")
@@ -327,7 +332,7 @@ def _row_payload(row):
     return (
         _row_identity(row), row["name"], row["code"], row["brand"], row["size"], row["cas"],
         str(row["stock_price_vnd"]) if row["stock_price_vnd"] is not None else None,
-        row["quantity"],
+        row["quantity"], row.get("stock_note", ""),
     )
 
 
@@ -358,14 +363,15 @@ def build_plan(cur, rows):
     prepared, new_brands = _prepare_rows(cur, rows, register=False)
     state = active_snapshot(cur)
     cur.execute(
-        """SELECT i.name,i.code,i.cas,i.brand,i.size,i.stock_price_vnd,i.quantity,i.expiry_date
+        """SELECT i.name,i.code,i.cas,i.brand,i.size,i.stock_price_vnd,i.quantity,i.expiry_date,i.stock_note
            FROM stock_items i WHERE i.snapshot_id=%s""",
         (state["id"],),
     )
     current = []
-    for name, code, cas, brand, size, price, quantity, expiry in cur.fetchall():
+    for name, code, cas, brand, size, price, quantity, expiry, note in cur.fetchall():
         current.append({"name": name, "code": code, "cas": cas, "brand": brand, "size": size,
-                        "stock_price_vnd": price, "quantity": quantity, "expiry_date": expiry})
+                        "stock_price_vnd": price, "quantity": quantity, "expiry_date": expiry,
+                        "stock_note": note})
     old_by_id = {_row_identity(row): _row_payload(row) for row in current}
     new_by_id = {_row_identity(row): _row_payload(row) for row in prepared}
     added = sum(1 for key in new_by_id if key not in old_by_id)
@@ -379,6 +385,7 @@ def build_plan(cur, rows):
         "brand": row["brand"], "size": row["size"], "quantity": row["quantity"],
         "stock_price": str(row["stock_price_vnd"]) if row["stock_price_vnd"] is not None else "",
         "expiry": row["expiry_date"].isoformat() if row["expiry_date"] else "",
+        "stock_note": row.get("stock_note", ""),
     } for row in prepared[:20]]
     return {
         "total_rows": len(prepared), "brands": sorted({row["brand"] for row in prepared}, key=str.casefold),
@@ -413,13 +420,13 @@ def _apply(cur, rows, expected, job):
         snapshot_id, row["name"], row["code"], row["cas"], row["brand"], row["size"],
         row["stock_price_vnd"], row["quantity"], row["expiry_date"],
         normalized_text(row["brand"]), normalized_text(row["code"]), normalized_text(row["size"]),
-        normalized_text(row["cas"]) or None,
+        normalized_text(row["cas"]) or None, row.get("stock_note", ""),
     ) for row in prepared]
     execute_values(
         cur,
         """INSERT INTO stock_items
            (snapshot_id,name,code,cas,brand,size,stock_price_vnd,quantity,expiry_date,
-            brand_norm,code_norm,size_norm,cas_norm) VALUES %s""",
+            brand_norm,code_norm,size_norm,cas_norm,stock_note) VALUES %s""",
         values,
         page_size=1000,
     )
@@ -475,9 +482,9 @@ def restore_snapshot(snapshot_id, actor, actor_user_id, actor_auth_version, expe
         cur.execute(
             """INSERT INTO stock_items
                (snapshot_id,name,code,cas,brand,size,stock_price_vnd,quantity,expiry_date,
-                brand_norm,code_norm,size_norm,cas_norm)
+                brand_norm,code_norm,size_norm,cas_norm,stock_note)
                SELECT %s,name,code,cas,brand,size,stock_price_vnd,quantity,expiry_date,
-                      brand_norm,code_norm,size_norm,cas_norm
+                      brand_norm,code_norm,size_norm,cas_norm,stock_note
                FROM stock_items WHERE snapshot_id=%s""",
             (new_id, source_id),
         )

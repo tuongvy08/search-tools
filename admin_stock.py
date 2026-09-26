@@ -91,7 +91,7 @@ def register(app, require_admin, actor):
             if app.testing:
                 raise
             recent_jobs, snapshots = [], []
-            error = "Không tải được dữ liệu tồn kho. Kiểm tra migration 029 và kết nối database."
+            error = "Không tải được dữ liệu tồn kho. Kiểm tra migration 029–031 và kết nối database."
         return render_template(
             "admin_stock.html", jobs=recent_jobs, snapshots=snapshots, job=None, events=[],
             error=error, message=request.args.get("msg"),
@@ -106,8 +106,8 @@ def register(app, require_admin, actor):
         wb = Workbook()
         ws = wb.active
         ws.title = "ton_kho"
-        ws.append(["Name", "Code", "Cas", "Brand", "Size", "Giá tồn kho", "Số lượng tồn", "Hạn sử dụng"])
-        ws.append(["Ví dụ — xóa dòng này", "STOCK-001", "50-00-0", "Brand mẫu", "100 mL", 125000, 4, "31/12/2027"])
+        ws.append(["Name", "Code", "Cas", "Brand", "Size", "Giá tồn kho", "Số lượng tồn", "Hạn sử dụng", "Ghi chú"])
+        ws.append(["Ví dụ — xóa dòng này", "STOCK-001", "50-00-0", "Brand mẫu", "100 mL", 125000, 4, "31/12/2027", "Kho A — hàng mẫu"])
         stream = BytesIO()
         wb.save(stream); wb.close(); stream.seek(0)
         return send_file(

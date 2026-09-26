@@ -122,9 +122,9 @@ class Phase6D2StockTests(unittest.TestCase):
             cur.execute("UPDATE app_users SET auth_version=1 WHERE id=%s", (self.admin_id,))
 
 
-    def _submit_preview(self, rows, filename="stock.xlsx"):
+    def _submit_preview(self, rows, filename="stock.xlsx", headers=HEADERS):
         job_id = stock_import_jobs.submit(
-            FileStorage(stream=workbook_bytes(rows), filename=filename), "stock_admin",
+            FileStorage(stream=workbook_bytes(rows, headers=headers), filename=filename), "stock_admin",
             self.admin_id, 1, str(uuid.uuid4()),
         )
         self.assertTrue(stock_import_jobs.run_once(job_id))
@@ -607,6 +607,81 @@ class Phase6D2StockTests(unittest.TestCase):
             self.assertEqual(cur.fetchone(), before)
             cur.execute("SELECT quantity FROM stock_items WHERE snapshot_id=%s", (before[0],))
             self.assertEqual(cur.fetchone()[0], 7)
+
+    def test_notes_import_search_findcode_restore_and_migration_reapply(self):
+        headers = HEADERS + ["Ghi chú"]
+        note = "Kho A\nHàng mẫu <b>không phải HTML</b>"
+        row = ["A", "NOTE-1", None, "Brand A", "1g", None, 7, None]
+        first_id, first = self._submit_preview([row + [note]], headers=headers)
+        self.assertEqual(first["preview"]["sample"][0]["stock_note"], note)
+        self.assertEqual(self._apply(first_id, first)["status"], "completed")
+        first_snapshot, _, _ = self._state_signature()
+        client = self._admin_client()
+        preview_html = client.get(f"/admin/stock/jobs/{first_id}").get_data(as_text=True)
+        self.assertIn("&lt;b&gt;không phải HTML&lt;/b&gt;", preview_html)
+        for grants in (["SEARCH", "FIND_CODE", "VIEW_CODE"],
+                       ["SEARCH", "FIND_CODE", "VIEW_CODE", "VIEW_NOTE"]):
+            team_client = self._team_client(grants, ["Brand A"])
+            for response in (team_client.get("/search?query=NOTE-1"),
+                             team_client.post("/find_code_batch", data={"codes": "NOTE-1"})):
+                self.assertEqual(response.status_code, 200)
+                option = response.get_json()["results"][0]["Stock_Options"][0]
+                self.assertEqual("Stock_Note" in option, "VIEW_NOTE" in grants)
+                if "VIEW_NOTE" in grants:
+                    self.assertEqual(option["Stock_Note"], note)
+                else:
+                    self.assertNotIn(note, response.get_data(as_text=True))
+        for response in (client.get("/search?query=NOTE-1"),
+                         client.post("/find_code_batch", data={"codes": "NOTE-1"})):
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.get_json()["results"][0]["Stock_Options"][0]["Stock_Note"], note)
+        second_id, second = self._submit_preview([row + ["Kho B"]], headers=headers)
+        self.assertEqual(second["preview"]["changed"], 1)
+        self.assertNotEqual(first["preview"]["plan_digest"], second["preview"]["plan_digest"])
+        self.assertEqual(self._apply(second_id, second)["status"], "completed")
+        self.assertEqual(client.get("/search?query=NOTE-1").get_json()["results"][0]["Stock_Options"][0]["Stock_Note"], "Kho B")
+        _, revision, fingerprint = self._state_signature()
+        restored = stock_import_jobs.restore_snapshot(first_snapshot, "stock_admin", self.admin_id, 1,
+                                                     revision, fingerprint)
+        migration = (ROOT / "sql" / "migration_031_stock_notes.sql").read_text(encoding="utf-8")
+        with self.conn.cursor() as cur:
+            cur.execute(migration)
+            cur.execute(migration)
+            cur.execute("SELECT stock_note FROM stock_items WHERE snapshot_id=%s", (restored,))
+            self.assertEqual(cur.fetchone()[0], note)
+        legacy_id, legacy = self._submit_preview([row])
+        self.assertEqual(legacy["preview"]["changed"], 1)
+        self.assertEqual(self._apply(legacy_id, legacy)["status"], "completed")
+        self.assertEqual(client.get("/search?query=NOTE-1").get_json()["results"][0]["Stock_Options"][0]["Stock_Note"], "")
+
+    def test_notes_migration_backfills_legacy_items_without_changing_stock_state(self):
+        job_id, job = self._submit_preview([["A", "LEGACY-1", None, "Brand A", "1g", None, 3, None]])
+        self.assertEqual(self._apply(job_id, job)["status"], "completed")
+        before = self._state_signature()
+        with self.conn.cursor() as cur:
+            cur.execute("INSERT INTO products(name,code,brand,source_brand) VALUES ('Untouched','NOTE-CATALOG','Brand A','Brand A')")
+            cur.execute("SELECT row_to_json(p),xmin::text FROM products p ORDER BY id")
+            products_before = cur.fetchall()
+            cur.execute("SELECT row_to_json(s),xmin::text FROM stock_snapshots s ORDER BY id")
+            snapshots_before = cur.fetchall()
+            # Confined to the throwaway database: emulate the schema before 031.
+            cur.execute("ALTER TABLE stock_items DROP COLUMN stock_note")
+            cur.execute((ROOT / "sql" / "migration_031_stock_notes.sql").read_text(encoding="utf-8"))
+            cur.execute("SELECT quantity,stock_note FROM stock_items")
+            self.assertEqual(cur.fetchall(), [(3, "")])
+            cur.execute("SELECT row_to_json(p),xmin::text FROM products p ORDER BY id")
+            self.assertEqual(cur.fetchall(), products_before)
+            cur.execute("SELECT row_to_json(s),xmin::text FROM stock_snapshots s ORDER BY id")
+            self.assertEqual(cur.fetchall(), snapshots_before)
+        self.assertEqual(self._state_signature(), before)
+
+    def test_notes_do_not_change_identity(self):
+        row = ["A", "NOTE-1", None, "Brand A", "1g", None, 7, None]
+        _, job = self._submit_preview([row + ["Kho A"], row + ["Kho B"]], headers=HEADERS + ["notes"])
+        self.assertEqual(job["status"], "failed")
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM stock_snapshots")
+            self.assertEqual(cur.fetchone()[0], 0)
 
     def test_migration_sql_avoids_pg15_only_unique_syntax(self):
         self.assertNotIn("UNIQUE NULLS NOT DISTINCT", MIGRATION_029)

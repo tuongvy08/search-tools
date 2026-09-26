@@ -8,65 +8,63 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260926d8') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='search_suggestions.css', v='20260926d7') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='search_workspace.css', v='20260926d9') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
 </head>
 <body class="search-page">
     {% include "_user_nav.html" %}
-    <h1>Product Search</h1>
-    <div class="search-container">
-        <!-- Thêm hai nút Find CAS và Find Code -->
-        {% if can("CHECK_LICENSE") %}
-        <button class="nav-button" id="btnCheckLicense" type="button">Check license</button>
-        {% endif %}
-        {% if can("FIND_CODE") %}
-        <button class="nav-button" id="btnFindCode" type="button">Find Code</button>
-        {% endif %}
-        {% if can("ADVANCED_SEARCH") %}
-        <button class="nav-button" id="btnAdvancedSearch" type="button">Advanced Search</button>
-        {% endif %}
-        {% if can("QUICK_QUOTE") %}
-        <a class="nav-button nav-button-link" href="{{ url_for('quick_quote') }}">Quick Quote</a>
-        {% endif %}
-        {% if can("COPY") %}
-        <button class="nav-button btn-export" id="btnCopySelected" type="button"
-                title="Sao chép các dòng đã chọn (dán vào Excel/Google Sheet bằng Ctrl/Cmd+V)"
-                aria-label="Copy Selected">
-            <i class="fas fa-copy"></i> Copy Selected
-        </button>
+    <main class="search-workspace">
+        <header class="search-workspace-heading">
+            <h1 id="productSearchTitle">Product Search</h1>
+        </header>
 
-        {% endif %}
-        {% if can("EXPORT") %}<button class="nav-button" id="btnExportSelected" type="button" disabled><i class="fas fa-file-invoice-dollar" aria-hidden="true"></i> Xuất báo giá</button>{% endif %}
+        <section class="search-card search-card-query" aria-labelledby="productSearchTitle">
+            <div class="search-container">
+                {% if can("SEARCH") %}
+                <div class="search-primary">
+                    <div class="product-search-controls">
+                        <label class="search-field-label" for="searchQuery">Từ khóa tìm kiếm</label>
+                        <div class="input-box">
+                            <i class="fas fa-search" aria-hidden="true"></i>
+                            <input type="text" id="searchQuery" placeholder="Nhập tên sản phẩm, code hoặc CAS..." maxlength="500"
+                                   role="combobox" aria-label="Tìm sản phẩm hoặc tồn kho" aria-autocomplete="list"
+                                   aria-expanded="false" aria-controls="searchSuggestions" autocomplete="off">
+                            <button class="search-button" type="button">Search</button>
+                            <ul id="searchSuggestions" class="search-suggestions" role="listbox" aria-label="Gợi ý tìm kiếm" hidden></ul>
+                            <span id="searchSuggestStatus" class="search-suggest-status" role="status" aria-live="polite"></span>
+                        </div>
+                    </div>
+                </div>
+                {% else %}
+                <span class="search-section-title">Công cụ tra cứu</span>
+                {% endif %}
 
-        {% if can("SEARCH") %}
-        <div class="product-search-controls">
-            <div class="input-box">
-                <i class="fas fa-search"></i>
-                <input type="text" id="searchQuery" placeholder="Search for products..." maxlength="500"
-                       role="combobox" aria-label="Tìm sản phẩm hoặc tồn kho" aria-autocomplete="list"
-                       aria-expanded="false" aria-controls="searchSuggestions" autocomplete="off">
-                <button class="search-button">Search</button>
-                <ul id="searchSuggestions" class="search-suggestions" role="listbox" aria-label="Gợi ý tìm kiếm" hidden></ul>
-                <span id="searchSuggestStatus" class="search-suggest-status" role="status" aria-live="polite"></span>
+                {% if can("CHECK_LICENSE") or can("FIND_CODE") or can("ADVANCED_SEARCH") or can("QUICK_QUOTE") %}
+                <div class="search-utility-group" aria-label="Công cụ tra cứu bổ sung">
+                    <span class="search-utility-label">Công cụ bổ sung</span>
+                    <div class="search-utility-actions">
+                        {% if can("CHECK_LICENSE") %}
+                        <button class="nav-button" id="btnCheckLicense" type="button">Check license</button>
+                        {% endif %}
+                        {% if can("FIND_CODE") %}
+                        <button class="nav-button" id="btnFindCode" type="button">Find Code</button>
+                        {% endif %}
+                        {% if can("ADVANCED_SEARCH") %}
+                        <button class="nav-button" id="btnAdvancedSearch" type="button">Advanced Search</button>
+                        {% endif %}
+                        {% if can("QUICK_QUOTE") %}
+                        <a class="nav-button nav-button-link" href="{{ url_for('quick_quote') }}">Quick Quote</a>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
             </div>
-            <label class="stock-only-filter" for="inStockOnly">
-                <input type="checkbox" id="inStockOnly" aria-describedby="inStockOnlyHint">
-                <span>Chỉ hiện kết quả có tồn kho</span>
-            </label>
-            <small id="inStockOnlyHint" class="stock-only-filter-hint">Khớp code hoặc cùng CAS · Chỉ áp dụng Product Search</small>
-        </div>
-        {% endif %}
-    </div>
-    {% if session.get('is_admin') %}
-    <div id="quoteExportContext" class="quote-export-context">
-        <label>Team <select data-quote-team><option value="">Toàn hệ thống</option></select></label>
-        <label>Mẫu báo giá <select data-quote-template><option value="">Theo team / mẫu mặc định</option></select></label>
-        <span data-quote-context-status>Đang tải phạm vi xuất…</span>
-    </div>
-    {% endif %}
-    {% if not can("SEARCH") and not can("FIND_CODE") and not can("ADVANCED_SEARCH") and not can("CHECK_LICENSE") %}<p class="permission-empty">Team chưa được bật chức năng tra cứu.</p>{% endif %}
+        </section>
+
+        {% if not can("SEARCH") and not can("FIND_CODE") and not can("ADVANCED_SEARCH") and not can("CHECK_LICENSE") %}<p class="permission-empty">Team chưa được bật chức năng tra cứu.</p>{% endif %}
 
     <!-- Panel nhập danh sách CAS / code để chạy nhanh (không cần sang app khác) -->
-    <div id="multiModePanel" class="multi-panel" style="display:none;">
+        <div id="multiModePanel" class="multi-panel" style="display:none;">
         <div class="multi-panel-title" id="multiModeTitle">Run</div>
         <textarea id="multiInput" rows="6" placeholder="Paste CAS (mỗi dòng 1 CAS) hoặc Code (mỗi dòng 1 code)"></textarea>
         <div class="multi-panel-actions">
@@ -74,10 +72,10 @@
             <button class="btn-secondary nav-button" id="multiCancelBtn" type="button">Cancel</button>
         </div>
         <div id="licenseWarnings" style="display:none;"></div>
-    </div>
+        </div>
 
     <!-- Advanced Search: CAS list → brand → size (chỉ size có trong kết quả CAS) -->
-    <div id="advancedSearchPanel" class="multi-panel adv-panel" style="display:none;">
+        <div id="advancedSearchPanel" class="multi-panel adv-panel" style="display:none;">
         <div class="multi-panel-title">Advanced Search (CAS + Brand + Size)</div>
         <div class="adv-step">
             <div class="adv-step-label">Bước 1 — Dán danh sách CAS</div>
@@ -107,28 +105,85 @@
             <button class="nav-button" id="advRunBtn" type="button">Tìm kiếm</button>
             <button class="btn-secondary nav-button" id="advCancelBtn" type="button">Cancel</button>
         </div>
-    </div>
-
-    <div id="operationStatus" class="operation-status" role="status" aria-live="polite"></div>
-
-    <div id="selectionBar" class="selection-bar" style="display:none;">
-        <span id="selectionCount">Đã chọn: 0 dòng</span>
-        <button type="button" class="btn-linkish" id="btnClearSelection">Bỏ chọn tất cả</button>
-    </div>
-
-    <div class="filter-container">
-        <!-- Div để chứa các checkbox của Brand -->
-        <div id="brandCheckboxes">
-            <!-- Checkboxes sẽ được thêm động bằng JavaScript -->
         </div>
-        <!-- Div để chứa các checkbox của Size -->
-        <div id="sizeCheckboxes">
-            <!-- Checkboxes sẽ được thêm động bằng JavaScript -->
-        </div>
-    </div>
 
-    <div class="results-table-wrap">
-    <table id="results">
+        <div id="operationStatus" class="operation-status" role="status" aria-live="polite"></div>
+
+        <section class="search-card filter-container" aria-labelledby="searchFiltersTitle">
+            <div class="search-card-heading">
+                <h2 id="searchFiltersTitle">Bộ lọc kết quả</h2>
+            </div>
+            <div class="search-filter-grid">
+                {% if can("SEARCH") %}
+                <fieldset class="search-filter-group search-filter-stock">
+                    <legend>Tình trạng tồn kho</legend>
+                    <label class="stock-only-filter" for="inStockOnly">
+                        <input type="checkbox" id="inStockOnly" aria-describedby="inStockOnlyHint">
+                        <span>Chỉ hiện kết quả có tồn kho</span>
+                    </label>
+                    <small id="inStockOnlyHint" class="stock-only-filter-hint">Khớp code hoặc cùng CAS · Chỉ áp dụng Product Search</small>
+                </fieldset>
+                {% endif %}
+                <fieldset class="search-filter-group">
+                    <legend>Brand</legend>
+                    <div id="brandCheckboxes" aria-label="Lọc theo brand"></div>
+                </fieldset>
+                <fieldset class="search-filter-group">
+                    <legend>Quy cách</legend>
+                    <div id="sizeCheckboxes" aria-label="Lọc theo quy cách"></div>
+                </fieldset>
+            </div>
+        </section>
+
+        <section class="search-card search-results-card" aria-labelledby="searchResultsTitle">
+            <div class="results-toolbar">
+                <h2 id="searchResultsTitle">Kết quả</h2>
+                <div class="results-actions" aria-label="Thao tác với kết quả đã chọn">
+                    {% if can("COPY") %}
+                    <button class="nav-button btn-export" id="btnCopySelected" type="button" disabled
+                            title="Sao chép các dòng đã chọn (dán vào Excel/Google Sheet bằng Ctrl/Cmd+V)"
+                            aria-label="Copy Selected">
+                        <i class="fas fa-copy" aria-hidden="true"></i> Copy Selected
+                    </button>
+                    {% endif %}
+                    {% if can("EXPORT") %}<button class="nav-button" id="btnExportSelected" type="button" disabled><i class="fas fa-file-invoice-dollar" aria-hidden="true"></i> Xuất báo giá</button>{% endif %}
+                </div>
+            </div>
+
+            <div id="selectionBar" class="selection-bar" style="display:none;">
+                <span id="selectionCount">Đã chọn: 0 dòng</span>
+                <button type="button" class="btn-linkish" id="btnClearSelection">Bỏ chọn tất cả</button>
+            </div>
+
+            {% if session.get('is_admin') %}
+            <div class="result-export-settings" aria-labelledby="quoteExportContextTitle">
+                <div class="result-export-heading">
+                    <strong id="quoteExportContextTitle">Ngữ cảnh xuất báo giá</strong>
+                    <span>Chỉ áp dụng khi xuất, không lọc kết quả.</span>
+                </div>
+                <div id="quoteExportContext" class="quote-export-context">
+                    <label>Team xuất báo giá <select data-quote-team><option value="">Toàn hệ thống</option></select></label>
+                    <label>Mẫu báo giá <select data-quote-template><option value="">Theo team / mẫu mặc định</option></select></label>
+                    <span data-quote-context-status>Đang tải phạm vi xuất…</span>
+                </div>
+            </div>
+            {% endif %}
+
+            <div class="results-table-wrap" role="region" aria-label="Bảng kết quả tìm kiếm" tabindex="0">
+            <table id="results">
+        <colgroup>
+            <col class="col-select">
+            {% if can("VIEW_NAME") %}<col class="col-name">{% endif %}
+            {% if can("VIEW_CODE") %}<col class="col-code">{% endif %}
+            {% if can("VIEW_CAS") %}<col class="col-cas">{% endif %}
+            {% if can("VIEW_BRAND") %}<col class="col-brand">{% endif %}
+            {% if can("VIEW_SIZE") %}<col class="col-size">{% endif %}
+            {% if can("VIEW_PRICE") %}<col class="col-price">{% endif %}
+            {% if can("VIEW_NOTE") %}<col class="col-note">{% endif %}
+            {% if can("VIEW_COMPLIANCE") %}<col class="col-compliance">{% endif %}
+            {% if can("VIEW_COMPLIANCE_NOTE") %}<col class="col-compliance-note">{% endif %}
+            <col class="col-stock">
+        </colgroup>
         <thead>
             <tr>
                 <th class="col-select" title="Chọn tất cả dòng hiển thị">
@@ -148,8 +203,10 @@
         </thead>
         <tbody>
         </tbody>
-    </table>
-    </div>
+            </table>
+            </div>
+        </section>
+    </main>
 
     <!-- Include necessary scripts -->
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>    

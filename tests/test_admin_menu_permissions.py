@@ -142,7 +142,7 @@ class AdminMenuPgTests(unittest.TestCase):
             client=self.client(uid)
             for rule in search.app.url_map.iter_rules():
                 if rule.endpoint not in rbac.ENDPOINT_PERMISSIONS:continue
-                values={arg: ('00000000-0000-0000-0000-000000000001' if 'id' in arg and arg not in ('user_id','product_id','template_id') else 1) for arg in rule.arguments}
+                values={arg: ('00000000-0000-0000-0000-000000000001' if 'id' in arg and arg not in ('user_id','product_id','template_id','item_id') else 1) for arg in rule.arguments}
                 values.update({k:v for k,v in {'action':'cancel','kind':'product','field':'cas'}.items() if k in values})
                 with search.app.test_request_context():
                     from flask import url_for

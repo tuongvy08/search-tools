@@ -196,6 +196,8 @@ def control(job_id, action, actor, fingerprint="", confirm_replace=""):
 
 def _clean(value, field, maximum, *, required=True):
     text = unicodedata.normalize("NFC", "" if value is None else str(value)).strip()
+    if "\x00" in text:
+        raise ImportProblem(f"{field} chứa ký tự không hợp lệ.")
     if required and not text:
         raise ImportProblem(f"{field} không được để trống.")
     if len(text) > maximum:
@@ -214,6 +216,8 @@ def _quantity(value):
         raise ImportProblem("Số lượng tồn phải là số nguyên không âm.") from None
     if not number.is_finite() or number < 0 or number != number.to_integral_value():
         raise ImportProblem("Số lượng tồn phải là số nguyên không âm.")
+    if number > 2147483647:
+        raise ImportProblem("Số lượng tồn tối đa 2.147.483.647.")
     return int(number)
 
 
@@ -228,6 +232,8 @@ def _price(value):
         raise ImportProblem("Giá tồn kho phải là số VND không âm hoặc để trống.") from None
     if not number.is_finite() or number < 0 or number.as_tuple().exponent < -2:
         raise ImportProblem("Giá tồn kho phải là số VND không âm, tối đa 2 chữ số thập phân.")
+    if number > Decimal("9999999999999999.99"):
+        raise ImportProblem("Giá tồn kho vượt giới hạn NUMERIC(18,2).")
     return number
 
 
@@ -245,6 +251,28 @@ def _expiry(value):
         except ValueError:
             pass
     raise ImportProblem("Hạn sử dụng phải là ngày Excel, YYYY-MM-DD hoặc DD/MM/YYYY.")
+
+
+def validate_stock_row(values, *, row_number=1):
+    """Shared nine-field validation for Excel and manual forms."""
+    cas_text = _clean(values[2], "CAS", 32, required=False)
+    return {
+        "row_number": row_number,
+        "name": _clean(values[0], "Name", 500),
+        "code": _clean(values[1], "Code", 500),
+        "cas": normalize_cas(cas_text) if cas_text else None,
+        "brand": _clean(values[3], "Brand", 180),
+        "size": _clean(values[4], "Size", 500),
+        "stock_price_vnd": _price(values[5]),
+        "quantity": _quantity(values[6]),
+        "expiry_date": _expiry(values[7]),
+        "stock_note": _clean(values[8], "Ghi chú", 2000, required=False),
+    }
+
+
+def content_digest(rows):
+    """Same row-payload contract for import plans and manual snapshots."""
+    return hashlib.sha256("\n".join(sorted(repr(_row_payload(row)) for row in rows)).encode("utf-8")).hexdigest()
 
 
 def parse_workbook(path: Path, progress=lambda *_: None):
@@ -292,19 +320,7 @@ def parse_workbook(path: Path, progress=lambda *_: None):
                 errors.append(f"Dòng {row_number}: hãy thay công thức bằng giá trị.")
                 continue
             try:
-                cas_text = _clean(values[2], "CAS", 32, required=False)
-                rows.append({
-                    "row_number": row_number,
-                    "name": _clean(values[0], "Name", 500),
-                    "code": _clean(values[1], "Code", 500),
-                    "cas": normalize_cas(cas_text) if cas_text else None,
-                    "brand": _clean(values[3], "Brand", 180),
-                    "size": _clean(values[4], "Size", 500),
-                    "stock_price_vnd": _price(values[5]),
-                    "quantity": _quantity(values[6]),
-                    "expiry_date": _expiry(values[7]),
-                    "stock_note": _clean(values[8], "Ghi chú", 2000, required=False),
-                })
+                rows.append(validate_stock_row(values, row_number=row_number))
             except (ImportProblem, ValueError) as exc:
                 errors.append(f"Dòng {row_number}: {exc}")
             if len(errors) >= 100:
@@ -378,8 +394,7 @@ def build_plan(cur, rows):
     changed = sum(1 for key in new_by_id if key in old_by_id and new_by_id[key] != old_by_id[key])
     unchanged = sum(1 for key in new_by_id if key in old_by_id and new_by_id[key] == old_by_id[key])
     removed = sum(1 for key in old_by_id if key not in new_by_id)
-    digest_rows = sorted(repr(_row_payload(row)) for row in prepared)
-    plan_digest = hashlib.sha256("\n".join(digest_rows).encode("utf-8")).hexdigest()
+    plan_digest = content_digest(prepared)
     sample = [{
         "name": row["name"], "code": row["code"], "cas": row["cas"] or "",
         "brand": row["brand"], "size": row["size"], "quantity": row["quantity"],

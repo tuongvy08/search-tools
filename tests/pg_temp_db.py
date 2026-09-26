@@ -83,6 +83,7 @@ _FULL_SCHEMA_SQL_FILES = (
     "migration_029_stock_management.sql",
     "migration_030_admin_menu_permissions.sql",
     "migration_031_stock_notes.sql",
+    "migration_032_stock_manual.sql",
 )
 
 # Same minimal pre-014 base `test_admin_pg_integration.py` /

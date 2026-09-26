@@ -8,16 +8,16 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260910d2') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='admin_stock.css', v='20260910d2') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_stock.css', v='20260926d6') }}">
   <script defer src="{{ url_for('static', filename='admin_ux.js', v='20260909d1') }}"></script>
-  <script defer src="{{ url_for('static', filename='admin_stock.js', v='20260910d2') }}"></script>
+  <script defer src="{{ url_for('static', filename='admin_stock.js', v='20260926d6') }}"></script>
 </head>
 <body class="admin-page">
 {% include '_user_nav.html' %}
 <main class="stock-shell stock-page">
   <header class="stock-header">
     <div><p class="eyebrow">Quản trị · Snapshot riêng</p><h1>Quản lý tồn kho</h1>
-      <p class="lead">Xem trước rồi thay toàn bộ tồn kho. Catalog, giá báo giá và quyền team không bị thay đổi.</p></div>
+      <p class="lead">Tìm và sửa từng dòng, hoặc nhập file thay toàn bộ. Catalog, giá báo giá và quyền team không bị thay đổi.</p></div>
     <a class="stock-template-link" href="{{ url_for('stock_template') }}"><i class="fas fa-file-excel" aria-hidden="true"></i> Tải file mẫu</a>
   </header>
 
@@ -74,6 +74,7 @@
     <details class="audit"><summary>Nhật ký tác vụ</summary><ul>{% for event in events %}<li>{{ event.created_at }} · {{ 'Hệ thống' if event.actor == 'worker' else event.actor }} · {{ event_labels.get(event.event, 'Sự kiện hệ thống') }}</li>{% else %}<li>Chưa có sự kiện.</li>{% endfor %}</ul></details>
   </section>
   {% else %}
+  {% if inventory %}{% include '_stock_current.html' %}{% endif %}
   <div class="stock-layout">
     <section class="stock-panel upload-panel">
       <div class="section-heading"><div><p class="eyebrow">Nhập an toàn</p><h2>Tạo snapshot mới</h2></div><span class="step-mark">01</span></div>
@@ -110,7 +111,7 @@
   <section class="stock-panel snapshots-panel">
     <div class="section-heading"><div><h2>Lịch sử snapshot</h2><p class="muted">Không tự xóa snapshot. Khôi phục luôn tạo một snapshot mới để giữ audit.</p></div></div>
     <div class="table-wrap" tabindex="0"><table><thead><tr><th>Trạng thái</th><th>Thời gian</th><th>Dòng</th><th>Nguồn</th><th>Người thực hiện</th><th>Thao tác</th></tr></thead><tbody>
-      {% for item in snapshots %}<tr><td>{% if item.is_active %}<span class="stock-status status-active">Đang dùng</span>{% else %}Lịch sử{% endif %}</td><td>{{ item.created_at }}</td><td>{{ item.row_count }}</td><td>{{ 'Khôi phục' if item.source_kind == 'RESTORE' else 'Import' }}</td><td>{{ item.actor }}</td><td>{% if not item.is_active %}<form method="post" action="{{ url_for('stock_snapshot_restore', snapshot_id=item.id) }}" data-submit-once><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="stock_revision" value="{{ stock_revision }}"><input type="hidden" name="stock_fingerprint" value="{{ stock_fingerprint }}"><button class="secondary compact" type="submit">Khôi phục thành bản mới</button></form>{% else %}—{% endif %}</td></tr>
+      {% for item in snapshots %}<tr><td>{% if item.is_active %}<span class="stock-status status-active">Đang dùng</span>{% else %}Lịch sử{% endif %}</td><td>{{ item.created_at }}</td><td>{{ item.row_count }}</td><td>{{ 'Khôi phục' if item.source_kind == 'RESTORE' else ('Thủ công' if item.source_kind == 'MANUAL' else 'Import') }}</td><td>{{ item.actor }}</td><td>{% if not item.is_active %}<form method="post" action="{{ url_for('stock_snapshot_restore', snapshot_id=item.id) }}" data-submit-once><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="stock_revision" value="{{ stock_revision }}"><input type="hidden" name="stock_fingerprint" value="{{ stock_fingerprint }}"><button class="secondary compact" type="submit">Khôi phục thành bản mới</button></form>{% else %}—{% endif %}</td></tr>
       {% else %}<tr><td colspan="6" class="empty-state">Chưa có snapshot; tra cứu tồn hiện trả rỗng.</td></tr>{% endfor %}
     </tbody></table></div>
   </section>

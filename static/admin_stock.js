@@ -1,4 +1,14 @@
 (() => {
+  document.querySelectorAll('[data-stock-manual-form]').forEach((form) => {
+    form.addEventListener('submit', (event) => {
+      if (event.defaultPrevented) return;
+      const status = form.querySelector('[data-stock-submit-status]');
+      if (status) status.textContent = form.dataset.submitMessage;
+    });
+  });
+  window.addEventListener('pageshow', () => {
+    document.querySelectorAll('[data-stock-submit-status]').forEach((status) => { status.textContent = ''; });
+  });
   const upload = document.querySelector('[data-stock-upload]');
   if (upload) upload.addEventListener('submit', () => {
     const status = upload.querySelector('[data-upload-status]');

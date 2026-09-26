@@ -1,0 +1,27 @@
+<section class="stock-panel" aria-labelledby="stock-current-title">
+  <div class="section-heading">
+    <div><p class="eyebrow">Thao tác nhanh · Tồn hiện hành</p><h2 id="stock-current-title">Tìm và chỉnh sửa tồn kho</h2></div>
+    <a class="stock-template-link" href="{{ url_for('stock_manual_new', **selected) }}">+ Thêm tồn mới</a>
+  </div>
+  <form method="get" action="{{ url_for('admin_stock') }}" class="stock-filters">
+    <label>Tên hàng, code hoặc CAS<input type="search" name="q" value="{{ selected.q or '' }}" maxlength="500" placeholder="Nhập một phần nội dung…"></label>
+    <label>Brand<select name="brand"><option value="">Tất cả brand</option>
+      {% if selected.brand and selected.brand not in inventory.brands %}<option selected value="{{ selected.brand }}">{{ selected.brand }} (không còn tồn)</option>{% endif %}
+      {% for brand in inventory.brands %}<option value="{{ brand }}" {{ 'selected' if brand == selected.brand else '' }}>{{ brand }}</option>{% endfor %}
+    </select></label>
+    <label>Dòng/trang<select name="page_size">{% for size in [25,50,100] %}<option value="{{ size }}" {{ 'selected' if size == selected.page_size else '' }}>{{ size }}</option>{% endfor %}</select></label>
+    <button type="submit">Tìm tồn</button><a href="{{ url_for('admin_stock') }}">Xóa bộ lọc</a>
+  </form>
+  <p role="status">{{ inventory.total }} kết quả · Trang {{ inventory.page }}/{{ inventory.pages }} · Phiên tồn {{ inventory.revision }}</p>
+  <div class="table-wrap stock-current-wrap" tabindex="0" role="region" aria-label="Danh sách tồn hiện hành, cuộn ngang để xem đủ trường">
+    <table class="stock-current-table"><thead><tr><th>Tên hàng</th><th>Code</th><th>CAS</th><th>Brand</th><th>Size</th><th>Giá tồn</th><th>Số lượng</th><th>Hạn sử dụng</th><th>Ghi chú</th><th>Thao tác</th></tr></thead><tbody>
+    {% for row in inventory.rows %}
+      <tr><td>{{ row.name }}</td><td>{{ row.code }}</td><td>{{ row.cas or '—' }}</td><td>{{ row.brand }}</td><td>{{ row.size }}</td><td class="stock-number">{{ row.price_label or '—' }}</td><td class="stock-number">{{ row.quantity_label }}</td><td>{{ row.expiry_label }}{% if row.expiry_state in ['expired','near_expiry'] %}<span class="stock-warning">{{ row.expiry_warning }}</span>{% endif %}</td><td class="stock-note">{{ row.stock_note or '—' }}</td><td><a href="{{ url_for('stock_manual_edit', item_id=row.id, **selected) }}" aria-label="Sửa {{ row.code }}">Sửa</a></td></tr>
+    {% else %}<tr><td colspan="10" class="empty-state">Không có dòng tồn phù hợp. Thử xóa bộ lọc hoặc thêm tồn mới.</td></tr>{% endfor %}
+    </tbody></table>
+  </div>
+  <nav class="stock-pagination" aria-label="Phân trang tồn kho">
+    {% if inventory.page > 1 %}<a href="{{ url_for('admin_stock', q=selected.q, brand=selected.brand, page=inventory.page-1, page_size=selected.page_size) }}">← Trang trước</a>{% endif %}
+    {% if inventory.page < inventory.pages %}<a href="{{ url_for('admin_stock', q=selected.q, brand=selected.brand, page=inventory.page+1, page_size=selected.page_size) }}">Trang sau →</a>{% endif %}
+  </nav>
+</section>

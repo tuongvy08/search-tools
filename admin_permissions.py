@@ -43,7 +43,8 @@ _ENDPOINT_GROUPS = {
     'regulatory': '''admin_regulatory regulatory_job_detail regulatory_job_control
         regulatory_job_status regulatory_status_action regulatory_template regulatory_upload''',
     'stock': '''admin_stock stock_job_detail stock_job_control stock_job_status
-        stock_snapshot_restore stock_template stock_upload''',
+        stock_snapshot_restore stock_template stock_upload stock_manual_new
+        stock_manual_edit stock_manual_review stock_manual_save''',
     'manual_priority': 'admin_brand_compliance',
     'login_history': 'admin_login_history.index',
 }

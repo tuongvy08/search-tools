@@ -79,6 +79,71 @@ def _visible_stock_sql(alias: str, *, is_admin: bool, team_id) -> tuple[str, tup
     )
 
 
+def catalog_in_stock_filter_sql(
+    product_alias: str,
+    *,
+    is_admin: bool,
+    team_id,
+    include_same_cas: bool,
+) -> tuple[str, str, tuple]:
+    """Build the early catalog predicate for the Product Search stock filter.
+
+    ``stock_items.code_norm``/``cas_norm`` are written with ``normalized_text``
+    (NFC + strip + casefold).  PostgreSQL does not expose Unicode casefold on
+    every supported server version.  Printable ASCII identities use an exact
+    SQL fast path (ASCII lower + space trim).  A product identity containing
+    non-ASCII or control whitespace uses a conservative SQL slow path whenever
+    positive visible stock exists, so the gate cannot discard a value that the
+    application NFC+strip+casefold matcher would accept.  The caller retains
+    that application matcher as the final authority for attached options.
+
+    The materialized stock CTE deliberately includes the active snapshot,
+    positive quantity, and team/brand visibility before membership matching.
+    PostgreSQL can hash the two ``IN`` subplans once instead of probing the
+    stock indexes once per catalog candidate.  This prevents hidden or zero
+    quantity rows from making a catalog result eligible without an N+1 plan.
+    """
+    visibility_sql, visibility_params = _visible_stock_sql(
+        "stock_filter", is_admin=is_admin, team_id=team_id
+    )
+    code_value = f"COALESCE({product_alias}.code, '')"
+    positive_exists = "EXISTS (SELECT 1 FROM positive_visible_stock)"
+    matches = [
+        "(("
+        f"({code_value} COLLATE \"C\") !~ '[^ -~]' AND "
+        f"LOWER(TRIM({code_value}) COLLATE \"C\") "
+        "IN (SELECT code_norm FROM positive_visible_stock WHERE code_norm <> '')"
+        ") OR ("
+        f"({code_value} COLLATE \"C\") ~ '[^ -~]' AND {positive_exists}"
+        "))"
+    ]
+    if include_same_cas:
+        cas_value = f"COALESCE({product_alias}.cas, '')"
+        matches.append(
+            "(("
+            f"({cas_value} COLLATE \"C\") !~ '[^ -~]' AND "
+            f"LOWER(TRIM({cas_value}) COLLATE \"C\") "
+            "IN (SELECT cas_norm FROM positive_visible_stock "
+            "WHERE NULLIF(cas_norm, '') IS NOT NULL)"
+            ") OR ("
+            f"({cas_value} COLLATE \"C\") ~ '[^ -~]' AND "
+            "EXISTS (SELECT 1 FROM positive_visible_stock WHERE NULLIF(cas_norm, '') IS NOT NULL)"
+            "))"
+        )
+    return (
+        "positive_visible_stock AS MATERIALIZED ("
+        "SELECT stock_filter.code_norm,stock_filter.cas_norm "
+        "FROM stock_state stock_filter_state "
+        "JOIN stock_items stock_filter "
+        "ON stock_filter.snapshot_id=stock_filter_state.active_snapshot_id "
+        "WHERE stock_filter_state.singleton=TRUE "
+        "AND stock_filter.quantity>0 "
+        f"{visibility_sql})",
+        f"({' OR '.join(matches)})",
+        visibility_params,
+    )
+
+
 def fetch_stock_options(
     cur,
     *,
@@ -89,6 +154,7 @@ def fetch_stock_options(
     grants,
     allow_same_cas: bool,
     query=None,
+    positive_direct_only: bool = False,
 ) -> dict:
     """Fetch all active stock candidates with one bulk query.
 
@@ -112,11 +178,12 @@ def fetch_stock_options(
             clauses.append("d.name ILIKE %s ESCAPE '!'")
             params.append("%" + literal_like(query.strip()) + "%")
         dvis, dparams = _visible_stock_sql("d", is_admin=is_admin, team_id=team_id)
+        positive_sql = " AND d.quantity>0" if positive_direct_only else ""
         direct_sql = f"""WITH direct AS MATERIALIZED (
             SELECT d.id, CASE WHEN d.code_norm=%s THEN 'exact_code'
                 WHEN %s AND d.cas_norm=%s THEN 'same_cas' ELSE 'name' END AS match
             FROM stock_items d JOIN stock_state ds ON ds.active_snapshot_id=d.snapshot_id
-            WHERE ds.singleton=TRUE AND ({' OR '.join(clauses)}) {dvis}
+            WHERE ds.singleton=TRUE{positive_sql} AND ({' OR '.join(clauses)}) {dvis}
             ORDER BY d.id LIMIT {DIRECT_STOCK_LIMIT + 1}) """
         direct_params = (normalized_text(query), allow_same_cas, normalized_text(query), *params, *dparams)
         direct_join = "LEFT JOIN direct ON direct.id=i.id"

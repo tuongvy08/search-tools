@@ -37,7 +37,12 @@ import auth_google
 import session_security
 import admin_permissions
 import team_permissions
-from stock import fetch_stock_options, normalized_text as stock_normalized_text, options_for_product
+from stock import (
+    catalog_in_stock_filter_sql,
+    fetch_stock_options,
+    normalized_text as stock_normalized_text,
+    options_for_product,
+)
 import search_suggestions
 from compliance_resolver import compliance_css_type, resolve_compliance_precedence
 from regulatory import (
@@ -457,7 +462,7 @@ def _visibility_sql(alias: str):
     )
 
 
-def _load_visible_stock(conn, *, codes=(), cas_values=(), query=None):
+def _load_visible_stock(conn, *, codes=(), cas_values=(), query=None, positive_direct_only=False):
     grants = team_permissions.current_permissions()
     can_lookup_cas = team_permissions.can("SEARCH_BY_CAS")
     include_same_cas = can_lookup_cas and team_permissions.can("VIEW_CAS")
@@ -466,6 +471,7 @@ def _load_visible_stock(conn, *, codes=(), cas_values=(), query=None):
             cur, codes=codes, cas_values=cas_values,
             is_admin=bool(session.get("is_admin")), team_id=session.get("team_id"),
             grants=grants, allow_same_cas=can_lookup_cas, query=query,
+            positive_direct_only=positive_direct_only,
         ), include_same_cas
 
 
@@ -4797,12 +4803,50 @@ def product_suggestions():
 @app.route("/search", methods=["GET"])
 def search_products():
     search_query = request.args.get("query") or ""
+    raw_in_stock_only = request.args.get("in_stock_only")
+    if raw_in_stock_only in (None, "", "0"):
+        in_stock_only = False
+    elif raw_in_stock_only == "1":
+        in_stock_only = True
+    else:
+        return jsonify(error="in_stock_only phải là 0 hoặc 1."), 400
+    if in_stock_only and not search_query.strip():
+        return jsonify(error="Nhập từ khóa trước khi lọc kết quả có tồn kho."), 400
+
     cas_search_sql = "OR p.cas ILIKE %s" if team_permissions.can("SEARCH_BY_CAS") else ""
     vis, vis_params = _visibility_sql("p")
+    include_same_cas_filter = (
+        team_permissions.can("SEARCH_BY_CAS") and team_permissions.can("VIEW_CAS")
+    )
+    stock_filter_cte, stock_filter_sql, stock_filter_params = "", "", ()
+    candidate_cte, product_source = "", "products p"
+    if in_stock_only:
+        stock_filter_cte, stock_filter_sql, stock_filter_params = catalog_in_stock_filter_sql(
+            "p",
+            is_admin=bool(session.get("is_admin")),
+            team_id=session.get("team_id"),
+            include_same_cas=include_same_cas_filter,
+        )
+        candidate_cte = f"""
+                WITH {stock_filter_cte},
+                filtered_products AS MATERIALIZED (
+                    SELECT p.*
+                    FROM products p
+                    WHERE (p.name ILIKE %s OR p.code ILIKE %s {cas_search_sql})
+                    {vis}
+                    AND {stock_filter_sql}
+                )
+        """
+        product_source = "filtered_products p"
+
     conn = get_connection()
     try:
+        if in_stock_only:
+            # Catalog qualification and the subsequent bulk option fetch must
+            # observe the same active stock snapshot/revision.
+            conn.set_session(isolation_level="REPEATABLE READ", readonly=True)
         with conn.cursor() as cursor:
-            query = f"""
+            select_sql = f"""
                 SELECT
                     p.id,
                     p.name,
@@ -4823,12 +4867,11 @@ def search_products():
                     rr.stable_key AS compliance_stable_key,
                     rr.status_id AS compliance_status_id,
                     rr.color_key AS compliance_color_key
-                FROM products p
+                FROM {product_source}
                 LEFT JOIN brand_compliance_settings bcs
                   ON bcs.brand_norm = UPPER(TRIM(COALESCE(p.brand, '')))
                 {product_resolver_lateral('p', 'bcs')}
-                WHERE (p.name ILIKE %s OR p.code ILIKE %s {cas_search_sql})
-                {vis}
+                {"" if in_stock_only else f"WHERE (p.name ILIKE %s OR p.code ILIKE %s {cas_search_sql}) {vis}"}
                 ORDER BY
                     UPPER(TRIM(COALESCE(p.brand, ''))) ASC,
                     UPPER(TRIM(COALESCE(p.size, ''))) ASC,
@@ -4836,8 +4879,13 @@ def search_products():
                     UPPER(TRIM(COALESCE(p.code, ''))) ASC,
                     p.id ASC
             """
+            query = candidate_cte + select_sql
             pattern = f"%{search_query}%"
-            cursor.execute(query, (pattern, pattern) + ((pattern,) if cas_search_sql else ()) + vis_params)
+            search_params = (pattern, pattern) + ((pattern,) if cas_search_sql else ()) + vis_params
+            cursor.execute(
+                query,
+                (stock_filter_params + search_params) if in_stock_only else search_params,
+            )
             products = cursor.fetchall()
 
         rate_map = _load_pricing_resolver(conn)
@@ -4918,8 +4966,18 @@ def search_products():
             query=search_query,
             codes=[result.get("Code") for result in results] + [search_query],
             cas_values=[result.get("Cas") for result in results] + [search_query],
+            positive_direct_only=in_stock_only,
         )
         _attach_stock_options(results, stock_data, include_same_cas=include_same_cas)
+        if in_stock_only:
+            # The materialized SQL stock-membership check is the early gate.
+            # Keep the existing application matcher as the final authority so
+            # an eligible catalog row can never be returned unless its attached
+            # options contain a visible, positive item under the same snapshot.
+            results = [
+                result for result in results
+                if any(int(item.get("Stock_Quantity", 0)) > 0 for item in result["Stock_Options"])
+            ]
         attached = {item["Stock_Item_Id"] for result in results for item in result["Stock_Options"]}
         results.extend(_stock_only_results([item for item in stock_data.get("direct", [])
                                             if item["Stock_Item_Id"] not in attached]))

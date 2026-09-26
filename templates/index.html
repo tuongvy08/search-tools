@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Product Search</title>
     <!-- Include stylesheets -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260925d5n1') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260926d8') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='search_suggestions.css', v='20260926d7') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
@@ -38,14 +38,21 @@
         {% if can("EXPORT") %}<button class="nav-button" id="btnExportSelected" type="button" disabled><i class="fas fa-file-invoice-dollar" aria-hidden="true"></i> Xuất báo giá</button>{% endif %}
 
         {% if can("SEARCH") %}
-        <div class="input-box">
-            <i class="fas fa-search"></i>
-            <input type="text" id="searchQuery" placeholder="Search for products..." maxlength="500"
-                   role="combobox" aria-label="Tìm sản phẩm hoặc tồn kho" aria-autocomplete="list"
-                   aria-expanded="false" aria-controls="searchSuggestions" autocomplete="off">
-            <button class="search-button">Search</button>
-            <ul id="searchSuggestions" class="search-suggestions" role="listbox" aria-label="Gợi ý tìm kiếm" hidden></ul>
-            <span id="searchSuggestStatus" class="search-suggest-status" role="status" aria-live="polite"></span>
+        <div class="product-search-controls">
+            <div class="input-box">
+                <i class="fas fa-search"></i>
+                <input type="text" id="searchQuery" placeholder="Search for products..." maxlength="500"
+                       role="combobox" aria-label="Tìm sản phẩm hoặc tồn kho" aria-autocomplete="list"
+                       aria-expanded="false" aria-controls="searchSuggestions" autocomplete="off">
+                <button class="search-button">Search</button>
+                <ul id="searchSuggestions" class="search-suggestions" role="listbox" aria-label="Gợi ý tìm kiếm" hidden></ul>
+                <span id="searchSuggestStatus" class="search-suggest-status" role="status" aria-live="polite"></span>
+            </div>
+            <label class="stock-only-filter" for="inStockOnly">
+                <input type="checkbox" id="inStockOnly" aria-describedby="inStockOnlyHint">
+                <span>Chỉ hiện kết quả có tồn kho</span>
+            </label>
+            <small id="inStockOnlyHint" class="stock-only-filter-hint">Khớp code hoặc cùng CAS · Chỉ áp dụng Product Search</small>
         </div>
         {% endif %}
     </div>
@@ -148,6 +155,6 @@
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>    
     <script src="{{ url_for('static', filename='quote_export_context.js', v='20260908c2') }}"></script>
     <script src="{{ url_for('static', filename='search_suggestions.js', v='20260926d7') }}"></script>
-    <script src="{{ url_for('static', filename='script.js', v='20260926d7') }}"></script>
+    <script src="{{ url_for('static', filename='script.js', v='20260926d8') }}"></script>
 </body>
 </html>

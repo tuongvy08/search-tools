@@ -65,6 +65,64 @@ h1 {
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
 
+.product-search-controls {
+  width: min(100%, 500px);
+  min-width: min(500px, 100%);
+}
+
+.product-search-controls .input-box {
+  width: 100%;
+}
+
+.stock-only-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 14px 0;
+  color: #18316f;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.stock-only-filter input {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: #2e45b6;
+}
+
+.stock-only-filter:focus-within {
+  outline: 2px solid #2e45b6;
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.stock-only-filter.is-disabled {
+  color: #64748b;
+  cursor: not-allowed;
+}
+
+.stock-only-filter-hint {
+  display: block;
+  margin: 2px 14px 0;
+  color: #607087;
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+@media (max-width: 760px) {
+  .product-search-controls {
+    min-width: 100%;
+  }
+
+  .stock-only-filter,
+  .stock-only-filter-hint {
+    margin-left: 8px;
+    margin-right: 8px;
+  }
+}
+
 .input-box i {
   position: absolute;
   top: 50%;

@@ -10,6 +10,11 @@ import unicodedata
 
 
 STOCK_LOCK_KEY = 62402901
+DIRECT_STOCK_LIMIT = 1000
+
+
+def literal_like(value):
+    return value.replace("!", "!!").replace("%", "!%").replace("_", "!_")
 
 
 def normalized_text(value) -> str:
@@ -83,6 +88,7 @@ def fetch_stock_options(
     team_id,
     grants,
     allow_same_cas: bool,
+    query=None,
 ) -> dict:
     """Fetch all active stock candidates with one bulk query.
 
@@ -91,29 +97,54 @@ def fetch_stock_options(
     """
     code_norms = sorted({normalized_text(value) for value in codes if normalized_text(value)})
     cas_norms = sorted({normalized_text(value) for value in cas_values if normalized_text(value)}) if allow_same_cas else []
-    if not code_norms and not cas_norms:
+    if not code_norms and not cas_norms and not query:
         return {"by_code": {}, "by_cas": {}, "all": []}
     visibility_sql, visibility_params = _visible_stock_sql("i", is_admin=is_admin, team_id=team_id)
+    grants = frozenset(grants or ())
+    direct_sql, direct_params = "", ()
+    direct_join, direct_where, direct_field = "", "", "NULL::text"
+    if query:
+        clauses, params = ["d.code_norm=%s"], [normalized_text(query)]
+        if allow_same_cas:
+            clauses.append("d.cas_norm=%s")
+            params.append(normalized_text(query))
+        if "VIEW_NAME" in grants:
+            clauses.append("d.name ILIKE %s ESCAPE '!'")
+            params.append("%" + literal_like(query.strip()) + "%")
+        dvis, dparams = _visible_stock_sql("d", is_admin=is_admin, team_id=team_id)
+        direct_sql = f"""WITH direct AS MATERIALIZED (
+            SELECT d.id, CASE WHEN d.code_norm=%s THEN 'exact_code'
+                WHEN %s AND d.cas_norm=%s THEN 'same_cas' ELSE 'name' END AS match
+            FROM stock_items d JOIN stock_state ds ON ds.active_snapshot_id=d.snapshot_id
+            WHERE ds.singleton=TRUE AND ({' OR '.join(clauses)}) {dvis}
+            ORDER BY d.id LIMIT {DIRECT_STOCK_LIMIT + 1}) """
+        direct_params = (normalized_text(query), allow_same_cas, normalized_text(query), *params, *dparams)
+        direct_join = "LEFT JOIN direct ON direct.id=i.id"
+        direct_where = " OR direct.id IS NOT NULL"
+        direct_field = "direct.match"
     cur.execute(
         f"""
+        {direct_sql}
         SELECT i.id,i.name,i.code,i.cas,i.brand,i.size,i.stock_price_vnd,
-               i.quantity,i.expiry_date,i.code_norm,i.cas_norm,i.stock_note
+               i.quantity,i.expiry_date,i.code_norm,i.cas_norm,i.stock_note,{direct_field}
         FROM stock_state state
         JOIN stock_items i ON i.snapshot_id=state.active_snapshot_id
+        {direct_join}
         WHERE state.singleton=TRUE
-          AND (i.code_norm=ANY(%s) OR i.cas_norm=ANY(%s))
+          AND (i.code_norm=ANY(%s) OR i.cas_norm=ANY(%s){direct_where})
           {visibility_sql}
         ORDER BY i.code_norm,i.brand_norm,i.size_norm,i.expiry_date NULLS LAST,i.id
         """,
-        (code_norms, cas_norms) + visibility_params,
+        direct_params + (code_norms, cas_norms) + visibility_params,
     )
     grants = frozenset(grants or ())
     by_code: dict[str, list[dict]] = {}
     by_cas: dict[str, list[dict]] = {}
     all_items: list[dict] = []
+    direct_items = []
     for row in cur.fetchall():
         (item_id, name, code, cas, brand, size, price, quantity, expiry,
-         code_norm, cas_norm, note) = row
+         code_norm, cas_norm, note, direct_match) = row
         state, warning = expiry_state(expiry)
         item = {
             "Stock_Item_Id": int(item_id),
@@ -139,10 +170,13 @@ def fetch_stock_options(
             item["Stock_Price"] = format_vnd(price)
             item["Stock_Price_Vnd"] = str(price) if price is not None else ""
         all_items.append(item)
+        if direct_match:
+            direct_items.append(dict(item, Stock_Match=direct_match))
         by_code.setdefault(code_norm, []).append(item)
         if cas_norm:
             by_cas.setdefault(cas_norm, []).append(item)
-    return {"by_code": by_code, "by_cas": by_cas, "all": all_items}
+    return {"by_code": by_code, "by_cas": by_cas, "all": all_items,
+            "direct": direct_items[:DIRECT_STOCK_LIMIT], "truncated": len(direct_items) > DIRECT_STOCK_LIMIT}
 
 
 def options_for_product(stock_data: dict, *, code, cas, include_same_cas: bool) -> list[dict]:

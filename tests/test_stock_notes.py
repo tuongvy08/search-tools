@@ -83,7 +83,7 @@ class StockNotesTests(unittest.TestCase):
     def test_stock_note_visibility_uses_view_note_permission(self):
         cur = mock.Mock()
         cur.fetchall.return_value = [(1, "A", "C1", "50-00-0", "Brand A", "1g", None,
-                                     1, None, "c1", "50-00-0", "Kho A")]
+                                     1, None, "c1", "50-00-0", "Kho A", None)]
         for grants in ([], ["VIEW_NOTE"]):
             with self.subTest(grants=grants):
                 result = stock.fetch_stock_options(cur, codes=["C1"], is_admin=False,

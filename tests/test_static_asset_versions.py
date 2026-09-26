@@ -10,12 +10,14 @@ ROOT = Path(__file__).resolve().parents[1]
 RELEASE_VERSION = '20260908c2'
 ASSET_VERSIONS = {
     'admin_quote_templates.js': '20260909c4', 'quick_quote.js': '20260910e1',
-    'script.js': '20260925d5n1', 'styles.css': '20260925d5n1',
+    'script.js': '20260926d7', 'styles.css': '20260925d5n1',
+    'search_suggestions.js': '20260926d7', 'search_suggestions.css': '20260926d7',
 }
 CAPABILITY_ASSETS = {
     'script.js', 'quick_quote.js', 'styles.css',
     'team_permissions.js', 'admin_team_permissions.js', 'admin_teams.css',
     'quote_export_context.js', 'admin_quote_templates.js',
+    'search_suggestions.js', 'search_suggestions.css',
 }
 
 

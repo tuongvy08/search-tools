@@ -30,7 +30,7 @@ DEPENDENCIES = {
     'EXPORT': ('VIEW_COMPLIANCE',),
 }
 ROUTES = {
-    'home': (), 'search_products': ('SEARCH',),
+    'home': (), 'search_products': ('SEARCH',), 'product_suggestions': ('SEARCH',),
     'check_cas': ('CHECK_LICENSE',), 'check_cas_batch': ('CHECK_LICENSE',),
     'find_code_batch': ('FIND_CODE',),
     'advanced_search': ('ADVANCED_SEARCH',),

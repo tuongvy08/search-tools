@@ -38,6 +38,7 @@ import session_security
 import admin_permissions
 import team_permissions
 from stock import fetch_stock_options, normalized_text as stock_normalized_text, options_for_product
+import search_suggestions
 from compliance_resolver import compliance_css_type, resolve_compliance_precedence
 from regulatory import (
     EXPORT_BLOCK,
@@ -456,7 +457,7 @@ def _visibility_sql(alias: str):
     )
 
 
-def _load_visible_stock(conn, *, codes=(), cas_values=()):
+def _load_visible_stock(conn, *, codes=(), cas_values=(), query=None):
     grants = team_permissions.current_permissions()
     can_lookup_cas = team_permissions.can("SEARCH_BY_CAS")
     include_same_cas = can_lookup_cas and team_permissions.can("VIEW_CAS")
@@ -464,7 +465,7 @@ def _load_visible_stock(conn, *, codes=(), cas_values=()):
         return fetch_stock_options(
             cur, codes=codes, cas_values=cas_values,
             is_admin=bool(session.get("is_admin")), team_id=session.get("team_id"),
-            grants=grants, allow_same_cas=can_lookup_cas,
+            grants=grants, allow_same_cas=can_lookup_cas, query=query,
         ), include_same_cas
 
 
@@ -489,7 +490,7 @@ def _stock_only_results(stock_items):
             "Compliance_Source": "none", "Compliance_Export_Policy": "",
             "note": "", "compliance": "", "compliance_note": "",
             "compliance_css": "", "compliance_source": "none",
-            "compliance_export_policy": "", "Stock_Options": [dict(item, Stock_Match="exact_code")],
+            "compliance_export_policy": "", "Stock_Options": [dict(item, Stock_Match=item.get("Stock_Match", "exact_code"))],
         }
         results.append(result)
     return results
@@ -4772,6 +4773,27 @@ def admin_brand_compliance():
     )
 
 
+@app.get('/search/suggestions')
+def product_suggestions():
+    try:
+        query = search_suggestions.normalize_query(request.args.get('query', ''))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    if len(query) < search_suggestions.MIN_QUERY:
+        return jsonify(suggestions=[], degraded=False)
+    conn = None
+    try:
+        conn = get_connection(connect_timeout=1)
+        return jsonify(search_suggestions.suggest(conn, query,
+            grants=team_permissions.current_permissions(),
+            is_admin=bool(session.get('is_admin')), team_id=session.get('team_id')))
+    except psycopg2.Error:
+        return jsonify(error='Gợi ý tạm thời không khả dụng. Bạn vẫn có thể bấm Search.'), 503
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 @app.route("/search", methods=["GET"])
 def search_products():
     search_query = request.args.get("query") or ""
@@ -4893,19 +4915,15 @@ def search_products():
             )
         stock_data, include_same_cas = _load_visible_stock(
             conn,
+            query=search_query,
             codes=[result.get("Code") for result in results] + [search_query],
             cas_values=[result.get("Cas") for result in results] + [search_query],
         )
         _attach_stock_options(results, stock_data, include_same_cas=include_same_cas)
-        if not results:
-            direct = stock_data["by_code"].get(stock_normalized_text(search_query), [])
-            if team_permissions.can("SEARCH_BY_CAS"):
-                seen = {item["Stock_Item_Id"] for item in direct}
-                direct = list(direct) + [item for item in stock_data["by_cas"].get(
-                    stock_normalized_text(search_query), []
-                ) if item["Stock_Item_Id"] not in seen]
-            results = _stock_only_results(direct)
-        return jsonify({"results": results})
+        attached = {item["Stock_Item_Id"] for result in results for item in result["Stock_Options"]}
+        results.extend(_stock_only_results([item for item in stock_data.get("direct", [])
+                                            if item["Stock_Item_Id"] not in attached]))
+        return jsonify({"results": results, "stock_truncated": stock_data.get("truncated", False)})
     finally:
         conn.close()
 

@@ -552,6 +552,7 @@ function _excelSafeCell(value) {
 }
 
 function searchProducts() {
+    window.productSuggestions?.dismiss();
     const query = $('#searchQuery').val();
     if (query.trim() === '') {
         setOperationStatus('Nhập từ khóa tìm kiếm.', 'error');
@@ -573,7 +574,8 @@ function searchProducts() {
             displayResults(searchResults);
             const n = searchResults.length;
             setOperationStatus(
-                n ? `Tìm thấy <strong>${n}</strong> dòng.` : 'Không có kết quả.',
+                (n ? `Tìm thấy <strong>${n}</strong> dòng.` : 'Không có kết quả.') +
+                    (data.stock_truncated ? ' Chỉ hiển thị tối đa 1.000 dòng tồn khớp trực tiếp; hãy nhập từ khóa cụ thể hơn.' : ''),
                 n ? 'success' : ''
             );
             if (!n) setTimeout(() => setOperationStatus('', ''), 4000);
@@ -751,7 +753,7 @@ function setStockCell(row, product) {
         head.appendChild(quantity);
         const match = document.createElement('span');
         match.className = 'stock-match';
-        match.textContent = item.Stock_Match === 'same_cas' ? 'Cùng CAS' : 'Khớp code';
+        match.textContent = item.Stock_Match === 'same_cas' ? 'Cùng CAS' : item.Stock_Match === 'name' ? 'Khớp tên tồn' : 'Khớp code';
         hasSameCas = hasSameCas || item.Stock_Match === 'same_cas';
         head.appendChild(match);
         line.appendChild(head);
@@ -1110,12 +1112,7 @@ $(document).ready(function() {
         );
     }
 
-    $('#searchQuery').on('keypress', function(event) {
-        if (event.key === 'Enter') {
-            event.preventDefault();
-            searchProducts();
-        }
-    });
+    window.productSuggestions = initProductSuggestions(document.getElementById('searchQuery'), searchProducts);
 
     $('.search-button').on('click', function() {
         searchProducts();

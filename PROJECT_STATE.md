@@ -1,7 +1,7 @@
 # Trạng thái project
 
-Cập nhật: 2026-09-27 (viết lại tài liệu sau khi áp Golden Development
-Template — task tài liệu thuần, không sửa code).
+Cập nhật: 2026-09-27 (checkpoint spec sửa quy tắc pháp chế thủ công;
+chưa triển khai code hoặc migration).
 
 ## Trạng thái hiện tại
 
@@ -63,21 +63,35 @@ commit `24ac6d4` (PR #5) trên database tên có "rollback"
 giữa `main` và production quanh 2026-09-06 — khoảng trễ đó đã được thu hẹp
 nhiều lần qua từng phase kể từ đó.
 
-Song song đó, branch hiện tại (`docs/adopt-golden-template`) đang áp dụng
-Golden Development Template (AGENTS.md, quy trình làm việc với AI, cấu trúc
-tài liệu) — chưa merge vào `main`.
+Golden Development Template đã merge vào `main` qua PR #21, commit
+`db26d40` (xác minh bằng Git ngày 2026-09-27). Branch hiện tại cho phase mới:
+`feature/regulatory-manual-edit`, tạo từ đúng commit này của `main`.
 
 ## Việc đang mở
 
-- Chờ merge branch `docs/adopt-golden-template` (chỉ thêm/viết lại tài
-  liệu: AGENTS.md, CLAUDE.md, ARCHITECTURE.md, PROJECT_STATE.md,
-  docs/BUSINESS_RULES.md, SECURITY.md, README.md, docs/DEVELOPMENT_WORKFLOW.md,
-  docs/README.md, specs/, `.opencode/`, `.claude/`, `.github/`). Không sửa
-  code ứng dụng trong task này.
-- Không còn câu hỏi nghiệp vụ nào mở (đã xác nhận đầy đủ 2026-09-27, xem
-  mục cuối `docs/BUSINESS_RULES.md`). Các việc tùy chọn còn lại (xóa file
-  `heroku`, cân nhắc tắt legacy login, cập nhật lại
-  `HUONG_DAN_DEPLOY_VA_CAP_NHAT.md`) nằm ở mục "Bước tiếp theo" bên dưới.
+- **HIGH — regulatory-manual-edit — spec v2 đã cập nhật theo duyệt có điều
+  chỉnh của người dùng ngày 2026-09-27; chưa implement.**
+  Mục tiêu: tìm/thêm/sửa/ngừng áp dụng/khôi phục từng quy tắc pháp chế,
+  có lịch sử và bảo vệ thay đổi thủ công trước import.
+  Branch: `feature/regulatory-manual-edit`, base `main@db26d40`.
+  Người dùng đã chốt A–H và điều chỉnh D: import luôn giữ mục thủ công,
+  không có tùy chọn ghi đè; preview tay chỉ trên UI, server kiểm tra quyền,
+  CSRF, validation, expected revision và chống gửi lặp. Quyết định nằm trong
+  `specs/regulatory-manual-edit/SPEC.md`. Hợp đồng kiểm chứng theo mục 11:
+  `specs/regulatory-manual-edit/VERIFICATION.md`; kế hoạch migration/rollback:
+  `specs/regulatory-manual-edit/MIGRATION.md`.
+  Phạm vi được phép lượt này: chỉ cập nhật tài liệu trên branch hiện có;
+  **không code, không tạo file migration, không SQL, không truy cập server**.
+  V2 còn 20 claim (V1–V11, V13–V21; bỏ V12). Không bảng preview tay/bảng
+  chi tiết import mới; dùng audit request_id chống gửi lặp và JSONB job/event
+  hiện có cho danh sách xung đột đầy đủ. Không số đếm sản phẩm ảnh hưởng.
+  Đã review tài liệu v2, có lượt review tài liệu độc lập; làm rõ không chia
+  tùy ý các dòng cùng scope để chạy nhiều lần replace_scoped khi file lớn.
+  Đây không phải verifier runtime. Bước kế tiếp: báo thay đổi và dừng chờ
+  yêu cầu tiếp; không suy quyền implement từ việc duyệt spec.
+  Chưa chạy test app/SQL, chưa có VERIFICATION_RESULT.md hoặc tính năng PASS.
+- Các việc tùy chọn cũ (xóa file `heroku`, cân nhắc tắt legacy login,
+  cập nhật tài liệu deploy) không thuộc phase này.
 
 ## Vấn đề đã biết
 
@@ -137,10 +151,9 @@ tài liệu) — chưa merge vào `main`.
 
 ## Bước tiếp theo được khuyến nghị
 
-1. Không còn câu hỏi nghiệp vụ nào mở (xem docs/BUSINESS_RULES.md — đã xác
-   nhận đầy đủ 2026-09-27, bao gồm cả phạm vi `replace_scoped`).
-2. Merge `docs/adopt-golden-template` vào `main` sau khi người dùng duyệt nội
-   dung tài liệu.
+1. Spec `regulatory-manual-edit` v2 đã cập nhật theo duyệt có điều chỉnh
+   ngày 2026-09-27. Dừng chờ yêu cầu tiếp; chưa có quyền implement lượt này.
+2. PR #21 đã merge Golden Development Template; không cần thực hiện lại.
 3. (Tùy chọn, ngoài phạm vi task tài liệu, cần yêu cầu rõ trước khi làm)
    - Xóa file `heroku` rỗng ở gốc repo — đã xác nhận có thể xóa.
    - Cân nhắc tắt `ENABLE_LEGACY_PASSWORD_LOGIN` trên production nếu xác

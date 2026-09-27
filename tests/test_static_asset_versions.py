@@ -12,12 +12,14 @@ ASSET_VERSIONS = {
     'admin_quote_templates.js': '20260909c4', 'quick_quote.js': '20260910e1',
     'script.js': '20260926d8', 'styles.css': '20260926d8',
     'search_suggestions.js': '20260926d7', 'search_suggestions.css': '20260926d7',
+    'search_workspace.css': '20260926d9',
 }
 CAPABILITY_ASSETS = {
     'script.js', 'quick_quote.js', 'styles.css',
     'team_permissions.js', 'admin_team_permissions.js', 'admin_teams.css',
     'quote_export_context.js', 'admin_quote_templates.js',
     'search_suggestions.js', 'search_suggestions.css',
+    'search_workspace.css',
 }
 
 
@@ -64,6 +66,7 @@ class StaticAssetVersionTests(unittest.TestCase):
                 self.assertTrue(sites, 'Expected asset must retain at least one template load site')
         self.assertIn('index.html', references['styles.css'])
         self.assertIn('quick_quote.html', references['styles.css'])
+        self.assertEqual(references['search_workspace.css'], ['index.html'])
 
 
 if __name__ == '__main__':

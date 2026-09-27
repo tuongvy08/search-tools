@@ -8,6 +8,10 @@ let licenseBatchRows = [];
 let licenseVisibleRows = [];
 const selectedLicenseRowKeys = new Set();
 const LICENSE_EMPTY_STATUS = '__EMPTY_STATUS__';
+let activeProductSearchRequest = null;
+let productSearchGeneration = 0;
+const activeAlternateSearchRequests = new Set();
+let alternateSearchGeneration = 0;
 
 const EXPORT_COLUMNS = [
     { key: 'Name', label: 'Name' },
@@ -551,6 +555,82 @@ function _excelSafeCell(value) {
     return s;
 }
 
+function cancelProductSearch() {
+    productSearchGeneration += 1;
+    if (activeProductSearchRequest && typeof activeProductSearchRequest.abort === 'function') {
+        activeProductSearchRequest.abort();
+    }
+    activeProductSearchRequest = null;
+}
+
+function cancelAlternateSearches() {
+    alternateSearchGeneration += 1;
+    for (const request of Array.from(activeAlternateSearchRequests)) {
+        if (request && typeof request.abort === 'function') request.abort();
+    }
+    activeAlternateSearchRequests.clear();
+    $('#advLoadOptionsBtn, #advRunBtn').prop('disabled', false);
+    setBatchRunning(false);
+}
+
+function trackAlternateSearchRequest(request) {
+    if (request) activeAlternateSearchRequests.add(request);
+    return request;
+}
+
+function releaseAlternateSearchRequest(request) {
+    if (request) activeAlternateSearchRequests.delete(request);
+}
+
+function setStockOnlyFilterAvailable(available) {
+    const checkbox = document.getElementById('inStockOnly');
+    if (!checkbox) return;
+    checkbox.disabled = !available;
+    checkbox.closest('label')?.classList.toggle('is-disabled', !available);
+    const hint = document.getElementById('inStockOnlyHint');
+    if (hint) {
+        hint.textContent = available
+            ? 'Khớp code hoặc cùng CAS · Chỉ áp dụng Product Search'
+            : 'Không áp dụng trong chế độ hiện tại · Chỉ áp dụng Product Search';
+    }
+}
+
+function activateProductSearchMode() {
+    cancelAlternateSearches();
+    resetLicenseBatchState();
+    $('#multiModePanel').hide();
+    $('#advancedSearchPanel').hide();
+    $('.filter-container').show();
+    $('#results').show();
+    window.__multiMode = null;
+    setStockOnlyFilterAvailable(true);
+}
+
+function suspendProductSearchForOtherMode() {
+    cancelProductSearch();
+    cancelAlternateSearches();
+    clearRowSelection();
+    setStockOnlyFilterAvailable(false);
+}
+
+function resetProductSearchResults() {
+    resultSource = 'SEARCH';
+    clearRowSelection();
+    searchResults = [];
+    updateBrandFilterOptions();
+    updateSizeFilterOptions();
+    displayResults(searchResults);
+}
+
+function returnToProductSearchFromAlternateMode() {
+    cancelAlternateSearches();
+    resetProductSearchResults();
+    window.__multiMode = null;
+    $('.filter-container').show();
+    $('#results').show();
+    setStockOnlyFilterAvailable(true);
+}
+
 function searchProducts() {
     window.productSuggestions?.dismiss();
     const query = $('#searchQuery').val();
@@ -559,16 +639,23 @@ function searchProducts() {
         return;
     }
 
+    activateProductSearchMode();
+    const inStockOnly = Boolean(document.getElementById('inStockOnly')?.checked);
+    const generation = productSearchGeneration + 1;
+    cancelProductSearch();
+    productSearchGeneration = generation;
+    resetProductSearchResults();
+
     setOperationStatus('<span class="status-spinner"></span> Đang tìm kiếm…', 'loading');
 
-    $.ajax({
-        url: `/search?query=${encodeURIComponent(query)}`,
+    activeProductSearchRequest = $.ajax({
+        url: `/search?query=${encodeURIComponent(query)}&in_stock_only=${inStockOnly ? '1' : '0'}`,
         dataType: 'json',
         timeout: AJAX_LONG_TIMEOUT_MS,
         success: function(data) {
+            if (generation !== productSearchGeneration) return;
             resultSource = "SEARCH";
             searchResults = data.results || [];
-            clearRowSelection();
             updateBrandFilterOptions();
             updateSizeFilterOptions();
             displayResults(searchResults);
@@ -578,14 +665,31 @@ function searchProducts() {
                     (data.stock_truncated ? ' Chỉ hiển thị tối đa 1.000 dòng tồn khớp trực tiếp; hãy nhập từ khóa cụ thể hơn.' : ''),
                 n ? 'success' : ''
             );
-            if (!n) setTimeout(() => setOperationStatus('', ''), 4000);
+            if (!n) setTimeout(() => {
+                if (generation === productSearchGeneration) setOperationStatus('', '');
+            }, 4000);
         },
-        error: function(xhr) {
+        error: function(xhr, textStatus) {
+            if (generation !== productSearchGeneration || textStatus === 'abort') return;
             const msg = formatAjaxError(xhr, 'Tìm kiếm thất bại.');
             setOperationStatus(msg, 'error');
             console.error('Search request failed', xhr);
         },
+        complete: function() {
+            if (generation === productSearchGeneration) activeProductSearchRequest = null;
+        },
     });
+}
+
+function handleInStockOnlyChange() {
+    const query = String($('#searchQuery').val() || '').trim();
+    if (!query) {
+        cancelProductSearch();
+        resetProductSearchResults();
+        setOperationStatus('Nhập từ khóa rồi bật bộ lọc tồn kho.', 'error');
+        return;
+    }
+    searchProducts();
 }
 
 function updateBrandFilterOptions() {
@@ -753,7 +857,7 @@ function setStockCell(row, product) {
         head.appendChild(quantity);
         const match = document.createElement('span');
         match.className = 'stock-match';
-        match.textContent = item.Stock_Match === 'same_cas' ? 'Cùng CAS' : item.Stock_Match === 'name' ? 'Khớp tên tồn' : 'Khớp code';
+        match.textContent = item.Stock_Match === 'same_cas' ? 'Cùng CAS — cần đối chiếu' : item.Stock_Match === 'name' ? 'Khớp tên tồn' : 'Khớp code';
         hasSameCas = hasSameCas || item.Stock_Match === 'same_cas';
         head.appendChild(match);
         line.appendChild(head);
@@ -905,6 +1009,7 @@ function filterResults() {
 let advOptionsData = { brands: [], size_pairs: [] };
 
 function openAdvancedPanel() {
+    suspendProductSearchForOtherMode();
     $('#multiModePanel').hide();
     $('#licenseWarnings').hide().html('');
     window.__multiMode = null;
@@ -922,6 +1027,7 @@ function closeAdvancedPanel() {
     $('#advSizeFilter').val('');
     $('#advSizeFuzzy').prop('checked', false);
     advOptionsData = { brands: [], size_pairs: [] };
+    returnToProductSearchFromAlternateMode();
     setOperationStatus('', '');
 }
 
@@ -1018,13 +1124,17 @@ function loadAdvancedOptions() {
         `<span class="status-spinner"></span> Đang tải brand &amp; size cho <strong>${nCas}</strong> CAS…`,
         'loading'
     );
+    cancelAlternateSearches();
     $('#advLoadOptionsBtn').prop('disabled', true);
-    $.ajax({
+    const generation = alternateSearchGeneration;
+    let requestHandle = null;
+    requestHandle = trackAlternateSearchRequest($.ajax({
         url: '/advanced_search/options',
         method: 'POST',
         data: { cas: casText },
         timeout: AJAX_LONG_TIMEOUT_MS,
         success: function(data) {
+            if (generation !== alternateSearchGeneration) return;
             $('#advLoadOptionsBtn').prop('disabled', false);
             if (data && data.error) {
                 setOperationStatus(String(data.error), 'error');
@@ -1043,11 +1153,13 @@ function loadAdvancedOptions() {
                 'success'
             );
         },
-        error: function(xhr) {
+        error: function(xhr, textStatus) {
+            if (generation !== alternateSearchGeneration || textStatus === 'abort') return;
             $('#advLoadOptionsBtn').prop('disabled', false);
             setOperationStatus(formatAjaxError(xhr, 'Tải brand/size thất bại.'), 'error');
         },
-    });
+        complete: function() { releaseAlternateSearchRequest(requestHandle); },
+    }));
 }
 
 function runAdvancedSearch() {
@@ -1064,8 +1176,11 @@ function runAdvancedSearch() {
         `<span class="status-spinner"></span> Đang tìm <strong>${nCas}</strong> CAS…`,
         'loading'
     );
+    cancelAlternateSearches();
     $('#advRunBtn').prop('disabled', true);
-    $.ajax({
+    const generation = alternateSearchGeneration;
+    let requestHandle = null;
+    requestHandle = trackAlternateSearchRequest($.ajax({
         url: '/advanced_search',
         method: 'POST',
         traditional: true,
@@ -1077,6 +1192,7 @@ function runAdvancedSearch() {
         },
         timeout: AJAX_LONG_TIMEOUT_MS,
         success: function(data) {
+            if (generation !== alternateSearchGeneration) return;
             $('#advRunBtn').prop('disabled', false);
             if (data && data.error) {
                 setOperationStatus(String(data.error), 'error');
@@ -1096,11 +1212,123 @@ function runAdvancedSearch() {
                 'success'
             );
         },
-        error: function(xhr) {
+        error: function(xhr, textStatus) {
+            if (generation !== alternateSearchGeneration || textStatus === 'abort') return;
             $('#advRunBtn').prop('disabled', false);
             setOperationStatus(formatAjaxError(xhr, 'Advanced search thất bại.'), 'error');
         },
-    });
+        complete: function() { releaseAlternateSearchRequest(requestHandle); },
+    }));
+}
+
+function runFindCodeBatch(text) {
+    const nCodes = countBatchItems(text);
+    setOperationStatus(
+        `<span class="status-spinner"></span> Đang tra cứu <strong>${nCodes}</strong> mã sản phẩm… (có thể mất vài chục giây với danh sách dài)`,
+        'loading'
+    );
+    cancelAlternateSearches();
+    setBatchRunning(true);
+    const generation = alternateSearchGeneration;
+    const send = function() {
+        if (generation !== alternateSearchGeneration || window.__multiMode !== 'findcode') return;
+        let requestHandle = null;
+        requestHandle = trackAlternateSearchRequest($.ajax({
+            url: '/find_code_batch',
+            method: 'POST',
+            data: { codes: text },
+            timeout: AJAX_LONG_TIMEOUT_MS,
+            success: function(data) {
+                if (generation !== alternateSearchGeneration) return;
+                const products = (data && data.results) ? data.results : [];
+                const err = data && data.error;
+                if (err) {
+                    setOperationStatus(String(err), 'error');
+                    setBatchRunning(false);
+                    return;
+                }
+                resultSource = "FIND_CODE";
+                searchResults = products;
+                clearRowSelection();
+                updateBrandFilterOptions();
+                updateSizeFilterOptions();
+                displayResults(searchResults);
+                $('#multiInput').val('');
+                const found = products.filter((p) => (p.Name || p.Cas || p.Brand || (p.Stock_Options || []).length)).length;
+                setOperationStatus(
+                    `Hoàn tất: <strong>${products.length}</strong> mã — <strong>${found}</strong> có dữ liệu sản phẩm.`,
+                    'success'
+                );
+                setBatchRunning(false);
+            },
+            error: function(xhr, textStatus) {
+                if (generation !== alternateSearchGeneration || textStatus === 'abort') return;
+                const msg = formatAjaxError(xhr, 'Tra cứu mã thất bại.');
+                setOperationStatus(msg, 'error');
+                setBatchRunning(false);
+            },
+            complete: function() { releaseAlternateSearchRequest(requestHandle); },
+        }));
+    };
+    if (window.requestAnimationFrame) requestAnimationFrame(() => setTimeout(send, 0));
+    else setTimeout(send, 0);
+}
+
+function runLicenseBatch(text) {
+    const nCas = countBatchItems(text);
+    resetLicenseBatchState();
+    const loading = document.createElement('div');
+    loading.className = 'batch-inline-loading';
+    const spinner = document.createElement('span');
+    spinner.className = 'status-spinner';
+    loading.appendChild(spinner);
+    loading.appendChild(document.createTextNode(` Đang kiểm tra ${nCas} CAS…`));
+    const licenseWarnings = document.getElementById('licenseWarnings');
+    licenseWarnings.replaceChildren(loading);
+    licenseWarnings.style.display = '';
+    cancelAlternateSearches();
+    setBatchRunning(true);
+    const generation = alternateSearchGeneration;
+    let requestHandle = null;
+    requestHandle = trackAlternateSearchRequest($.ajax({
+        url: '/check_cas_batch',
+        method: 'POST',
+        data: { cas: text },
+        timeout: AJAX_LONG_TIMEOUT_MS,
+        success: function(data) {
+            if (generation !== alternateSearchGeneration) return;
+            const items = data && data.results ? data.results : [];
+            licenseBatchRows = items.map((item, index) => {
+                const row = Object.assign({}, item || {});
+                Object.defineProperty(row, '__licenseRowKey', { value: `license-${index}` });
+                return row;
+            });
+            licenseVisibleRows = licenseBatchRows.slice();
+            selectedLicenseRowKeys.clear();
+            renderLicenseTable();
+            $('#multiInput').val('');
+            setBatchRunning(false);
+        },
+        error: function(xhr, textStatus) {
+            if (generation !== alternateSearchGeneration || textStatus === 'abort') return;
+            const msg = formatAjaxError(xhr, 'Kiểm tra CAS thất bại.');
+            const error = document.createElement('div');
+            error.className = 'batch-error-msg';
+            error.textContent = msg;
+            licenseWarnings.replaceChildren(error);
+            setBatchRunning(false);
+        },
+        complete: function() { releaseAlternateSearchRequest(requestHandle); },
+    }));
+}
+
+function closeMultiModePanel() {
+    resetLicenseBatchState();
+    $('#multiModePanel').hide();
+    $('#licenseWarnings').hide().html('');
+    $('#multiInput').val('');
+    returnToProductSearchFromAlternateMode();
+    setOperationStatus('', '');
 }
 
 $(document).ready(function() {
@@ -1117,6 +1345,7 @@ $(document).ready(function() {
     $('.search-button').on('click', function() {
         searchProducts();
     });
+    $('#inStockOnly').on('change', handleInStockOnlyChange);
     $('#btnCopySelected').on('click', function() {
         copySelectedRows();
     });
@@ -1134,6 +1363,7 @@ $(document).ready(function() {
     });
 
     function setMultiMode(mode) {
+        suspendProductSearchForOtherMode();
         $('#multiModePanel').show();
         $('#licenseWarnings').hide().html('');
 
@@ -1187,16 +1417,7 @@ $(document).ready(function() {
     });
 
     $('#multiCancelBtn').on('click', function() {
-        resetLicenseBatchState();
-        $('#multiModePanel').hide();
-        $('#licenseWarnings').hide().html('');
-        $('#multiInput').val('');
-        setOperationStatus('', '');
-        setBatchRunning(false);
-        // Trở về màn search mặc định
-        $('.filter-container').show();
-        $('#results').show();
-        window.__multiMode = null;
+        closeMultiModePanel();
     });
 
     $('#multiRunBtn').on('click', function() {
@@ -1212,97 +1433,12 @@ $(document).ready(function() {
         }
 
         if (mode === 'license') {
-            const nCas = countBatchItems(text);
-            resetLicenseBatchState();
-            const loading = document.createElement('div');
-            loading.className = 'batch-inline-loading';
-            const spinner = document.createElement('span');
-            spinner.className = 'status-spinner';
-            loading.appendChild(spinner);
-            loading.appendChild(document.createTextNode(` Đang kiểm tra ${nCas} CAS…`));
-            const licenseWarnings = document.getElementById('licenseWarnings');
-            licenseWarnings.replaceChildren(loading);
-            licenseWarnings.style.display = '';
-            setBatchRunning(true);
-            $.ajax({
-                url: '/check_cas_batch',
-                method: 'POST',
-                data: { cas: text },
-                timeout: AJAX_LONG_TIMEOUT_MS,
-                success: function(data) {
-                    const items = data && data.results ? data.results : [];
-                    licenseBatchRows = items.map((item, index) => {
-                        const row = Object.assign({}, item || {});
-                        Object.defineProperty(row, '__licenseRowKey', { value: `license-${index}` });
-                        return row;
-                    });
-                    licenseVisibleRows = licenseBatchRows.slice();
-                    selectedLicenseRowKeys.clear();
-                    renderLicenseTable();
-                    $('#multiInput').val('');
-                    setBatchRunning(false);
-                },
-                error: function(xhr) {
-                    const msg = formatAjaxError(xhr, 'Kiểm tra CAS thất bại.');
-                    const error = document.createElement('div');
-                    error.className = 'batch-error-msg';
-                    error.textContent = msg;
-                    licenseWarnings.replaceChildren(error);
-                    setBatchRunning(false);
-                }
-            });
+            runLicenseBatch(text);
             return;
         }
 
         if (mode === 'findcode') {
-            const nCodes = countBatchItems(text);
-            setOperationStatus(
-                `<span class="status-spinner"></span> Đang tra cứu <strong>${nCodes}</strong> mã sản phẩm… (có thể mất vài chục giây với danh sách dài)`,
-                'loading'
-            );
-            setBatchRunning(true);
-            const runFind = function() {
-            $.ajax({
-                url: '/find_code_batch',
-                method: 'POST',
-                data: { codes: text },
-                timeout: AJAX_LONG_TIMEOUT_MS,
-                success: function(data) {
-                    const products = (data && data.results) ? data.results : [];
-                    const err = data && data.error;
-                    if (err) {
-                        setOperationStatus(String(err), 'error');
-                        setBatchRunning(false);
-                        return;
-                    }
-                    resultSource = "FIND_CODE";
-                    searchResults = products;
-                    clearRowSelection();
-                    updateBrandFilterOptions();
-                    updateSizeFilterOptions();
-                    displayResults(searchResults);
-                    $('#multiInput').val('');
-                    const found = products.filter((p) => (p.Name || p.Cas || p.Brand || (p.Stock_Options || []).length)).length;
-                    setOperationStatus(
-                        `Hoàn tất: <strong>${products.length}</strong> mã — <strong>${found}</strong> có dữ liệu sản phẩm.`,
-                        'success'
-                    );
-                    setBatchRunning(false);
-                },
-                error: function(xhr) {
-                    const msg = formatAjaxError(xhr, 'Tra cứu mã thất bại.');
-                    setOperationStatus(msg, 'error');
-                    setBatchRunning(false);
-                }
-            });
-            };
-            if (window.requestAnimationFrame) {
-                requestAnimationFrame(function() {
-                    setTimeout(runFind, 0);
-                });
-            } else {
-                setTimeout(runFind, 0);
-            }
+            runFindCodeBatch(text);
         }
     });
 });

@@ -58,11 +58,14 @@ class SearchStockSuggestTests(unittest.TestCase):
                         username='fixture',auth_provider='LOCAL',csrf_token='fixture')
         return client
 
-    def stock(self, name='Stock name', code='HI70024P', cas='50-00-0', brand='Brand A', snapshot=None):
+    def stock(self, name='Stock name', code='HI70024P', cas='50-00-0', brand='Brand A', snapshot=None,
+              quantity=7, expiry=None):
         with self.conn.cursor() as cur:
             cur.execute('''INSERT INTO stock_items(snapshot_id,name,code,cas,brand,size,quantity,stock_price_vnd,
-                stock_note,brand_norm,code_norm,cas_norm,size_norm) VALUES(%s,%s,%s,%s,%s,'1g',7,999,'Kho A',%s,%s,%s,'1g') RETURNING id''',
-                (snapshot or self.snapshot,name,code,cas,brand,normalized_text(brand),normalized_text(code),normalized_text(cas)))
+                expiry_date,stock_note,brand_norm,code_norm,cas_norm,size_norm)
+                VALUES(%s,%s,%s,%s,%s,'1g',%s,999,%s,'Kho A',%s,%s,%s,'1g') RETURNING id''',
+                (snapshot or self.snapshot,name,code,cas,brand,quantity,expiry,
+                 normalized_text(brand),normalized_text(code),normalized_text(cas)))
             return cur.fetchone()[0]
 
     def product(self, name='Catalog name', code='CAT-1', cas='64-17-5', brand='Brand A'):
@@ -191,6 +194,141 @@ class SearchStockSuggestTests(unittest.TestCase):
         self.assertEqual(rows[0]['Name'],'Public stock name')
         self.assertNotIn('Code',rows[0]); self.assertNotIn('Cas',rows[0])
         self.assertEqual(rows[0]['Stock_Options'][0]['Stock_Match'],'name')
+
+    def test_in_stock_filter_off_regression_validation_and_empty_guard(self):
+        self.product('No stock catalog', 'NONE')
+        client = self.client()
+        for query_string in ({'query':'No stock'}, {'query':'No stock','in_stock_only':'0'}):
+            response = client.get('/search', query_string=query_string)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(len(response.get_json()['results']), 1)
+        self.assertEqual(client.get('/search?query=No+stock&in_stock_only=true').status_code, 400)
+        self.assertEqual(client.get('/search?query=&in_stock_only=1').status_code, 400)
+
+    def test_in_stock_filter_code_cas_positive_zero_inactive_dedup_and_expiry(self):
+        self.product('Code hit', 'CODE-POS', '11-11-1')
+        self.product('CAS hit', 'OTHER', '22-22-2')
+        self.product('Both hit', 'CODE-POS', '22-22-2')
+        self.product('Zero only', 'ZERO', '33-33-3')
+        self.product('Inactive only', 'OLD', '44-44-4')
+        positive = self.stock('Positive', 'CODE-POS', '22-22-2', quantity=4, expiry='2020-01-01')
+        self.stock('Zero', 'ZERO', '33-33-3', quantity=0)
+        old = str(uuid.uuid4())
+        with self.conn.cursor() as cur:
+            cur.execute("INSERT INTO stock_snapshots(id,source_kind,actor,row_count,content_sha256) VALUES(%s,'IMPORT','fixture',0,'')",(old,))
+        self.stock('Inactive', 'OLD', '44-44-4', snapshot=old, quantity=9)
+        rows = self.client().get('/search', query_string={'query':'hit','in_stock_only':'1'}).get_json()['results']
+        self.assertEqual([row['Name'] for row in rows], ['Both hit', 'CAS hit', 'Code hit'])
+        options = [item for row in rows for item in row['Stock_Options']]
+        self.assertEqual({item['Stock_Item_Id'] for item in options}, {positive})
+        self.assertEqual(sum(item['Stock_Item_Id'] == positive for item in options), 3)
+        self.assertTrue(all(len(row['Stock_Options']) == 1 for row in rows))
+        self.assertTrue(all(item['Stock_Quantity'] > 0 for item in options))
+        self.assertTrue(any(item['Stock_Match'] == 'same_cas' for item in options))
+        self.assertTrue(any(item['Stock_State'] == 'expired' and item['Stock_Warning'] == 'Đã hết hạn' for item in options))
+        for query in ('Zero only','Inactive only'):
+            self.assertEqual(self.client().get('/search',query_string={'query':query,'in_stock_only':'1'}).get_json()['results'], [])
+
+    def test_in_stock_filter_cas_requires_both_grants_and_visibility(self):
+        self.product('CAS candidate', 'CAT-X', '50-00-0')
+        self.stock('CAS stock', 'STOCK-X', '50-00-0', quantity=3)
+        for grants in (
+            ['SEARCH','VIEW_NAME','VIEW_CAS'],
+            ['SEARCH','VIEW_NAME','SEARCH_BY_CAS'],
+        ):
+            rows = self.client(grants).get('/search',query_string={'query':'candidate','in_stock_only':'1'}).get_json()['results']
+            self.assertEqual(rows, [])
+        allowed = self.client(['SEARCH','VIEW_NAME','VIEW_CAS','SEARCH_BY_CAS'])
+        rows = allowed.get('/search',query_string={'query':'candidate','in_stock_only':'1'}).get_json()['results']
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['Stock_Options'][0]['Stock_Match'], 'same_cas')
+        denied_brand = self.client(['SEARCH','VIEW_NAME','VIEW_CAS','SEARCH_BY_CAS'], brands=('Brand B',))
+        self.assertEqual(denied_brand.get('/search',query_string={'query':'candidate','in_stock_only':'1'}).get_json()['results'], [])
+
+    def test_in_stock_filter_stock_only_name_code_cap_literals_unicode_and_export_block(self):
+        self.stock('Zero Match 100%_ Å', 'ZERO-DIRECT', quantity=0)
+        positive = self.stock('Positive Match 100%_ Å', 'POS-DIRECT', quantity=2)
+        client = self.client()
+        with mock.patch('stock.DIRECT_STOCK_LIMIT', 1):
+            payload = client.get('/search',query_string={'query':'Match 100%_ Å','in_stock_only':'1'}).get_json()
+        self.assertFalse(payload['stock_truncated'])
+        self.assertEqual(len(payload['results']), 1)
+        row = payload['results'][0]
+        self.assertEqual(row['Result_Kind'], 'stock_only')
+        self.assertIsNone(row['product_id'])
+        self.assertEqual(row['Stock_Options'][0]['Stock_Item_Id'], positive)
+        self.assertEqual(row['Stock_Options'][0]['Stock_Match'], 'name')
+        code_row = client.get('/search',query_string={'query':'POS-DIRECT','in_stock_only':'1'}).get_json()['results'][0]
+        self.assertEqual(code_row['Stock_Options'][0]['Stock_Match'], 'exact_code')
+
+    def test_in_stock_direct_cap_applies_positive_visibility_before_limit(self):
+        zero = self.stock('Cap needle', 'CAP-ZERO', quantity=0)
+        first = self.stock('Cap needle', 'CAP-ONE', quantity=1)
+        self.stock('Cap needle', 'CAP-TWO', quantity=2)
+        with mock.patch('stock.DIRECT_STOCK_LIMIT', 1):
+            payload = self.client().get('/search',query_string={'query':'Cap needle','in_stock_only':'1'}).get_json()
+        self.assertTrue(payload['stock_truncated'])
+        self.assertEqual(len(payload['results']), 1)
+        returned = payload['results'][0]['Stock_Options'][0]
+        self.assertEqual(returned['Stock_Item_Id'], first)
+        self.assertNotEqual(returned['Stock_Item_Id'], zero)
+        self.assertGreater(returned['Stock_Quantity'], 0)
+
+    def test_in_stock_filter_catalog_unicode_normalization_and_repeatable_snapshot(self):
+        self.product('Unicode catalog', 'Café-ß', '11-11-1')
+        self.stock('Warehouse only', 'Cafe\u0301-SS', '22-22-2', quantity=5)
+        client = self.client()
+        replacement = str(uuid.uuid4())
+        with self.conn.cursor() as cur:
+            cur.execute("INSERT INTO stock_snapshots(id,source_kind,actor,row_count,content_sha256) VALUES(%s,'IMPORT','fixture',0,'')",(replacement,))
+        original_loader = search._load_pricing_resolver
+        switched = False
+        def switch_snapshot(conn):
+            nonlocal switched
+            if not switched:
+                switched = True
+                other = psycopg2.connect(self.dsn)
+                try:
+                    with other:
+                        with other.cursor() as cur:
+                            cur.execute('UPDATE stock_state SET active_snapshot_id=%s,revision=revision+1 WHERE singleton=TRUE',(replacement,))
+                finally:
+                    other.close()
+            return original_loader(conn)
+        with mock.patch.object(search, '_load_pricing_resolver', side_effect=switch_snapshot):
+            rows = client.get('/search',query_string={'query':'Unicode','in_stock_only':'1'}).get_json()['results']
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['Stock_Options'][0]['Stock_Quantity'], 5)
+
+    def test_in_stock_filter_code_slow_path_is_conservative_for_python_casefold(self):
+        pairs = (
+            ('Unicode sharp s', 'Café-ß', 'Cafe\u0301-SS'),
+            ('Unicode ligature', 'ITEM-ﬀ', 'ITEM-ff'),
+            ('Unicode dotted i', 'ITEM-İ', 'ITEM-i\u0307'),
+            ('Unicode tabs', '\tABC\t', 'ABC'),
+            ('Unicode dotless i', 'ITEM-ı', 'ITEM-ı'),
+        )
+        for index, (name, catalog_code, stock_code) in enumerate(pairs):
+            self.product(name, catalog_code, f'CAT-CAS-{index}')
+            self.stock('Warehouse only', stock_code, f'STOCK-CAS-{index}', quantity=1)
+        # Deliberately omit SEARCH_BY_CAS/VIEW_CAS: every result must qualify
+        # by the existing Python code matcher, not a coincidentally equal CAS.
+        client = self.client(['SEARCH','VIEW_NAME','VIEW_CODE'])
+        for name, _catalog_code, _stock_code in pairs:
+            rows = client.get('/search',query_string={'query':name,'in_stock_only':'1'}).get_json()['results']
+            self.assertEqual(len(rows), 1, name)
+            self.assertEqual(rows[0]['Stock_Options'][0]['Stock_Match'], 'exact_code', name)
+        self.product('Unicode negative', 'ITEM-ñ', 'NEG-CAT')
+        rows = client.get('/search',query_string={'query':'Unicode negative','in_stock_only':'1'}).get_json()['results']
+        self.assertEqual(rows, [])
+
+    def test_in_stock_filter_empty_cas_does_not_admit_catalog_to_resolver(self):
+        self.product('No CAS catalog', 'CAT-NO-CAS', '')
+        self.stock('Warehouse only', 'STOCK-NO-CAS', '', quantity=2)
+        with mock.patch.object(search, 'resolve_compliance_precedence', wraps=search.resolve_compliance_precedence) as resolver:
+            rows = self.client().get('/search',query_string={'query':'No CAS catalog','in_stock_only':'1'}).get_json()['results']
+        self.assertEqual(rows, [])
+        self.assertEqual(resolver.call_count, 0)
 
 
 if __name__ == '__main__': unittest.main()

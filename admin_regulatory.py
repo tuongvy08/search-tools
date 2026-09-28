@@ -24,6 +24,8 @@ from regulatory import (
     valid_color_hex,
 )
 import regulatory_import_jobs as jobs
+import regulatory_manual as manual
+from regulatory_presentation import vietnam_time
 import session_security
 
 STATUS_LABELS = {
@@ -89,11 +91,19 @@ def _status_snapshot(row):
 
 
 def register(app, require_admin, actor):
+    app.add_template_filter(vietnam_time, 'regulatory_vn_time')
+    @app.errorhandler(manual.ManualProblem)
+    def manual_error(error):
+        return jsonify(error=str(error), rule_id=error.rule_id,
+                       rule_url=url_for('regulatory_rule_detail', rule_id=error.rule_id) if error.rule_id else None), error.status
+
     def guard(mutation=False):
         denied = require_admin()
         if denied is not None:
             return denied
         with jobs.connection() as conn, conn.cursor() as cur:
+            if mutation:
+                manual.require_schema(cur)
             cur.execute(
                 """SELECT 1 FROM app_users WHERE id=%s AND is_admin=true
                    AND account_status='ACTIVE' AND auth_version=%s""",
@@ -105,6 +115,87 @@ def register(app, require_admin, actor):
             request.headers.get("X-CSRF-Token", "") or request.form.get("csrf_token", "")
         ):
             abort(400, description="CSRF token không hợp lệ hoặc đã hết hạn.")
+
+    def reject_extra(allowed):
+        if set(request.form) - allowed or request.args:
+            raise manual.ManualProblem('Tham số không được hỗ trợ; import không cho ghi đè mục thủ công.')
+
+    @app.get('/admin/regulatory/rules', endpoint='regulatory_rules')
+    def rules():
+        denied = guard()
+        if denied is not None:
+            return denied
+        with jobs.connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            result = manual.list_rules(cur, request.args)
+            cur.execute('SELECT * FROM regulatory_statuses ORDER BY priority,id')
+            statuses = cur.fetchall()
+        return render_template('admin_regulatory_rules.html', statuses=statuses, filters=request.args,
+                               field_labels=FIELD_LABELS, **result)
+
+    def rule_form(rule_id=None):
+        denied = guard()
+        if denied is not None:
+            return denied
+        page = manual.positive_int(request.args.get('page', '1'), 'Trang lịch sử')
+        if page > 100000000:
+            raise manual.ManualProblem('Trang không hợp lệ.')
+        with jobs.connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            manual.require_schema(cur)
+            row = manual.get_rule(cur, rule_id) if rule_id else None
+            cur.execute('SELECT * FROM regulatory_statuses ORDER BY priority,id')
+            statuses = cur.fetchall()
+            cur.execute('SELECT count(*) AS total FROM regulatory_rule_manual_events WHERE rule_id=%s', (rule_id,))
+            total = cur.fetchone()['total']
+            cur.execute('''SELECT * FROM regulatory_rule_manual_events WHERE rule_id=%s
+                ORDER BY created_at DESC,id DESC LIMIT 50 OFFSET %s''', (rule_id, (page-1)*50))
+            events = cur.fetchall()
+        return render_template('admin_regulatory_rule.html', rule=row, statuses=statuses, events=events,
+                               request_id=str(uuid.uuid4()), page=page, has_next=page*50 < total,
+                               field_labels=FIELD_LABELS)
+
+    @app.get('/admin/regulatory/rules/new', endpoint='regulatory_rule_new')
+    def rule_new():
+        return rule_form()
+
+    @app.get('/admin/regulatory/rules/<int:rule_id>', endpoint='regulatory_rule_detail')
+    def rule_detail(rule_id):
+        return rule_form(rule_id)
+
+    @app.post('/admin/regulatory/rules/save', endpoint='regulatory_rule_save')
+    def rule_save():
+        denied = guard(True)
+        if denied is not None:
+            return denied
+        payload = request.get_json(silent=True) if request.is_json else request.form.to_dict()
+        with jobs.connection() as conn, conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            result = manual.mutate(cur, payload, session.get('user_id'), session.get('auth_version'))
+        return jsonify(**result, url=url_for('regulatory_rule_detail', rule_id=result['rule_id']))
+
+    @app.post('/admin/regulatory/rules/check', endpoint='regulatory_rule_check')
+    def rule_check():
+        denied = guard(True)
+        if denied is not None:
+            return denied
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict) or set(data) - {'match_field','match_value','status_id','rule_id'}:
+            raise manual.ManualProblem('Dữ liệu kiểm tra không hợp lệ.')
+        from regulatory import normalize_match_value
+        field = data.get('match_field')
+        if field not in ('cas', 'code', 'name'):
+            raise manual.ManualProblem('Loại đối chiếu không hợp lệ.')
+        try:
+            value = normalize_match_value(field, manual.text_input(data.get('match_value'), 500))
+        except ValueError as exc:
+            raise manual.ManualProblem(str(exc)) from None
+        status_id = manual.positive_int(data.get('status_id'), 'Tình trạng')
+        owner = manual.positive_int(data['rule_id'], 'ID') if data.get('rule_id') else None
+        with jobs.connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute('SELECT 1 FROM regulatory_statuses WHERE id=%s', (status_id,))
+            if not cur.fetchone():
+                raise manual.ManualProblem('Tình trạng không tồn tại.')
+            manual.collision(cur, status_id, field, value, owner)
+            related = manual.related_rules(cur, field, value, status_id, owner)
+        return jsonify(related=related)
 
     @app.get("/admin/regulatory", endpoint="admin_regulatory")
     def index():
@@ -301,6 +392,7 @@ def register(app, require_admin, actor):
         denied = guard(True)
         if denied is not None:
             return denied
+        reject_extra({'csrf_token','mode','submission_key'})
         try:
             file = request.files.get("file")
             if not file:
@@ -319,11 +411,14 @@ def register(app, require_admin, actor):
         if denied is not None:
             return denied
         with jobs.connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
-            job = jobs.fetch_job(cur, job_id)
+            job = jobs.fetch_job(cur, job_id, summary=True)
             if not job:
                 abort(404)
             cur.execute(
-                "SELECT actor,event,detail,created_at FROM regulatory_import_events WHERE job_id=%s ORDER BY id DESC LIMIT 30",
+                """SELECT e.id,e.actor,e.event,e.created_at,u.username AS actor_username
+                   FROM regulatory_import_events e
+                   LEFT JOIN app_users u ON e.actor='user:' || u.id::text
+                   WHERE e.job_id=%s ORDER BY e.id DESC LIMIT 30""",
                 (str(job_id),),
             )
             events = cur.fetchall()
@@ -338,7 +433,7 @@ def register(app, require_admin, actor):
         if denied is not None:
             return denied
         with jobs.connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
-            job = jobs.fetch_job(cur, job_id)
+            job = jobs.fetch_job(cur, job_id, summary=True)
         if not job:
             abort(404)
         data = {key: job[key] for key in
@@ -354,9 +449,19 @@ def register(app, require_admin, actor):
         denied = guard(True)
         if denied is not None:
             return denied
+        reject_extra({'csrf_token','fingerprint','confirm_delete'})
         try:
             jobs.control(job_id, action, actor(), request.form.get("fingerprint", ""),
                          request.form.get("confirm_delete", ""))
         except ImportProblem as exc:
             return redirect(url_for("regulatory_job_detail", job_id=job_id, err=str(exc)))
         return redirect(url_for("regulatory_job_detail", job_id=job_id))
+
+    @app.get('/admin/regulatory/jobs/<uuid:job_id>/protection', endpoint='regulatory_job_protection')
+    def job_protection(job_id):
+        denied = guard()
+        if denied is not None:
+            return denied
+        with jobs.connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            result = jobs.protection_page(cur, job_id, request.args.get('page', '1'), request.args.get('event_id'))
+        return render_template('admin_regulatory_protection.html', job_id=job_id, field_labels=FIELD_LABELS, **result)

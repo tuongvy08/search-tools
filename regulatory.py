@@ -351,10 +351,16 @@ def catalog_fingerprint(cur) -> str:
                                                                    COALESCE(to_jsonb(regulatory_statuses)->>'color_hex',
                                                                             to_jsonb(regulatory_statuses)->>'color_key'))
                                      ORDER BY priority,id) FROM regulatory_statuses), '[]'::jsonb),
-          'rules', COALESCE((SELECT jsonb_agg(jsonb_build_array(id,status_id,match_field,match_value,note,is_active)
+          'rules', COALESCE((SELECT jsonb_agg(jsonb_build_array(id,status_id,match_field,match_value,note,is_active,
+                                  to_jsonb(regulatory_rules)->'revision',to_jsonb(regulatory_rules)->'manual_protected')
                                   ORDER BY id) FROM regulatory_rules), '[]'::jsonb)
         )
         """
     )
     payload = cur.fetchone()[0]
+    cur.execute("SELECT to_regclass('regulatory_rule_manual_keys')")
+    if cur.fetchone()[0]:
+        cur.execute("""SELECT COALESCE(jsonb_agg(jsonb_build_array(rule_id,status_id,match_field,match_value)
+                       ORDER BY id),'[]'::jsonb) FROM regulatory_rule_manual_keys""")
+        payload['manual_keys'] = cur.fetchone()[0]
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()

@@ -156,7 +156,7 @@ def probe_postgres_reachable():
         return False
 
 
-def create_full_schema_temp_db():
+def create_full_schema_temp_db(include_manual=True):
     """Create a brand-new, uniquely-named database (never `products_local`)
     with the full real schema described in this module's docstring.
     Returns `(db_name, dsn)`. Caller MUST call `drop_temp_db(db_name)` in
@@ -191,6 +191,8 @@ def create_full_schema_temp_db():
                     cur.execute(_MINIMAL_BASE_SCHEMA_SQL)
                     for fname in _FULL_SCHEMA_SQL_FILES:
                         cur.execute(_read_sql(fname))
+                    if include_manual:
+                        cur.execute(_read_sql('migration_033_regulatory_manual_edit.sql'))
                     cur.execute(_EXCHANGE_RATES_SQL)
         finally:
             conn.close()
@@ -278,6 +280,16 @@ def psql_available():
     return shutil.which("psql") is not None
 
 
+def _compose_command():
+    command = ["docker", "compose", "--env-file", "/dev/null", "-f", str(_REPO_ROOT / "docker-compose.yml")]
+    project = os.environ.get("REGULATORY_TEST_COMPOSE_PROJECT")
+    if project:
+        if project != "search-tools-regulatory-test" or os.environ.get("REGULATORY_LOCAL_TEST") != "1":
+            raise ValueError("Unverified test Compose project")
+        command += ["-p", project]
+    return command
+
+
 def _docker_compose_db_available():
     """True if `docker compose`'s `db` service (this repo's local Postgres,
     per docker-compose.yml / AGENTS.md) is up and reachable, as a fallback
@@ -295,7 +307,7 @@ def _docker_compose_db_available():
         return False
     try:
         proc = subprocess.run(
-            ["docker", "compose", "ps", "--status=running", "--services"],
+            _compose_command() + ["ps", "--status=running", "--services"],
             cwd=str(_REPO_ROOT),
             capture_output=True,
             text=True,
@@ -415,8 +427,8 @@ def run_migration_via_psql(dsn, sql_path, timeout=120):
         if parsed.password:
             docker_env["PGPASSWORD"] = parsed.password
         proc = subprocess.run(
-            [
-                "docker", "compose", "exec", "-T",
+            _compose_command() + [
+                "exec", "-T",
                 # Bare `-e VARNAME` (no `=value`) forwards the value from
                 # THIS subprocess's own environment into the container --
                 # the password/user never appear in argv (never visible via

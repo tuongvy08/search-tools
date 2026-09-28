@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ 'Sửa' if rule else 'Thêm' }} quy tắc</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css') }}">
+<script defer src="{{ url_for('static', filename='regulatory_manual.js',v='033v2-display1') }}"></script>
+</head><body class="admin-page">{% include '_user_nav.html' %}
+<main class="admin-shell"><a href="{{ url_for('regulatory_rules') }}">← Danh sách quy tắc</a>
+<h1>{{ 'Quy tắc #' ~ rule.id if rule else 'Thêm quy tắc thủ công' }}</h1>
+<p class="state-banner">Quy tắc áp dụng toàn danh mục, không giới hạn hãng. Quy tắc tên có thể khớp nhiều sản phẩm. Kết quả cuối còn phụ thuộc thứ tự ưu tiên và ngoại lệ sản phẩm.</p>
+{% if rule %}<p>{{ 'Đang áp dụng' if rule.is_active else 'Ngừng áp dụng' }} · Phiên bản {{ rule.revision }}{% if rule.manual_protected %} · Được bảo vệ khi import{% endif %}</p>{% endif %}
+<section class="admin-card"><form id="manualRuleForm" data-save-url="{{ url_for('regulatory_rule_save') }}" data-check-url="{{ url_for('regulatory_rule_check') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="request_id" value="{{ request_id }}">
+<label>Thao tác <select name="action">{% if rule %}<option value="edit">Sửa nội dung</option><option value="{{ 'deactivate' if rule.is_active else 'restore' }}">{{ 'Ngừng áp dụng' if rule.is_active else 'Khôi phục' }}</option>{% else %}<option value="create">Thêm mới</option>{% endif %}</select></label>
+<label>Loại đối chiếu {% if rule %}<input type="hidden" name="match_field" value="{{ rule.match_field }}"><input value="{{ field_labels[rule.match_field] }}" readonly>{% else %}<select name="match_field">{% for key,label in field_labels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select>{% endif %}</label>
+<label>Giá trị <input name="match_value" value="{{ rule.match_value if rule else '' }}" maxlength="500" required></label>
+<label>Tình trạng <select name="status_id">{% for status in statuses %}<option value="{{ status.id }}"{{ ' selected' if rule and rule.status_id==status.id else '' }}>{{ status.label }}</option>{% endfor %}</select></label>
+<label>Ghi chú <textarea name="note" maxlength="4000">{{ rule.note or '' if rule else '' }}</textarea></label>
+<label>Lý do (bắt buộc khi đổi tình trạng hoặc ngừng áp dụng) <textarea name="reason" maxlength="1000"></textarea></label>
+<button type="submit" id="manualPreview">Xem trước</button>
+<div id="manualError" role="alert"></div>
+<section id="manualReview" hidden><h2>Đối chiếu trước / sau</h2><div id="manualComparison"></div><div id="manualWarnings" role="status"></div>
+<button type="button" id="manualConfirm">Xác nhận lưu</button></section>
+<noscript>Cần bật JavaScript để xem trước và xác nhận trên màn hình này.</noscript>
+</form></section>
+<script id="regulatoryRuleData" type="application/json">{{ (rule or {})|tojson }}</script>
+<script id="regulatoryFieldLabels" type="application/json">{{ field_labels|tojson }}</script>
+{% if rule %}<section class="admin-card"><h2>Lịch sử thủ công</h2>
+<p class="muted">Thời gian theo giờ Việt Nam (UTC+7).</p>
+{% for event in events %}<article><h3>{{ {'created':'Thêm mới','edited':'Sửa nội dung','deactivated':'Ngừng áp dụng','restored':'Khôi phục'}[event.event] }}</h3>
+<p><time datetime="{{ event.created_at.isoformat() }}">{{ event.created_at|regulatory_vn_time }}</time> · {{ event.actor_label }} (ID {{ event.actor_id_snapshot }})</p><p>Lý do: {{ event.reason or 'Không bắt buộc' }}</p>
+<div class="table-wrap"><table><thead><tr><th>Nội dung</th><th>Trước</th><th>Sau</th></tr></thead><tbody>
+{% for key,label in [('match_value','Giá trị'),('rule_label','Tình trạng'),('note','Ghi chú'),('is_active','Áp dụng'),('manual_protected','Bảo vệ'),('revision','Phiên bản')] %}<tr><th>{{ label }}</th>{% for state in [event.before_json,event.after_json] %}<td>{% if key in ['is_active','manual_protected'] %}{{ 'Có' if state.get(key) is sameas true else ('Không' if state.get(key) is sameas false else '—') }}{% else %}{{ state.get(key,'—') }}{% endif %}</td>{% endfor %}</tr>{% endfor %}
+</tbody></table></div></article>{% else %}<p>Chưa có lịch sử sửa tay. Không suy đoán nguồn gốc dữ liệu trước phase.</p>{% endfor %}
+<nav aria-label="Phân trang lịch sử">{% if page>1 %}<a href="{{ url_for('regulatory_rule_detail',rule_id=rule.id,page=page-1) }}">← Trang trước</a>{% endif %}{% if has_next %}<a href="{{ url_for('regulatory_rule_detail',rule_id=rule.id,page=page+1) }}">Trang sau →</a>{% endif %}</nav>
+</section>{% endif %}</main></body></html>

@@ -232,6 +232,43 @@ nghiệp vụ thật.
   biến môi trường `IMPORT_MAX_BYTES`/`IMPORT_MAX_ROWS`...), chặn macro/
   external link/zip-bomb. **[xác nhận từ code]**.
 
+## 8. Quy tắc thủ công — UAT local và polish đạt, chuẩn bị PR
+
+**[xác nhận từ người dùng, 2026-09-27]** Phase `regulatory-manual-edit`:
+
+- Dùng quyền menu `regulatory` hiện có, không tách quyền sửa riêng.
+- Tìm trong giá trị quy tắc tên/CAS/mã, lọc tình trạng và trạng thái áp dụng,
+  có phân trang; chưa tìm quy tắc tác động tới một sản phẩm cụ thể.
+- Thêm/sửa giá trị, tình trạng, ghi chú; không sửa loại đối chiếu. Người sửa
+  tự xác nhận sau khi xem trước/sau. Trùng khóa dẫn về mục có sẵn; cùng
+  CAS/mã khác tình trạng cảnh báo nhưng vẫn cho thêm.
+- Không xóa hẳn bằng thao tác tay hoặc với mục đã được bảo vệ; ngừng áp dụng
+  và có khôi phục. Mục thuần import chưa bảo vệ vẫn theo replace_scoped cũ.
+  Phạm vi C này được người dùng xác nhận ngày 2026-09-27. Lưu lịch
+  sử tay theo từng rule: người, thời gian, trước/sau. Lý do bắt buộc khi đổi
+  tình trạng hoặc ngừng áp dụng. Import vẫn dùng nhật ký tác vụ hiện có.
+- **Điều chỉnh D của người dùng ngày 2026-09-27, thay quyết định trước đó:**
+  cả upsert và replace_scoped **luôn giữ nguyên** mục thêm/sửa/ngừng thủ
+  công, kể cả vắng trong file. **Bỏ tùy chọn cho file ghi đè khỏi bản đầu.**
+  Muốn lấy nội dung file cho mục thủ công phải sửa tay mục đó. Preview
+  import liệt kê đầy đủ mục giữ/xung đột; không ghi đè, xóa hoặc tự bật lại
+  rule ngừng tay. Bảo vệ cả khóa trước khi sửa để file cũ không tạo lại rule cũ.
+- Backfill bảo vệ mọi rule inactive có sẵn, không tạo lịch sử giả. Không
+  suy nguồn sửa tay của active cũ từ note/timestamp; chúng chưa bảo vệ cho
+  tới khi có thay đổi tay thật. Người dùng đã duyệt ngày 2026-09-27.
+- **Điều chỉnh được duyệt ngày 2026-09-27:** preview tay ở UI, không bảng
+  preview DB; server confirm kiểm tra quyền, CSRF, validation và expected
+  revision, từ chối revision cũ/yêu cầu tải lại; chống xác nhận lặp tạo hai
+  bản ghi. Không thay cơ chế preview/apply import bằng UI-only.
+- **H đã chốt ngày 2026-09-27:** bản đầu không làm số sản phẩm ảnh hưởng,
+  chỉ cảnh báo chung; không còn phần số đếm tùy chọn trong phase này.
+
+Nguồn quyết định A–H hiện hành, thiết kế v2 và hợp đồng kiểm
+chứng: [spec](../specs/regulatory-manual-edit/SPEC.md). **Cập nhật 2026-09-28:**
+đã triển khai trên branch `feature/regulatory-manual-edit`, verifier PASS
+20/20 local; PO đã nghiệm thu UAT. Mục 2 và 7 ở trên mô tả
+baseline trước phase; **không coi cơ chế này đã phát hành lên production**.
+
 ## Câu hỏi cần người dùng xác nhận (tổng hợp)
 
 Đã xác nhận 2026-09-27 (xem chi tiết ở từng mục trên): ý nghĩa và tính linh
@@ -239,4 +276,9 @@ hoạt của nhãn pháp chế, ý nghĩa override thủ công, phạm vi `repla
 khi import quy tắc pháp chế, giá tồn kho/ngưỡng sắp hết hạn, cách dùng
 `preparation_type`, trạng thái/đối tượng dùng `ENABLE_LEGACY_PASSWORD_LOGIN`,
 tần suất cập nhật tồn kho/tỷ giá, quy mô dữ liệu production. Không còn câu
-hỏi nghiệp vụ nào mở tại thời điểm viết tài liệu này.
+hỏi nghiệp vụ nào mở trong phạm vi tài liệu ban đầu đó.
+
+Phase mới: người dùng đã duyệt spec với điều chỉnh ngày 2026-09-27 như mục 8.
+PO đã xác nhận UAT browser local 8/8 và polish hiển thị 4/4 đạt. Tests và
+verifier phạm vi ảnh hưởng đã đạt. Bước kế tiếp: review PR; merge và deploy
+cần phê duyệt riêng, chưa thực hiện. Không đổi nghiệp vụ.

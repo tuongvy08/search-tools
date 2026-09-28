@@ -232,7 +232,7 @@ nghiệp vụ thật.
   biến môi trường `IMPORT_MAX_BYTES`/`IMPORT_MAX_ROWS`...), chặn macro/
   external link/zip-bomb. **[xác nhận từ code]**.
 
-## 8. Quy tắc thủ công — đã chốt nghiệp vụ, CHƯA triển khai
+## 8. Quy tắc thủ công — UAT local và polish đạt, chuẩn bị PR
 
 **[xác nhận từ người dùng, 2026-09-27]** Phase `regulatory-manual-edit`:
 
@@ -264,8 +264,10 @@ nghiệp vụ thật.
   chỉ cảnh báo chung; không còn phần số đếm tùy chọn trong phase này.
 
 Nguồn quyết định A–H hiện hành, thiết kế v2 và hợp đồng kiểm
-chứng: [spec](../specs/regulatory-manual-edit/SPEC.md). Mục 2 và 7 ở trên
-vẫn mô tả code hiện tại; **không coi cơ chế bảo vệ import này đã có**.
+chứng: [spec](../specs/regulatory-manual-edit/SPEC.md). **Cập nhật 2026-09-28:**
+đã triển khai trên branch `feature/regulatory-manual-edit`, verifier PASS
+20/20 local; PO đã nghiệm thu UAT. Mục 2 và 7 ở trên mô tả
+baseline trước phase; **không coi cơ chế này đã phát hành lên production**.
 
 ## Câu hỏi cần người dùng xác nhận (tổng hợp)
 
@@ -277,5 +279,6 @@ tần suất cập nhật tồn kho/tỷ giá, quy mô dữ liệu production. K
 hỏi nghiệp vụ nào mở trong phạm vi tài liệu ban đầu đó.
 
 Phase mới: người dùng đã duyệt spec với điều chỉnh ngày 2026-09-27 như mục 8.
-Lượt hiện tại chỉ cập nhật tài liệu lên v2, xong phải dừng; chưa được phép
-implement, tạo/chạy migration hoặc deploy.
+PO đã xác nhận UAT browser local 8/8 và polish hiển thị 4/4 đạt. Tests và
+verifier phạm vi ảnh hưởng đã đạt. Bước kế tiếp: review PR; merge và deploy
+cần phê duyệt riêng, chưa thực hiện. Không đổi nghiệp vụ.

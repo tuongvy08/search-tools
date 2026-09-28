@@ -41,7 +41,9 @@ _ENDPOINT_GROUPS = {
         admin_quote_templates_download admin_quote_templates_inspect''',
     'exchange_rates': 'admin_exchange_rates',
     'regulatory': '''admin_regulatory regulatory_job_detail regulatory_job_control
-        regulatory_job_status regulatory_status_action regulatory_template regulatory_upload''',
+        regulatory_job_status regulatory_status_action regulatory_template regulatory_upload
+        regulatory_rules regulatory_rule_new regulatory_rule_detail regulatory_rule_save
+        regulatory_rule_check regulatory_job_protection''',
     'stock': '''admin_stock stock_job_detail stock_job_control stock_job_status
         stock_snapshot_restore stock_template stock_upload stock_manual_new
         stock_manual_edit stock_manual_review stock_manual_save''',

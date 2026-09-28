@@ -1,7 +1,7 @@
 # Trạng thái project
 
-Cập nhật: 2026-09-27 (checkpoint spec sửa quy tắc pháp chế thủ công;
-chưa triển khai code hoặc migration).
+Cập nhật: 2026-09-28 (phase regulatory-manual-edit hoàn tất local;
+verifier/UAT đạt; chờ review PR, chưa merge/deploy).
 
 ## Trạng thái hiện tại
 
@@ -39,10 +39,8 @@ thời điểm viết phase doc, không phản ánh tình trạng hiện tại.
 
 **Nguồn bổ sung quan trọng** (2026-09-27, do người dùng chỉ ra): một
 `PROJECT_STATE.md` chi tiết hơn nhiều (618 dòng) từ các phiên điều phối
-Codex trước đây cho project này, lưu **cục bộ trên máy Product Owner** tại
-`/Users/truong/Documents/Codex/2026-08-16/referenced-chatgpt-conversation-this-is-an/`
-(không nằm trong Git, chỉ có trên máy đó — không giả định file này còn tồn
-tại/đúng như vậy trên máy khác hoặc trong tương lai). File đó ghi lại toàn
+Codex trước đây cho project này, lưu **cục bộ ngoài Git trên máy Product
+Owner**; không giả định file này còn tồn tại trên máy khác. File đó ghi lại toàn
 bộ lịch sử preflight/prepare/cutover từng phase, quyết định nghiệp vụ chi
 tiết (đối chiếu với `SPEC_REGULATORY_STOCK.md` cùng thư mục — đã dùng để bổ
 sung docs/BUSINESS_RULES.md) và mô hình deploy thực tế (xem ARCHITECTURE.md
@@ -52,7 +50,7 @@ AUTHORIZED, sẵn sàng cho người dùng chạy" — chưa có output xác nh�
 xong tại thời điểm đó; xác nhận của người dùng trong phiên tài liệu này (sau
 đó cùng ngày) rằng production đã chạy bản mới nhất được hiểu là cutover đó
 đã hoàn tất sau thời điểm file kia được ghi. Không tự suy ra thêm chi tiết
-vận hành (PID, tên release cụ thể...) ngoài hai nguồn này; đọc lại file đó
+vận hành (tên release cụ thể...) ngoài hai nguồn này; đọc lại file đó
 hoặc hỏi người dùng nếu cần mốc thời gian chính xác hơn.
 
 Bối cảnh lịch sử xa hơn (không còn là rủi ro hiện tại, giữ lại để tránh nhầm
@@ -69,29 +67,18 @@ Golden Development Template đã merge vào `main` qua PR #21, commit
 
 ## Việc đang mở
 
-- **HIGH — regulatory-manual-edit — spec v2 đã cập nhật theo duyệt có điều
-  chỉnh của người dùng ngày 2026-09-27; chưa implement.**
-  Mục tiêu: tìm/thêm/sửa/ngừng áp dụng/khôi phục từng quy tắc pháp chế,
-  có lịch sử và bảo vệ thay đổi thủ công trước import.
-  Branch: `feature/regulatory-manual-edit`, base `main@db26d40`.
-  Người dùng đã chốt A–H và điều chỉnh D: import luôn giữ mục thủ công,
-  không có tùy chọn ghi đè; preview tay chỉ trên UI, server kiểm tra quyền,
-  CSRF, validation, expected revision và chống gửi lặp. Quyết định nằm trong
-  `specs/regulatory-manual-edit/SPEC.md`. Hợp đồng kiểm chứng theo mục 11:
-  `specs/regulatory-manual-edit/VERIFICATION.md`; kế hoạch migration/rollback:
-  `specs/regulatory-manual-edit/MIGRATION.md`.
-  Phạm vi được phép lượt này: chỉ cập nhật tài liệu trên branch hiện có;
-  **không code, không tạo file migration, không SQL, không truy cập server**.
-  V2 còn 20 claim (V1–V11, V13–V21; bỏ V12). Không bảng preview tay/bảng
-  chi tiết import mới; dùng audit request_id chống gửi lặp và JSONB job/event
-  hiện có cho danh sách xung đột đầy đủ. Không số đếm sản phẩm ảnh hưởng.
-  Đã review tài liệu v2, có lượt review tài liệu độc lập; làm rõ không chia
-  tùy ý các dòng cùng scope để chạy nhiều lần replace_scoped khi file lớn.
-  Đây không phải verifier runtime. Bước kế tiếp: báo thay đổi và dừng chờ
-  yêu cầu tiếp; không suy quyền implement từ việc duyệt spec.
-  Chưa chạy test app/SQL, chưa có VERIFICATION_RESULT.md hoặc tính năng PASS.
-- Các việc tùy chọn cũ (xóa file `heroku`, cân nhắc tắt legacy login,
-  cập nhật tài liệu deploy) không thuộc phase này.
+- `feature/regulatory-manual-edit`: code hoàn tất, hợp đồng spec v2 khóa ở
+  commit `ee2ee5a`; verifier độc lập **PASS 20/20 claim** sau 1 repair.
+- PO đã nghiệm thu local **8/8 chức năng + 4/4 hiển thị**. Bộ test phase
+  cuối: **24 tính năng + 81 hồi quy + 2 bộ DOM PASS**, không skip.
+- Migration 033 và rollback có guard đã kiểm tra trên database test tạm;
+  chưa chạy trên staging/production. Chi tiết evidence, lịch sử repair và
+  UAT: `docs/regulatory-manual-edit/VALIDATION.md` và `UAT.md`.
+- Bước kế tiếp: review PR → được phép merge → lập task HIGH riêng để deploy
+  staging rồi production sau preflight/backup/UAT và phê duyệt tương ứng.
+  **Chưa merge/deploy hoặc thao tác database/hạ tầng server.**
+- Phase sau đề xuất (chưa triển khai): **Xuất danh mục quy tắc ra Excel**;
+  cần chốt phạm vi xuất. Phase sau đề xuất: **Thiết kế lại giao diện quản trị**.
 
 ## Vấn đề đã biết
 
@@ -151,8 +138,10 @@ Golden Development Template đã merge vào `main` qua PR #21, commit
 
 ## Bước tiếp theo được khuyến nghị
 
-1. Spec `regulatory-manual-edit` v2 đã cập nhật theo duyệt có điều chỉnh
-   ngày 2026-09-27. Dừng chờ yêu cầu tiếp; chưa có quyền implement lượt này.
+1. Review PR regulatory-manual-edit vào `main`; chỉ merge khi được phép và
+   các gate áp dụng đạt. Sau đó mở task HIGH riêng cho staging rồi production,
+   không suy quyền deploy từ việc duyệt PR. Hai đề xuất phase sau giữ ở
+   "Việc đang mở", chưa triển khai.
 2. PR #21 đã merge Golden Development Template; không cần thực hiện lại.
 3. (Tùy chọn, ngoài phạm vi task tài liệu, cần yêu cầu rõ trước khi làm)
    - Xóa file `heroku` rỗng ở gốc repo — đã xác nhận có thể xóa.

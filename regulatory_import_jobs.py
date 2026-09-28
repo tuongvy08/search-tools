@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import admin_permissions
 import os
 from pathlib import Path
@@ -14,6 +15,7 @@ from openpyxl import load_workbook
 from psycopg2.extras import Json, RealDictCursor, execute_values
 
 import import_jobs
+import regulatory_manual as manual
 from import_engine import ImportProblem, inspect_workbook, limit
 from regulatory import (
     EXPORT_ALLOW,
@@ -49,14 +51,45 @@ def _event(cur, job_id, actor, name, detail=None):
     )
 
 
-def fetch_job(cur, job_id):
+def fetch_job(cur, job_id, summary=False):
+    if summary:
+        cur.execute("""SELECT (to_jsonb(j)-'preview') || jsonb_build_object('preview',
+            j.preview-'protection_details') AS data FROM regulatory_import_jobs j WHERE id=%s""", (str(job_id),))
+        row = cur.fetchone()
+        return row['data'] if row else None
     cur.execute("SELECT * FROM regulatory_import_jobs WHERE id=%s", (str(job_id),))
     return cur.fetchone()
 
 
+def protection_page(cur, job_id, page=1, event_id=None):
+    page = manual.positive_int(page, 'Trang')
+    if page > 100000000:
+        raise manual.ManualProblem('Trang không hợp lệ.')
+    event_id = manual.positive_int(event_id, 'Sự kiện') if event_id else None
+    cur.execute("""WITH chosen AS (
+        SELECT e.id,e.event,e.created_at,e.detail FROM regulatory_import_events e
+        JOIN regulatory_import_jobs j ON j.id=e.job_id
+        WHERE j.id=%s AND e.event IN ('preview_completed','apply_completed')
+          AND ((%s::bigint IS NOT NULL AND e.id=%s) OR
+               (%s::bigint IS NULL AND j.status='completed' AND e.detail->>'run_attempt'=j.attempts::text
+                AND e.event=j.phase || '_completed'))
+        ORDER BY e.id DESC LIMIT 1
+    ) SELECT id,event,created_at,detail-'protection_details' AS summary,
+        jsonb_array_length(detail->'protection_details') AS total,
+        (SELECT COALESCE(jsonb_agg(item ORDER BY ordinal),'[]'::jsonb)
+         FROM jsonb_array_elements(detail->'protection_details') WITH ORDINALITY AS x(item,ordinal)
+         WHERE ordinal>%s AND ordinal<=%s) AS details
+        FROM chosen WHERE detail->>'contract_version'='2' AND detail ? 'protection_details'""",
+        (str(job_id), event_id, event_id, event_id, (page-1)*50, page*50))
+    row = cur.fetchone()
+    if not row:
+        raise manual.ManualProblem('Chưa có snapshot chi tiết hoàn tất cho lần xử lý này.', 404)
+    return dict(row, page=page, has_next=page*50 < row['total'])
+
+
 def list_jobs():
     with connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute("SELECT * FROM regulatory_import_jobs ORDER BY created_at DESC LIMIT 30")
+        cur.execute("SELECT id,filename,mode,phase,status,created_at FROM regulatory_import_jobs ORDER BY created_at DESC LIMIT 30")
         return cur.fetchall()
 
 
@@ -78,6 +111,7 @@ def submit(file, mode, actor, user_id, auth_version, submission_key):
         try:
             with conn, conn.cursor() as cur:
                 acquire_regulatory_lock(cur)
+                manual.require_schema(cur)
                 admin_permissions.require_job_actor(cur, user_id, auth_version, 'regulatory')
                 cur.execute(
                     "SELECT id FROM regulatory_import_jobs WHERE actor_user_id=%s AND submission_key=%s",
@@ -121,6 +155,7 @@ def submit(file, mode, actor, user_id, auth_version, submission_key):
 
 def control(job_id, action, actor, fingerprint="", confirm_delete=""):
     with connection() as conn, conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+        manual.require_schema(cur)
         cur.execute("SELECT * FROM regulatory_import_jobs WHERE id=%s FOR UPDATE", (str(job_id),))
         job = cur.fetchone()
         admin_permissions.require_job_request_actor(cur, 'regulatory')
@@ -145,6 +180,8 @@ def control(job_id, action, actor, fingerprint="", confirm_delete=""):
             if not cur.fetchone()["valid"]:
                 raise ImportProblem("Tệp đã hết hạn; hãy upload lại.")
             preview = job["preview"] or {}
+            if preview.get('contract_version') != 2:
+                raise ImportProblem('Kế hoạch cũ không còn hợp lệ. Hãy xem trước lại.')
             if job["status"] != "completed" or job["phase"] != "preview" or not job["preview_ready"]:
                 raise ImportProblem("Cần xem trước thành công trước khi ghi dữ liệu.")
             if fingerprint != preview.get("fingerprint"):
@@ -157,7 +194,9 @@ def control(job_id, action, actor, fingerprint="", confirm_delete=""):
                 (str(job_id),),
             )
         elif action == "retry":
-            if job["status"] not in ("failed", "cancelled"):
+            if job["status"] not in ("failed", "cancelled") and not (
+                job['status'] == 'completed' and job['phase'] == 'preview'
+            ):
                 raise ImportProblem("Không thể thử lại tác vụ này.")
             if job["attempts"] >= limit("MAX_ATTEMPTS", 6):
                 raise ImportProblem("Đã hết số lần thử. Hãy upload lại workbook.")
@@ -229,34 +268,54 @@ def _parse_workbook(path: Path):
         wb.close()
 
 
-def _load_existing(cur):
-    cur.execute("SELECT id,stable_key,label,priority,export_policy FROM regulatory_statuses ORDER BY priority,id")
-    statuses = [dict(zip(("id", "stable_key", "label", "priority", "export_policy"), row)) for row in cur.fetchall()]
-    cur.execute(
-        """SELECT r.id,s.label,r.match_field,r.match_value,COALESCE(r.note,''),r.status_id
-           FROM regulatory_rules r JOIN regulatory_statuses s ON s.id=r.status_id
-           WHERE r.is_active=true"""
-    )
-    rules = [dict(zip(("id", "status_label", "match_field", "match_value", "note", "status_id"), row))
-             for row in cur.fetchall()]
-    return statuses, rules
+def _records(cur, statement, args=()):
+    cur.execute(statement, args)
+    names = [column[0] for column in cur.description]
+    return [dict(row) if isinstance(row, dict) else dict(zip(names, row)) for row in cur.fetchall()]
+
+
+PROTECTION_DETAILS_MAX_BYTES = 8 * 1024 * 1024
+
+
+def _detail_size_error(mode):
+    instruction = ('Chỉ chia theo nhóm trường+tình trạng không giao nhau, giữ đủ mỗi nhóm; '
+                   'một nhóm vẫn quá lớn thì dừng, không chia nhóm thành nhiều lần thay thế.'
+                   if mode == 'replace_scoped' else 'Hãy chia nhỏ file theo dòng rồi xem trước lại.')
+    return ImportProblem('Chi tiết bảo vệ vượt 8 MiB. ' + instruction)
+
+
+def detail_bytes(value):
+    return len(json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode('utf-8'))
 
 
 def build_plan(cur, rows, mode):
-    statuses, existing_rules = _load_existing(cur)
-    status_by_norm = {normalized_identity(item["label"]): item for item in statuses}
+    manual.require_schema(cur)
+    if mode not in ('upsert', 'replace_scoped') or not rows:
+        raise ImportProblem('Chế độ hoặc danh sách quy tắc không hợp lệ; không dùng file rỗng để xóa.')
+    statuses = _records(cur, "SELECT *,upper(btrim(label)) AS norm FROM regulatory_statuses ORDER BY priority,id")
+    existing_rules = _records(cur, """SELECT r.*,s.label AS status_label,upper(btrim(s.label)) AS status_norm,
+        upper(btrim(r.match_value)) AS value_norm FROM regulatory_rules r
+        JOIN regulatory_statuses s ON s.id=r.status_id ORDER BY r.id""")
+    held_keys = _records(cur, """SELECT k.*,upper(btrim(s.label)) AS status_norm,
+        upper(btrim(k.match_value)) AS value_norm FROM regulatory_rule_manual_keys k
+        JOIN regulatory_statuses s ON s.id=k.status_id ORDER BY k.id""")
+    # Batch normalize through PostgreSQL: Python casefold is not the unique-index oracle.
+    texts = list({row['status_label'] for row in rows} | {row['match_value'] for row in rows})
+    norms = {r['value']: r['norm'] for r in _records(cur,
+        'SELECT value,upper(btrim(value)) AS norm FROM unnest(%s::text[]) value', (texts,))}
+    status_by_norm = {item['norm']: item for item in statuses}
     new_statuses = []
     seen_status = set(status_by_norm)
     seen_rows = {}
     prepared = []
     for row in rows:
-        status_norm = normalized_identity(row["status_label"])
+        status_norm = norms[row['status_label']]
         if not status_norm:
             raise ImportProblem(f"Dòng {row['row_number']}: tình trạng không hợp lệ.")
         if status_norm not in seen_status:
             seen_status.add(status_norm)
             new_statuses.append(row["status_label"])
-        value_norm = normalized_identity(row["match_value"])
+        value_norm = norms[row['match_value']]
         key = (status_norm, row["match_field"], value_norm)
         if key in seen_rows:
             raise ImportProblem(
@@ -267,20 +326,49 @@ def build_plan(cur, rows, mode):
         prepared.append(dict(row, status_norm=status_norm, value_norm=value_norm))
 
     existing = {
-        (normalized_identity(item["status_label"]), item["match_field"], normalized_identity(item["match_value"])): item
+        (item['status_norm'], item["match_field"], item['value_norm']): item
         for item in existing_rules
     }
+    by_id = {item['id']: item for item in existing_rules}
+    held = {(k['status_norm'], k['match_field'], k['value_norm']): k['rule_id'] for k in held_keys}
+    held_owners = set(held.values())
     inserted = updated = 0
     changes = []
+    details, protected_ids, writes = [], set(), []
+    detail_size = 2  # JSON list brackets, account for every comma and UTF-8 byte
+
+    def keep(old, proposed, reason):
+        nonlocal detail_size
+        detail = {'rule_id': old['id'], 'row_number': proposed['row_number'] if proposed else None,
+                  'before': manual.snapshot(old), 'proposed': proposed,
+                  'reason': reason, 'decision': 'Giữ nguyên'}
+        detail_size += detail_bytes(detail) + bool(details)
+        if detail_size > PROTECTION_DETAILS_MAX_BYTES:
+            raise _detail_size_error(mode)
+        details.append(detail)
+        protected_ids.add(old['id'])
+
     for row in prepared:
         key = (row["status_norm"], row["match_field"], row["value_norm"])
         old = existing.get(key)
-        if old is None:
+        owner = held.get(key)
+        if owner is not None or (old and old['manual_protected']):
+            protected = by_id[owner] if owner is not None else old
+            historical = old is None or old['id'] != protected['id']
+            reason = ('Khóa trước khi sửa' if historical else
+                      'Đang ngừng áp dụng — không khôi phục' if not protected['is_active'] else
+                      'Nội dung file xung đột với mục được bảo vệ' if (protected['note'] or '') != row['note'] else
+                      'Mục được bảo vệ giống nội dung file')
+            keep(protected, row, reason)
+            kind = 'giữ nguyên'
+        elif old is None:
             inserted += 1
             kind = "thêm"
-        elif clean_text(old["note"]) != row["note"]:
+            writes.append(row)
+        elif (old['note'] or '') != row['note'] or old['match_value'] != row['match_value'] or not old['is_active']:
             updated += 1
             kind = "cập nhật"
+            writes.append(row)
         else:
             kind = "giữ nguyên"
         if len(changes) < 20:
@@ -292,10 +380,16 @@ def build_plan(cur, rows, mode):
     delete_ids = []
     if mode == "replace_scoped":
         scope_set = set(scopes)
-        delete_ids = [item["id"] for key, item in existing.items()
-                      if (key[1], key[0]) in scope_set and key not in uploaded_keys]
+        for key, item in existing.items():
+            if (key[1], key[0]) in scope_set and key not in uploaded_keys:
+                if item['manual_protected'] or item['id'] in held_owners:
+                    if item['id'] not in protected_ids:
+                        keep(item, None, 'Vắng trong file — giữ mục được bảo vệ')
+                elif item['is_active']:
+                    delete_ids.append(item['id'])
     fingerprint = catalog_fingerprint(cur)
     plan_core = {
+        'contract_version': 2, 'protection_details': details, 'protected_count': len(protected_ids),
         "row_count": len(prepared), "inserted": inserted, "updated": updated,
         "deleted": len(delete_ids), "unchanged": len(prepared) - inserted - updated,
         "new_statuses": new_statuses,
@@ -306,10 +400,14 @@ def build_plan(cur, rows, mode):
     }
     plan_digest = hashlib.sha256(repr((prepared, mode, plan_core)).encode("utf-8")).hexdigest()
     return dict(plan_core, fingerprint=fingerprint, plan_digest=plan_digest, _delete_ids=delete_ids,
-                _prepared=prepared)
+                _prepared=writes)
 
 
 def apply_plan(cur, rows, mode, expected):
+    acquire_regulatory_lock(cur)
+    manual.require_schema(cur)
+    if expected.get('contract_version') != 2:
+        raise ImportProblem('Kế hoạch cũ không còn hợp lệ. Hãy xem trước lại.')
     current_fingerprint = catalog_fingerprint(cur)
     if current_fingerprint != expected.get("fingerprint"):
         raise ImportProblem("Danh mục hoặc quy tắc đã đổi từ lúc xem trước. Hãy xem trước lại.")
@@ -329,7 +427,7 @@ def apply_plan(cur, rows, mode, expected):
             )
 
     if plan["_delete_ids"]:
-        cur.execute("DELETE FROM regulatory_rules WHERE id=ANY(%s)", (plan["_delete_ids"],))
+        cur.execute("DELETE FROM regulatory_rules WHERE id=ANY(%s) AND NOT manual_protected", (plan["_delete_ids"],))
     for row in plan["_prepared"]:
         cur.execute(
             "SELECT id,stable_key,label,priority FROM regulatory_statuses WHERE upper(btrim(label))=upper(btrim(%s))",
@@ -343,7 +441,8 @@ def apply_plan(cur, rows, mode, expected):
                ON CONFLICT (status_id,match_field,upper(btrim(match_value)))
                DO UPDATE SET note=EXCLUDED.note,match_value=EXCLUDED.match_value,
                              rule_label=EXCLUDED.rule_label,rule_type=EXCLUDED.rule_type,
-                             priority=EXCLUDED.priority,is_active=true,updated_at=now()""",
+                              priority=EXCLUDED.priority,is_active=true,updated_at=now()
+                WHERE NOT regulatory_rules.manual_protected""",
             (stable_key, label, row["match_field"], row["match_value"], priority,
              row["note"] or None, status_id),
         )
@@ -489,6 +588,7 @@ def run_once(only_id=None):
                 if not final_state or any(final_state):
                     raise ImportProblem("Tác vụ đã được hủy hoặc hết hạn.")
                 public_plan = {key: value for key, value in plan.items() if not key.startswith("_")}
+                public_plan['run_attempt'] = job['attempts']
                 cur.execute(
                     """UPDATE regulatory_import_jobs SET status='completed',preview_ready=%s,preview=%s,
                        row_count=%s,processed_count=%s,inserted_count=%s,updated_count=%s,

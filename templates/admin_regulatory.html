@@ -35,11 +35,13 @@
     </dl>
     {% if job.errors %}<div class="state-banner state-error" role="alert">{% for item in job.errors %}<p>{{ item }}</p>{% endfor %}</div>{% endif %}
     {% if job.preview %}
+    {% if job.preview.contract_version == 2 %}<p>{{ job.preview.protected_count }} quy tắc được bảo vệ giữ nguyên.
+    <a href="{{ url_for('regulatory_job_protection',job_id=job.id) }}">Xem toàn bộ mục giữ / xung đột</a></p>{% endif %}
     <div class="preview-grid">
-      <div><strong>{{ job.preview.inserted }}</strong><span>thêm</span></div>
-      <div><strong>{{ job.preview.updated }}</strong><span>cập nhật</span></div>
-      <div><strong>{{ job.preview.deleted }}</strong><span>xóa</span></div>
-      <div><strong>{{ job.preview.unchanged }}</strong><span>giữ nguyên</span></div>
+      <div><strong>{{ job.preview.inserted }}</strong><span>dòng file thêm</span></div>
+      <div><strong>{{ job.preview.updated }}</strong><span>dòng file cập nhật</span></div>
+      <div><strong>{{ job.preview.deleted }}</strong><span>quy tắc xóa</span></div>
+      <div><strong>{{ job.preview.unchanged }}</strong><span>dòng file giữ / bỏ qua</span></div>
     </div>
     {% if job.preview.new_statuses %}<p><strong>Tình trạng mới ở cuối thứ tự:</strong> {{ job.preview.new_statuses|join(', ') }}</p>{% endif %}
     <h3>Phạm vi</h3><ul>{% for scope in job.preview.scopes %}<li>{{ field_labels.get(scope.match_field, 'Không xác định') }} / {{ scope.status }}</li>{% endfor %}</ul>
@@ -47,26 +49,31 @@
       <tbody>{% for row in job.preview.sample %}<tr><td>{{ row.action }}</td><td>{{ field_labels.get(row.field, 'Không xác định') }}</td><td>{{ row.value }}</td><td>{{ row.status }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
     {% endif %}
     <div class="job-actions">
-      {% if job.status == 'completed' and job.phase == 'preview' and job.preview_ready %}
+      {% if job.status == 'completed' and job.phase == 'preview' and job.preview_ready and job.preview.contract_version == 2 %}
       <form method="post" action="{{ url_for('regulatory_job_control', job_id=job.id, action='apply') }}" data-submit-once>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="fingerprint" value="{{ job.preview.fingerprint }}">
-        {% if job.mode == 'replace_scoped' %}<label>Nhập <strong>{{ job.preview.deleted }}</strong> để xác nhận số dòng sẽ xóa
+        {% if job.mode == 'replace_scoped' %}<label>Nhập <strong>{{ job.preview.deleted }}</strong> để xác nhận số quy tắc sẽ xóa
           <input name="confirm_delete" inputmode="numeric" required autocomplete="off"></label>{% endif %}
         <button type="submit">Xác nhận áp dụng</button>
       </form>
       {% elif job.status in ('queued','running') %}
       <form method="post" action="{{ url_for('regulatory_job_control', job_id=job.id, action='cancel') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="secondary" type="submit">Hủy</button></form>
-      {% elif job.status in ('failed','cancelled') %}
+      {% elif job.status in ('failed','cancelled') or (job.status == 'completed' and job.phase == 'preview') %}
       <form method="post" action="{{ url_for('regulatory_job_control', job_id=job.id, action='retry') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Xem trước lại</button></form>
       {% endif %}
     </div>
     <h3>Nhật ký tác vụ</h3>
+    <p class="muted">Thời gian theo giờ Việt Nam (UTC+7).</p>
     <div class="table-wrap"><table><thead><tr><th>Thời gian</th><th>Tác nhân</th><th>Sự kiện</th></tr></thead><tbody>
-      {% for event in events %}<tr><td>{{ event.created_at }}</td><td>{{ 'Hệ thống' if event.actor == 'worker' else event.actor }}</td><td>{{ event_labels.get(event.event, 'Sự kiện hệ thống') }}</td></tr>
+      {% for event in events %}<tr><td><time datetime="{{ event.created_at.isoformat() }}">{{ event.created_at|regulatory_vn_time }}</time></td><td>{{ 'Hệ thống' if event.actor == 'worker' else (event.actor_username or ('Tài khoản không còn tồn tại (' ~ event.actor ~ ')' if event.actor.startswith('user:') else event.actor)) }}</td><td>{{ event_labels.get(event.event, 'Sự kiện hệ thống') }}{% if event.event in ('preview_completed','apply_completed') %} · <a href="{{ url_for('regulatory_job_protection',job_id=job.id,event_id=event.id) }}">Chi tiết snapshot</a>{% endif %}</td></tr>
       {% else %}<tr><td colspan="3" class="empty-state">Chưa có sự kiện.</td></tr>{% endfor %}
     </tbody></table></div>
   </section>
   {% else %}
+  <section class="admin-card"><h2>Quản lý từng quy tắc</h2>
+    <p><a href="{{ url_for('regulatory_rules') }}">Tìm theo tên / CAS / mã, sửa và xem lịch sử</a> ·
+       <a href="{{ url_for('regulatory_rule_new') }}">Thêm quy tắc thủ công</a></p>
+    <p>Mục thủ công luôn được giữ khi import, kể cả đã ngừng áp dụng.</p></section>
   <div class="regulatory-layout">
     <section class="admin-card status-catalog">
       <div class="section-heading"><div><p class="eyebrow">Danh mục linh hoạt</p><h2>Thứ tự tình trạng</h2></div></div>
@@ -126,9 +133,9 @@
   </div>
 
   <section class="admin-card history">
-    <div class="section-heading"><h2>Tác vụ gần đây</h2></div>
+    <div class="section-heading"><h2>Tác vụ gần đây</h2></div><p class="muted">Thời gian theo giờ Việt Nam (UTC+7).</p>
     <div class="table-wrap"><table><thead><tr><th>Tệp</th><th>Chế độ</th><th>Giai đoạn</th><th>Trạng thái</th><th>Thời gian</th></tr></thead><tbody>
-      {% for item in jobs %}<tr><td><a href="{{ url_for('regulatory_job_detail', job_id=item.id) }}">{{ item.filename }}</a></td><td>{{ mode_labels.get(item.mode, 'Không xác định') }}</td><td>{{ phase_labels.get(item.phase, 'Không xác định') }}</td><td>{{ status_labels.get(item.status, 'Không xác định') }}</td><td>{{ item.created_at }}</td></tr>
+      {% for item in jobs %}<tr><td><a href="{{ url_for('regulatory_job_detail', job_id=item.id) }}">{{ item.filename }}</a></td><td>{{ mode_labels.get(item.mode, 'Không xác định') }}</td><td>{{ phase_labels.get(item.phase, 'Không xác định') }}</td><td>{{ status_labels.get(item.status, 'Không xác định') }}</td><td><time datetime="{{ item.created_at.isoformat() }}">{{ item.created_at|regulatory_vn_time }}</time></td></tr>
       {% else %}<tr><td colspan="5" class="empty-state">Chưa có tác vụ.</td></tr>{% endfor %}
     </tbody></table></div>
   </section>

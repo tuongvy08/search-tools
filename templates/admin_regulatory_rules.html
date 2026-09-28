@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Danh sách quy tắc</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css') }}">
+</head><body class="admin-page">{% include '_user_nav.html' %}
+<main class="admin-shell"><a href="{{ url_for('admin_regulatory') }}">← Quy tắc quản lý</a>
+<h1>Tìm và sửa quy tắc</h1><p><a href="{{ url_for('regulatory_rule_new') }}">Thêm quy tắc thủ công</a></p>
+<section class="admin-card"><form method="get">
+<label>Tên / CAS / mã trong quy tắc <input name="q" value="{{ filters.get('q','') }}" maxlength="500"></label>
+<label>Loại đối chiếu <select name="field"><option value="">Tất cả</option>{% for key,label in field_labels.items() %}<option value="{{ key }}"{{ ' selected' if filters.get('field')==key else '' }}>{{ label }}</option>{% endfor %}</select></label>
+<label>Tình trạng <select name="status_id"><option value="">Tất cả</option>{% for status in statuses %}<option value="{{ status.id }}"{{ ' selected' if filters.get('status_id')==status.id|string else '' }}>{{ status.label }}</option>{% endfor %}</select></label>
+<label>Áp dụng <select name="state">{% for key,label in [('active','Đang áp dụng'),('inactive','Ngừng áp dụng'),('all','Tất cả')] %}<option value="{{ key }}"{{ ' selected' if filters.get('state','active')==key else '' }}>{{ label }}</option>{% endfor %}</select></label>
+<button type="submit">Tìm quy tắc</button></form></section>
+<section class="admin-card"><p>{{ total }} quy tắc · Trang {{ page }}</p>
+<div class="table-wrap"><table><thead><tr><th>ID</th><th>Loại</th><th>Giá trị</th><th>Tình trạng</th><th>Ghi chú</th><th>Áp dụng / bảo vệ</th></tr></thead><tbody>
+{% for row in rules %}<tr><td><a href="{{ url_for('regulatory_rule_detail',rule_id=row.id) }}">{{ row.id }} — Mở / lịch sử</a></td><td>{{ field_labels[row.match_field] }}</td><td>{{ row.match_value }}</td><td>{{ row.rule_label }}</td><td>{{ row.note or '' }}</td><td>{{ 'Đang áp dụng' if row.is_active else 'Ngừng áp dụng' }}{% if row.manual_protected %}<br>Được bảo vệ khi import{% endif %}</td></tr>
+{% else %}<tr><td colspan="6">Không có quy tắc phù hợp.</td></tr>{% endfor %}</tbody></table></div>
+<nav aria-label="Phân trang quy tắc">{% if page>1 %}<a href="{{ url_for('regulatory_rules',page=page-1,q=filters.get('q',''),field=filters.get('field',''),status_id=filters.get('status_id',''),state=filters.get('state','active')) }}">← Trang trước</a>{% endif %}
+{% if has_next %}<a href="{{ url_for('regulatory_rules',page=page+1,q=filters.get('q',''),field=filters.get('field',''),status_id=filters.get('status_id',''),state=filters.get('state','active')) }}">Trang sau →</a>{% endif %}</nav>
+</section></main></body></html>

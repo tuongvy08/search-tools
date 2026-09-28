@@ -245,6 +245,21 @@ mới khi apply (không tự ý sinh brand ngoài luồng import).
 
 ## Khi sửa kiến trúc
 
+### Bổ sung local — regulatory-manual-edit (2026-09-28)
+
+Trên branch `feature/regulatory-manual-edit`, chưa phát hành: service
+`regulatory_manual.py` dùng advisory lock regulatory hiện có, kiểm tra quyền
+sống, expected revision và audit request_id chống gửi lặp. Migration 033
+thêm metadata protection/revision, bảng khóa lịch sử và bảng audit tay;
+không bảng preview tay. UI preview trước/sau, server xác thực lại khi confirm.
+Import giữ current/historical keys được bảo vệ, fingerprint v2; snapshot chi
+tiết phân trang nằm trong JSONB job/event sẵn có. Không thay resolver hoặc
+đếm products. Verifier PASS local; vận hành/rollback xem
+`docs/regulatory-manual-edit/OPERATIONS.md`. PO đã xác nhận UAT browser local
+8/8 đạt và hiển thị 4/4 đạt; polish qua verifier scope riêng, chưa production.
+
+### Nguyên tắc chung
+
 Giữ nguyên các quyết định trên khi sửa project trừ khi có yêu cầu thay đổi rõ
 ràng. Đề xuất thay đổi lớn (đổi cơ chế phân quyền, đổi mô hình tồn kho, thêm
 dependency mới...) theo quy trình phê duyệt trong

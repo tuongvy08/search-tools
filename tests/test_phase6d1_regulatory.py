@@ -890,7 +890,10 @@ class Phase6D1LegacyMigrationRehearsal(unittest.TestCase):
                         "csrf_token": "pre027-csrf", "action": "set_color",
                         "status_id": status_id, "revision": str(pre027_revision), "color_hex": "#1D4ED8",
                     })
-                    self.assertIn("migration+028", response.location)
+                    # Current writers fail closed on the new minimum schema; old
+                    # 026/027 rehearsal data must still remain untouched below.
+                    self.assertEqual(response.status_code, 503)
+                    self.assertIn("migration 033", response.get_json()['error'])
                 with conn.cursor() as cur:
                     cur.execute(MIGRATION_027)
                     cur.execute("""SELECT stable_key,color_key FROM regulatory_statuses

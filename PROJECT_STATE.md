@@ -1,162 +1,39 @@
 # Trạng thái project
 
-Cập nhật: 2026-09-28 (phase regulatory-manual-edit hoàn tất local;
-verifier/UAT đạt; chờ review PR, chưa merge/deploy).
+Cập nhật: 2026-09-30. Đây là trạng thái hiện hành; các mốc cũ giữ nguyên ở [archive](docs/archive/PROJECT_STATE_HISTORY.md). Nếu chưa có xác nhận mới từ production, coi như **chưa deploy migration033**.
 
-## Trạng thái hiện tại
+## Tiếp nối nhanh
 
-Search-tools là ứng dụng Flask + PostgreSQL **đang chạy production** cho
-nhân viên công ty. Tính đến commit `6155f25` (nhánh `main`), lịch sử merge
-gần nhất theo `git log --oneline --merges` là:
+- Phase: regulatory-manual-edit / migration033; PR tính năng **#22 đã merge** vào `main@2ec9b6c` (PR tài liệu #21 cũng đã merge). Branch PR1 hiện tại: `docs/state-cleanup`; branch vận hành trước đó: `ops/deploy-regulatory-manual-edit`.
+- Staging: migration033 đã COMMIT, web/worker chạy bản `2ec9b6c`; PO xác nhận UAT đạt. Không chạy lại các bước staging chỉ vì đổi tài liệu.
+- Production: ứng dụng cũ vẫn đang phục vụ nhân viên; **chưa có bằng chứng deploy bản #22/migration033, coi là CHƯA DEPLOY**. Mốc quan sát trước đó: commit `6155f25`, PG14.24, migration030–032 có, 033 chưa (preflight 28/09 do PO cung cấp). Không suy trạng thái máy chủ hiện tại từ Git.
+- Artifact đã qua verifier độc lập P1–P6 **local/mock**, nằm ngoài Git tại `/Volumes/DATA/Development/_ops/search-tools/`; SHA256 tính lại 2026-09-30:
+  - `prepare_regulatory_staging.py`: `dd668fb18377ade432503f58b9d3e451d0f7849b75cb7fd430f5f255b499840d`.
+  - `cutover_regulatory_staging.py`: `240424034cd4f5b3768aaf757c0b3a917a2e55958a73789ed4c80cf7ef1991e8`.
+  - `search-tools-regulatory-6155f25-to-2ec9b6c.bundle`: `3c9f83a474b3c891a81d95a90eccf573be0faf52f024803073154c339e91cddb`.
+- Preflight chỉ đọc của PO là artifact riêng, không nằm trong ba SHA256 P1–P6 trên; kiểm tra đúng bản preflight trước khi dùng theo runbook, không tự nhận đã qua verifier P1–P6.
+- Báo cáo verifier còn hiệu lực: [production adapter P1–P6](specs/deploy-regulatory-manual-edit-production/VERIFICATION_RESULT.md) PASS local/mock sau một repair; [evidence/human review](docs/ops-deploy-regulatory-manual-edit/VALIDATION.md). S1 là rủi ro được chấp nhận, **không phải lỗi đã sửa**; PASS local không chứng minh server đã triển khai.
+- **Việc kế tiếp duy nhất của release:** PO xem xét năm câu human review và rủi ro còn lại; chỉ sau khi phê duyệt riêng mới xem xét cửa sổ triển khai production theo [runbook](docs/ops-deploy-regulatory-manual-edit/PRODUCTION_RUNBOOK.md). Trong đợt tài liệu này, hoàn thành PR1 rồi dừng chờ PO quyết định có làm PR2 hay không.
 
-- PR #20 (`codex/phase6d9-search-workspace`) — sắp xếp lại giao diện Product
-  Search (chỉ trình bày, không đổi route/permission/query — xem
-  `docs/phase6d9/BRIEF.md`).
-- PR #19 (`codex/phase6d8-stock-only-filter`) — lọc "chỉ hiện kết quả có
-  tồn kho" trên Product Search.
-- PR #18 (`codex/phase6d7-search-stock-suggest`) — tìm theo tên hàng tồn
-  kho + endpoint gợi ý tìm kiếm.
-- PR #17 (`codex/phase6d6-stock-quick-edit`) — sửa nhanh 1 dòng tồn kho.
-- PR #16 (`codex/phase6d2-stock-notes`) — ghi chú tồn kho (`stock_note`).
-- PR #15 (`codex/phase6d5-check-license-selection`), #14 (`phase6d4-admin-menu-rbac`),
-  #13 (`fix-admin-login-access`), #12 (`fix-product-import-replace`),
-  #11 (`phase6d3-preparation-type`), #10 (`phase6d2-pg14-compat`),
-  Phase 6D2 inventory snapshot (merge trực tiếp, không qua số PR), #8
-  (`phase6d1-1-status-colors`), #7 (`phase6c4-admin-ux`), #6
-  (`phase6c3-product-management`), #5 (`phase6c2-admin-import-center`), #4
-  (`phase6c1-release`), #3 (`phase6c0-1-team-capabilities`), #2
-  (`feature/admin-lifecycle-v1`), #1 (Release 1 — quote assistant + canonical
-  pricing).
+## Quyết định đã chốt và phạm vi phê duyệt
 
-**[xác nhận từ người dùng, 2026-09-27]** Production hiện chạy **bản mới nhất
-của `main`** (tới PR #20 / Phase 6D9). Quy trình chuẩn của team: mỗi phase
-sau khi làm xong được deploy lên **staging thật** (hạ tầng riêng: web
-`search-tools-staging.service`, worker `search-tools-import-worker.service`,
-thư mục `/srv/search-tools`, database `search_tools_staging`) để UAT, chỉ
-triển khai production sau khi staging đạt — nên các UAT checklist trong
-`docs/phase6d7/`, `phase6d8/`, `phase6d9/` ghi "pending" là trạng thái tại
-thời điểm viết phase doc, không phản ánh tình trạng hiện tại.
+- PO đã cho phép commit, push và tạo PR1 `docs/state-cleanup`, bao gồm hồ sơ phase chưa theo dõi Git nếu quét sạch secret và bản kế hoạch PR2–PR5. Dừng sau PR1, chờ phản hồi mới làm PR2. Không có quyền thao tác staging/production; PR3–PR5 chỉ bắt đầu sau khi có xác nhận production deploy thành công.
+- Production dùng release bất biến, shared `.venv`, launcher riêng và một drop-in mỗi unit chỉ thay WorkingDirectory/ExecStart. PO đã chấp nhận giữ S1 chưa sửa; chỉ được hiệu chỉnh local hai script trong task adapter cũ, **không** suy thành quyền chạy server hay sửa artifact đã duyệt trong đợt này.
+- Rủi ro worker có thể nhận job trước khi hậu kiểm kết thúc: chấp nhận trước đây **chỉ cho staging** với queue=0 và không upload. Cần PO chấp thuận riêng rủi ro này, thời điểm ngừng ghi/upload và các bước [GHI] production; nếu điều kiện production khác hoặc artifact/hash đổi thì dừng và đánh giá lại, không dùng lại phê duyệt staging.
+- Giữ nguyên script/bundle, hợp đồng kiểm chứng, VALIDATION và kết quả verifier đã khóa trong hồ sơ ops; không truy cập server hay DB thật. Backup production và kiểm tra trước/sau thuộc release riêng, không có quyền ngầm từ việc sửa tài liệu.
 
-**Nguồn bổ sung quan trọng** (2026-09-27, do người dùng chỉ ra): một
-`PROJECT_STATE.md` chi tiết hơn nhiều (618 dòng) từ các phiên điều phối
-Codex trước đây cho project này, lưu **cục bộ ngoài Git trên máy Product
-Owner**; không giả định file này còn tồn tại trên máy khác. File đó ghi lại toàn
-bộ lịch sử preflight/prepare/cutover từng phase, quyết định nghiệp vụ chi
-tiết (đối chiếu với `SPEC_REGULATORY_STOCK.md` cùng thư mục — đã dùng để bổ
-sung docs/BUSINESS_RULES.md) và mô hình deploy thực tế (xem ARCHITECTURE.md
-mục Deploy). Theo lần cập nhật cuối cùng ghi nhận trong file đó (cũng ngày
-2026-09-27), cutover production cho Phase 6D8+6D9 mới ở trạng thái "PREPARED,
-AUTHORIZED, sẵn sàng cho người dùng chạy" — chưa có output xác nhận đã chạy
-xong tại thời điểm đó; xác nhận của người dùng trong phiên tài liệu này (sau
-đó cùng ngày) rằng production đã chạy bản mới nhất được hiểu là cutover đó
-đã hoàn tất sau thời điểm file kia được ghi. Không tự suy ra thêm chi tiết
-vận hành (tên release cụ thể...) ngoài hai nguồn này; đọc lại file đó
-hoặc hỏi người dùng nếu cần mốc thời gian chính xác hơn.
+## Blocker hiện hành
 
-Bối cảnh lịch sử xa hơn (không còn là rủi ro hiện tại, giữ lại để tránh nhầm
-lẫn khi đọc phase docs cũ): `docs/phase6c3/OPERATIONS.md` (Phase 6C3, PR #6)
-ghi **"PRODUCTION HOLD"** tại thời điểm đó và production khi đó đang ở
-commit `24ac6d4` (PR #5) trên database tên có "rollback"
-(`searchtools_pg_r1_rollback_20260906_153842`), tức từng có một khoảng trễ
-giữa `main` và production quanh 2026-09-06 — khoảng trễ đó đã được thu hẹp
-nhiều lần qua từng phase kể từ đó.
+- Release production migration033: đang chờ phê duyệt human review/rủi ro/cửa sổ thực thi riêng; chưa có bằng chứng deploy. Các báo cáo staging FAIL ở mốc cũ đã có kết quả/ngoại lệ về sau, không coi là blocker mới.
+- Đợt B (PR3–PR5): chưa đủ điều kiện vì production chưa xác nhận deploy thành công. PR1/PR2 tài liệu không bị chặn bởi việc này.
 
-Golden Development Template đã merge vào `main` qua PR #21, commit
-`db26d40` (xác minh bằng Git ngày 2026-09-27). Branch hiện tại cho phase mới:
-`feature/regulatory-manual-edit`, tạo từ đúng commit này của `main`.
+## Việc mở
 
-## Việc đang mở
+- PR1 `docs/state-cleanup`: hoàn tất commit/push/tạo PR và chờ PO phản hồi; sau đó mới làm PR2 `docs/agent-workflow`.
+- Sau PR2: trình bày ngắn phạm vi, rủi ro và phê duyệt cần có trước production; không deploy trong đợt này.
+- Sau khi có xác nhận production thành công: PR3 lưu script đã chạy, PR4 thống nhất hướng dẫn deploy/security/architecture, PR5 kiểm chứng bootstrap và sửa hướng dẫn local/RBAC/README; mỗi PR một branch và chờ PO giữa các PR.
+- Các việc riêng chưa giao: xem xét tắt `ENABLE_LEGACY_PASSWORD_LOGIN` trên production nếu không còn cần; cân nhắc CI và xóa file `heroku` rỗng; đề xuất phase xuất quy tắc ra Excel và cải tiến giao diện quản trị cần quyết định nghiệp vụ mới. Không tự làm kèm.
 
-- `feature/regulatory-manual-edit`: code hoàn tất, hợp đồng spec v2 khóa ở
-  commit `ee2ee5a`; verifier độc lập **PASS 20/20 claim** sau 1 repair.
-- PO đã nghiệm thu local **8/8 chức năng + 4/4 hiển thị**. Bộ test phase
-  cuối: **24 tính năng + 81 hồi quy + 2 bộ DOM PASS**, không skip.
-- Migration 033 và rollback có guard đã kiểm tra trên database test tạm;
-  chưa chạy trên staging/production. Chi tiết evidence, lịch sử repair và
-  UAT: `docs/regulatory-manual-edit/VALIDATION.md` và `UAT.md`.
-- Bước kế tiếp: review PR → được phép merge → lập task HIGH riêng để deploy
-  staging rồi production sau preflight/backup/UAT và phê duyệt tương ứng.
-  **Chưa merge/deploy hoặc thao tác database/hạ tầng server.**
-- Phase sau đề xuất (chưa triển khai): **Xuất danh mục quy tắc ra Excel**;
-  cần chốt phạm vi xuất. Phase sau đề xuất: **Thiết kế lại giao diện quản trị**.
+## Liên kết
 
-## Vấn đề đã biết
-
-- `ENABLE_LEGACY_PASSWORD_LOGIN` (đăng nhập chỉ-mật-khẩu, không username)
-  **đang bật trên production**; hiển thị dưới nút đăng nhập Google, thực tế
-  chỉ admin dùng. Người dùng ghi nhận (2026-09-27): **nên tắt nếu xác nhận
-  không còn cần thiết** (admin đã có đăng nhập Google). Đây là ý kiến/định
-  hướng, chưa phải yêu cầu thực hiện ngay — tắt biến này là thay đổi cấu
-  hình `.env` trên production (HIGH theo AGENTS.md/SECURITY.md), chỉ thực
-  hiện khi người dùng yêu cầu rõ trong một task riêng. Xem SECURITY.md.
-- Tài liệu vận hành hiện có (`HUONG_DAN_DEPLOY_VA_CAP_NHAT.md`) mô tả quy
-  trình deploy đơn giản (git pull tại chỗ ở `/opt/search-tools-pg`, restart
-  service) — **khác với thực tế vận hành gần đây** (xem ARCHITECTURE.md mục
-  Deploy): mỗi release là một thư mục bất biến riêng
-  `/opt/search-tools-pg-release-<timestamp>-<commit>-clean`, deploy qua 3
-  script preflight/prepare/cutover, luôn có staging trước production. Tài
-  liệu này chưa được cập nhật lại trong task hiện tại (ngoài phạm vi 5 file
-  được giao viết lại) — cân nhắc cập nhật `HUONG_DAN_DEPLOY_VA_CAP_NHAT.md`
-  trong một task riêng để tránh agent tương lai làm theo quy trình cũ.
-- Không có workflow CI trong repo tại thời điểm viết tài liệu này —
-  `.github/` mới chỉ có `PULL_REQUEST_TEMPLATE.md` (từ Golden Template), chưa
-  có GitHub Actions chạy test/lint tự động. Test hiện chạy thủ công:
-  `PYTHONPATH=.:tests python -m unittest discover -s tests -v` (một số test
-  cần PostgreSQL local, tự skip nếu không có) và các file `tests/*.js` (Node
-  thuần, chạy từng file).
-- Một số phase docs (`docs/phase6c2/`, `phase6c3/`...) ghi số liệu hiệu năng/
-  benchmark tại thời điểm viết — không tự suy ra hiệu năng hiện tại còn
-  đúng, đo lại nếu ra quyết định tối ưu mới.
-- File `heroku` ở gốc repo là file rỗng (0 byte), tàn dư từ lần cấu hình
-  Heroku cũ trước khi chuyển sang Vultr. Người dùng xác nhận (2026-09-27)
-  **có thể xóa** — chưa xóa vì nằm ngoài phạm vi task viết tài liệu này; xóa
-  trong một task riêng khi được yêu cầu.
-
-## Môi trường
-
-- **Local/dev**: PostgreSQL qua Docker Compose (service `db`, `docker-compose.yml`),
-  `.venv` Python (`requirements.txt`), chạy `python search.py` (cổng mặc định
-  theo `.env`, khuyến nghị 5001). Chi tiết: `HUONG_DAN_LOCAL.md`.
-- **Production**: VPS Vultr, mỗi release là thư mục riêng
-  `/opt/search-tools-pg-release-<timestamp>-<commit>-clean`, service systemd
-  cho web (Gunicorn) + service riêng cho import worker, Nginx phía trước.
-  Xem quy trình deploy thực tế (preflight/prepare/cutover, khác tài liệu
-  `HUONG_DAN_DEPLOY_VA_CAP_NHAT.md` hiện có) ở ARCHITECTURE.md mục Deploy.
-- **Staging**: hạ tầng riêng thật, tách biệt production — web
-  `search-tools-staging.service`, thư mục `/srv/search-tools`, database
-  `search_tools_staging`. Quy trình chuẩn: xong 1 phase → deploy staging →
-  UAT → đạt mới triển khai production.
-
-## Git
-
-- Remote: xem `git remote -v` (không ghi cố định ở đây để tránh lỗi thời).
-- Branch chuẩn: `main`. Mỗi task dùng branch riêng
-  (`codex/<mô-tả>` là quy ước đặt tên đã dùng cho các phase trước; có thể
-  tiếp tục quy ước này hoặc đổi theo hướng dẫn mới trong
-  `docs/DEVELOPMENT_WORKFLOW.md`).
-- Không xóa các branch backup/lịch sử khi chưa được yêu cầu rõ.
-
-## Bước tiếp theo được khuyến nghị
-
-1. Review PR regulatory-manual-edit vào `main`; chỉ merge khi được phép và
-   các gate áp dụng đạt. Sau đó mở task HIGH riêng cho staging rồi production,
-   không suy quyền deploy từ việc duyệt PR. Hai đề xuất phase sau giữ ở
-   "Việc đang mở", chưa triển khai.
-2. PR #21 đã merge Golden Development Template; không cần thực hiện lại.
-3. (Tùy chọn, ngoài phạm vi task tài liệu, cần yêu cầu rõ trước khi làm)
-   - Xóa file `heroku` rỗng ở gốc repo — đã xác nhận có thể xóa.
-   - Cân nhắc tắt `ENABLE_LEGACY_PASSWORD_LOGIN` trên production nếu xác
-     nhận không còn cần thiết — thay đổi cấu hình production, cần yêu cầu
-     rõ và thực hiện theo đúng SECURITY.md.
-   - Cập nhật `HUONG_DAN_DEPLOY_VA_CAP_NHAT.md` cho khớp quy trình release
-     thực tế (immutable release + preflight/prepare/cutover, staging trước
-     production) — tài liệu hiện tại mô tả cách làm cũ/đơn giản hơn.
-4. Nếu tiếp tục phát triển tính năng: đọc `docs/DEVELOPMENT_WORKFLOW.md` để
-   áp dụng đúng quy trình theo mức rủi ro (LOW/MEDIUM/HIGH), đặc biệt lưu ý
-   HIGH chỉ thực hiện trong OpenCode theo AGENTS.md.
-5. Cân nhắc thiết lập CI (chạy `python -m unittest discover -s tests`) nếu
-   muốn có kiểm chứng tự động trước khi merge — hiện chưa có, chỉ chạy thủ
-   công.
-
-Khi có thay đổi nghiệp vụ/kỹ thuật mới, cập nhật mục "Việc đang mở" và
-"Vấn đề đã biết" ở trên trước khi coi checkpoint này là lỗi thời.
+- [Archive nguyên văn trạng thái trước PR1](docs/archive/PROJECT_STATE_HISTORY.md); [hồ sơ feature](docs/regulatory-manual-edit/); [hồ sơ vận hành và runbook](docs/ops-deploy-regulatory-manual-edit/); [bản rà soát quy trình](docs/reviews/2026-09_process-review.md); [kế hoạch PR2–PR5](docs/reviews/2026-09_remediation-plan.md).

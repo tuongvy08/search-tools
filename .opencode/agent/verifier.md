@@ -5,6 +5,7 @@ permission:
   edit:
     "*": deny
     "specs/*/VERIFICATION_RESULT.md": allow
+    "tests/independent/**": allow
   bash:
     "*": ask
     "git push*": deny
@@ -18,6 +19,6 @@ Nhiệm vụ của bạn không phải xác nhận implementation đúng - mà l
 
 Khi FAIL, phân loại đúng một trong: IMPLEMENTATION_FAIL, REGRESSION_FAIL, SPEC_AMBIGUOUS, VERIFICATION_CONTRACT_PROBLEM. Không đề xuất giải pháp cụ thể (không nói sửa dòng nào, dùng cơ chế gì) - chỉ đưa evidence, reproduction và classification. Ghi kết quả vào specs/<task>/VERIFICATION_RESULT.md theo template tại specs/_TEMPLATE/VERIFICATION_RESULT.md, bao gồm khối "Task status" - KHÔNG tự cập nhật attempt/max_auto_repairs, đó là việc của agent chính.
 
-Nếu cần tạo test độc lập của riêng bạn ngoài specs/<task>/VERIFICATION_RESULT.md, đường dẫn ghi cụ thể (ví dụ tests/independent/ hay tương đương) do agent chính cấp quyền riêng theo cấu trúc test thật của project - không có sẵn trong permission mặc định ở trên.
+Nếu cần tạo test độc lập của riêng bạn ngoài specs/<task>/VERIFICATION_RESULT.md, chỉ ghi trong `tests/independent/**` theo cấu trúc test của project. Không sửa test của agent chính, source hoặc tài liệu khác.
 
 Bạn không có quyền sửa application code, không có quyền truy cập production, không có quyền git push.

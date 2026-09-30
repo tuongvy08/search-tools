@@ -1,6 +1,6 @@
 # Quy trình phát triển phần mềm với AI
 
-Đây là quy trình chung được [AGENTS.md](../AGENTS.md) yêu cầu đọc. Áp dụng theo phạm vi thực tế; không tạo công việc hình thức cho thay đổi nhỏ.
+Đây là quy trình chung được [AGENTS.md](../AGENTS.md) dẫn tới khi task chạm quy trình/kiểm chứng. Áp dụng theo phạm vi thực tế; không tạo công việc hình thức cho thay đổi nhỏ.
 
 ## 1. Vai trò và quyền quyết định
 
@@ -16,7 +16,7 @@ Xác định vấn đề nghiệp vụ, hành vi hiện tại, hành vi mong mu�
 
 ## 3. Inspect — Kiểm tra trước khi sửa
 
-Đọc các tài liệu được liệt kê trong AGENTS.md, sau đó kiểm tra code, API, schema, lịch sử migration, `.env.example`, cấu hình Docker/deploy và tests có liên quan nếu tồn tại. Không đọc hoặc in secret chỉ để hiểu tên cấu hình. Không suy đoán kiến trúc khi có thể xác minh.
+Chọn chế độ đọc và nguồn thông tin trong AGENTS.md, sau đó kiểm tra code, API, schema, lịch sử migration, `.env.example`, cấu hình Docker/deploy và tests có liên quan nếu tồn tại. Không đọc hoặc in secret chỉ để hiểu tên cấu hình. Không suy đoán kiến trúc khi có thể xác minh.
 
 Kiểm tra đúng repository, branch, git status và thay đổi chưa commit. Giữ nguyên công việc của người khác. Xác định môi trường và dữ liệu bị tác động trước khi chạy lệnh có thể ghi dữ liệu; không mặc định kết nối database là local.
 
@@ -26,7 +26,7 @@ Với bug: tái hiện nếu có thể, thu thập log đã che dữ liệu nh�
 
 Trước thay đổi đáng kể, trình bày ngắn: mục tiêu, nguyên nhân hoặc kiến trúc liên quan, phần sẽ sửa, mức rủi ro và cách chứng minh kết quả. Nêu ranh giới phạm vi khi cần giúp người dùng ra quyết định.
 
-- LOW: text/UI nhỏ, validation đơn giản, bug cô lập, cập nhật test. AI có thể chủ động triển khai trong phạm vi đã giao.
+- LOW: thay đổi chỉ trên tài liệu, text/UI nhỏ, validation đơn giản, bug cô lập, cập nhật test. AI có thể chủ động triển khai trong phạm vi đã giao; tài liệu thuần túy không cần hợp đồng claim hoặc verifier.
 - MEDIUM: logic API, query, nghiệp vụ hoặc tích hợp. AI có thể triển khai với kiểm tra hồi quy phù hợp.
 - HIGH: auth, permissions, payment, hạ tầng, triển khai, migration dữ liệu quan trọng, thay đổi production hoặc thao tác phá hủy. Chuẩn bị và kiểm chứng phương án trong môi trường an toàn khi được phép; cần phê duyệt rõ trước bước làm thay đổi bảo mật, dữ liệu quan trọng hoặc production. Trước khi implement, tạo `specs/<task>/VERIFICATION.md` theo mục 11.
 
@@ -53,6 +53,22 @@ Chọn kiểm tra theo thay đổi: unit/integration/regression tests, lint, for
 Với bug, thêm hoặc chạy kiểm tra hồi quy chứng minh lỗi đã được xử lý khi phù hợp. Với tài liệu, kiểm tra nội dung, liên kết, tính nhất quán và diff là đủ; không tạo test ứng dụng giả.
 
 Ghi rõ lệnh hoặc cách kiểm tra, môi trường, kết quả và phần chưa kiểm tra. Phân biệt PASS, FAIL, NOT RUN và N/A; không biến kiểm tra bị bỏ qua thành PASS. Review toàn bộ diff trước đề xuất commit, bao gồm file mới, debug code tạm và secret.
+
+### Dùng lại evidence
+
+Evidence đã có **chỉ còn hiệu lực khi đồng thời**: (1) SHA256 artifact đang dùng khớp artifact đã kiểm; (2) không đổi code, migration, cấu hình hoặc runtime **liên quan tới claim**; (3) cùng môi trường đích mà evidence đó đã chứng minh. Xác minh hash và diff/phạm vi thay đổi trước khi dùng lại; nếu thiếu bằng chứng về một điều kiện thì không tự coi là PASS. Mock/local kiểm adapter cho production không thay thế kiểm chứng trên production thật; staging không chứng minh cutover production thành công.
+
+| Loại thay đổi | Claim cần mở lại |
+| --- | --- |
+| Chỉ tài liệu diễn giải, không đổi lệnh, artifact hoặc điều kiện vận hành | Không mở lại claim thực thi; kiểm nội dung, liên kết và tính nhất quán tài liệu. Nếu sửa runbook làm thay đổi lệnh/gate, đánh giá như thay đổi vận hành bên dưới. |
+| Code ứng dụng hoặc migration | Các claim về hành vi/nghiệp vụ, schema, tương thích và rollback phụ thuộc phần đổi; không tự mở lại claim độc lập. |
+| Script deploy, bundle hoặc lệnh/gate runbook | Các claim preflight/prepare/cutover, tính toàn vẹn artifact, thứ tự, phục hồi và hậu kiểm bị ảnh hưởng; hash mới phải được chứng minh, không dùng PASS của artifact cũ. |
+| Cấu hình, dịch vụ, quyền, DB hoặc runtime liên quan | Các claim đọc/ghi/phân quyền, tương thích runtime, service/DB và phục hồi liên quan; preflight lại điều kiện đích. |
+| Chuyển môi trường đích (local → staging → production) | Các claim phụ thuộc môi trường (DB, service, cấu hình, backup, quyền, smoke/UAT) phải xác minh tại đích mới. Evidence thuần tĩnh của artifact có thể hỗ trợ kế hoạch kiểm tra, nhưng không coi PASS ở đích cũ là PASS ở đích mới. |
+
+Chỉ kiểm lại các claim bị ảnh hưởng theo hợp đồng đã khóa, trừ khi hợp đồng HIGH được đổi theo mục 11 (khi đó phải chạy lại toàn bộ theo quy định). **Gate trước deploy** chứng minh điều kiện và artifact sẵn sàng, không chứng minh đã deploy; **xác nhận sau deploy** kiểm commit/schema/service/đăng nhập/UAT thật tại đích, chỉ được ghi PASS sau khi quan sát. Báo cáo cũ bị báo cáo mới thay thế phải gắn nhãn **LỊCH SỬ**, không coi FAIL cũ là blocker hiện hành; lưu nguyên evidence cũ, không sửa hồi tố.
+
+Không áp dụng hồi tố để mở lại hợp đồng phase regulatory-manual-edit hiện tại. Quy tắc dùng lại evidence áp dụng cho lần deploy production sắp tới: xác nhận đúng SHA256 script/bundle và điều kiện đích trước khi quyết định dùng lại phần kiểm local; production vẫn cần phê duyệt, backup và kiểm chứng sau triển khai riêng.
 
 ## 7. Report — Báo cáo và nghiệm thu
 

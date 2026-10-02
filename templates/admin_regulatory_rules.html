@@ -1,22 +1,40 @@
 <!doctype html>
 <html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Danh sách quy tắc</title>
+<title>Tìm và sửa quy tắc</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css') }}">
-</head><body class="admin-page">{% include '_user_nav.html' %}
-<main class="admin-shell"><a href="{{ url_for('admin_regulatory') }}">← Quy tắc quản lý</a>
-<h1>Tìm và sửa quy tắc</h1><p><a href="{{ url_for('regulatory_rule_new') }}">Thêm quy tắc thủ công</a></p>
-<section class="admin-card"><form method="get">
-<label>Tên / CAS / mã trong quy tắc <input name="q" value="{{ filters.get('q','') }}" maxlength="500"></label>
-<label>Loại đối chiếu <select name="field"><option value="">Tất cả</option>{% for key,label in field_labels.items() %}<option value="{{ key }}"{{ ' selected' if filters.get('field')==key else '' }}>{{ label }}</option>{% endfor %}</select></label>
-<label>Tình trạng <select name="status_id"><option value="">Tất cả</option>{% for status in statuses %}<option value="{{ status.id }}"{{ ' selected' if filters.get('status_id')==status.id|string else '' }}>{{ status.label }}</option>{% endfor %}</select></label>
-<label>Áp dụng <select name="state">{% for key,label in [('active','Đang áp dụng'),('inactive','Ngừng áp dụng'),('all','Tất cả')] %}<option value="{{ key }}"{{ ' selected' if filters.get('state','active')==key else '' }}>{{ label }}</option>{% endfor %}</select></label>
-<button type="submit">Tìm quy tắc</button></form></section>
-<section class="admin-card"><p>{{ total }} quy tắc · Trang {{ page }}</p>
-<div class="table-wrap"><table><thead><tr><th>ID</th><th>Loại</th><th>Giá trị</th><th>Tình trạng</th><th>Ghi chú</th><th>Áp dụng / bảo vệ</th></tr></thead><tbody>
-{% for row in rules %}<tr><td><a href="{{ url_for('regulatory_rule_detail',rule_id=row.id) }}">{{ row.id }} — Mở / lịch sử</a></td><td>{{ field_labels[row.match_field] }}</td><td>{{ row.match_value }}</td><td>{{ row.rule_label }}</td><td>{{ row.note or '' }}</td><td>{{ 'Đang áp dụng' if row.is_active else 'Ngừng áp dụng' }}{% if row.manual_protected %}<br>Được bảo vệ khi import{% endif %}</td></tr>
-{% else %}<tr><td colspan="6">Không có quy tắc phù hợp.</td></tr>{% endfor %}</tbody></table></div>
-<nav aria-label="Phân trang quy tắc">{% if page>1 %}<a href="{{ url_for('regulatory_rules',page=page-1,q=filters.get('q',''),field=filters.get('field',''),status_id=filters.get('status_id',''),state=filters.get('state','active')) }}">← Trang trước</a>{% endif %}
-{% if has_next %}<a href="{{ url_for('regulatory_rules',page=page+1,q=filters.get('q',''),field=filters.get('field',''),status_id=filters.get('status_id',''),state=filters.get('state','active')) }}">Trang sau →</a>{% endif %}</nav>
-</section></main></body></html>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_regulatory.css', v='20261002ui1') }}">
+</head><body class="admin-page regulatory-page">{% include '_user_nav.html' %}
+{% set status_map = {} %}{% for status in statuses %}{% set _ = status_map.update({status.id: status}) %}{% endfor %}
+<main class="admin-shell">
+<a class="rg-back" href="{{ url_for('admin_regulatory') }}">← Quy tắc quản lý</a>
+<header class="rg-head">
+  <div><h1>Tìm và sửa quy tắc</h1>
+    <p class="lead">Tìm theo một phần CAS, mã hoặc tên. Mở một quy tắc để sửa, ngừng áp dụng hoặc xem lịch sử.</p></div>
+  <div class="rg-actions"><a class="rg-btn" href="{{ url_for('regulatory_rule_new') }}">Thêm quy tắc thủ công</a></div>
+</header>
+
+<form class="rg-filter" method="get" role="search">
+  <label class="rg-field rg-field-q"><span>Tên / CAS / mã trong quy tắc</span><input name="q" value="{{ filters.get('q','') }}" maxlength="500" placeholder="Ví dụ: 64-17-5 hoặc Ethanol"></label>
+  <label class="rg-field"><span>Loại đối chiếu</span><select name="field"><option value="">Tất cả</option>{% for key,label in field_labels.items() %}<option value="{{ key }}"{{ ' selected' if filters.get('field')==key else '' }}>{{ label }}</option>{% endfor %}</select></label>
+  <label class="rg-field"><span>Tình trạng</span><select name="status_id"><option value="">Tất cả</option>{% for status in statuses %}<option value="{{ status.id }}"{{ ' selected' if filters.get('status_id')==status.id|string else '' }}>{{ status.label }}</option>{% endfor %}</select></label>
+  <label class="rg-field"><span>Áp dụng</span><select name="state">{% for key,label in [('active','Đang áp dụng'),('inactive','Ngừng áp dụng'),('all','Tất cả')] %}<option value="{{ key }}"{{ ' selected' if filters.get('state','active')==key else '' }}>{{ label }}</option>{% endfor %}</select></label>
+  <button type="submit">Tìm quy tắc</button>
+</form>
+
+<p class="rg-result-meta"><span><strong>{{ total }}</strong> quy tắc</span><span>Trang {{ page }}</span></p>
+<div class="table-wrap"><table class="rg-rules"><thead><tr><th scope="col">Số</th><th scope="col">Giá trị đối chiếu</th><th scope="col">Tình trạng</th><th scope="col">Ghi chú</th><th scope="col">Áp dụng</th></tr></thead><tbody>
+{% for row in rules %}{% set st = status_map.get(row.status_id) %}<tr>
+<td class="rg-col-id">#{{ row.id }}</td>
+<td><a class="rg-value" href="{{ url_for('regulatory_rule_detail',rule_id=row.id) }}" aria-label="Mở quy tắc #{{ row.id }}: {{ row.match_value }}">{{ row.match_value }}</a><span class="rg-type">{{ field_labels[row.match_field] }}</span></td>
+<td><span class="rg-chip {{ st.color_css if st else '' }}"{% if st %} style="--reg-bg:{{ st.color_bg }};--reg-fg:{{ st.color_fg }}{% if st.color_hex %};--reg-hue:{{ st.color_hex }}{% endif %}"{% endif %}>{{ row.rule_label }}</span></td>
+<td>{% if row.note %}<span class="rg-note" title="{{ row.note }}">{{ row.note }}</span>{% endif %}</td>
+<td><span class="rg-state{{ '' if row.is_active else ' is-off' }}">{{ 'Đang áp dụng' if row.is_active else 'Ngừng áp dụng' }}</span>{% if row.manual_protected %}<span class="rg-protected">Được bảo vệ khi import</span>{% endif %}</td>
+</tr>
+{% else %}<tr><td colspan="5" class="empty-state">Không có quy tắc phù hợp. Thử bớt bộ lọc hoặc chỉ nhập một phần CAS/mã.</td></tr>{% endfor %}</tbody></table></div>
+<nav class="rg-pager" aria-label="Phân trang quy tắc">{% if page>1 %}<a href="{{ url_for('regulatory_rules',page=page-1,q=filters.get('q',''),field=filters.get('field',''),status_id=filters.get('status_id',''),state=filters.get('state','active')) }}">Trang trước</a>{% endif %}
+{% if has_next %}<a href="{{ url_for('regulatory_rules',page=page+1,q=filters.get('q',''),field=filters.get('field',''),status_id=filters.get('status_id',''),state=filters.get('state','active')) }}">Trang sau</a>{% endif %}</nav>
+</main></body></html>

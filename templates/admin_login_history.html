@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Lịch sử đăng nhập</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20261002ui1') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
   <style>
     body { font-family: system-ui, sans-serif; max-width: 1200px; margin: 24px auto; padding: 0 12px; }
@@ -34,9 +34,11 @@
     .lh-pagination .disabled { color: #aaa; pointer-events: none; }
   </style>
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260909c4') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='ui_system.css', v='20261002ui2') }}">
 </head>
-<body class="admin-page">
+<body class="admin-page ui-v2">
   {% include "_user_nav.html" %}
+<main class="admin-shell">
 
   <h1 style="margin-top:0;">Lịch sử đăng nhập</h1>
   <p class="muted">
@@ -148,5 +150,6 @@
       {% endif %}
     </div>
   </div>
+</main>
 </body>
 </html>

@@ -5,18 +5,19 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Quản lý tồn kho — Search Tools</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260926d8') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20261002ui1') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260910d2') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='ui_system.css', v='20261002ui2') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_stock.css', v='20260926d6') }}">
   <script defer src="{{ url_for('static', filename='admin_ux.js', v='20260909d1') }}"></script>
   <script defer src="{{ url_for('static', filename='admin_stock.js', v='20260926d6') }}"></script>
 </head>
-<body class="admin-page">
+<body class="admin-page ui-v2">
 {% include '_user_nav.html' %}
 <main class="stock-shell stock-page">
   <header class="stock-header">
-    <div><p class="eyebrow">Quản trị · Snapshot riêng</p><h1>Quản lý tồn kho</h1>
+    <div><h1>Quản lý tồn kho</h1>
       <p class="lead">Tìm và sửa từng dòng, hoặc nhập file thay toàn bộ. Catalog, giá báo giá và quyền team không bị thay đổi.</p></div>
     <a class="stock-template-link" href="{{ url_for('stock_template') }}"><i class="fas fa-file-excel" aria-hidden="true"></i> Tải file mẫu</a>
   </header>
@@ -77,7 +78,7 @@
   {% if inventory %}{% include '_stock_current.html' %}{% endif %}
   <div class="stock-layout">
     <section class="stock-panel upload-panel">
-      <div class="section-heading"><div><p class="eyebrow">Nhập an toàn</p><h2>Tạo snapshot mới</h2></div><span class="step-mark">01</span></div>
+      <div class="section-heading"><div><h2>Tạo snapshot mới</h2></div><span class="step-mark">01</span></div>
       <p class="muted">File rỗng, lỗi CAS, trùng định danh hoặc quantity không hợp lệ sẽ dừng trước apply. Trong lúc xử lý, snapshot active hiện tại vẫn đọc được.</p>
       <form method="post" enctype="multipart/form-data" action="{{ url_for('stock_upload') }}" data-stock-upload data-submit-once>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="submission_key" value="{{ submission_key }}">
@@ -88,7 +89,7 @@
     </section>
 
     <section class="stock-panel guide-panel">
-      <div class="section-heading"><div><p class="eyebrow">Quy tắc file</p><h2>Kiểm tra nhanh</h2></div><span class="step-mark">02</span></div>
+      <div class="section-heading"><div><h2>Kiểm tra nhanh</h2></div><span class="step-mark">02</span></div>
       <ul class="check-list">
         <li>9 cột theo file mẫu; CAS, giá, hạn dùng và ghi chú được để trống. Vẫn nhận file cũ 8 cột.</li>
         <li>Ghi chú dạng văn bản, tối đa 2.000 ký tự: ví dụ “Kho A”, “Hàng mẫu”. File cũ 8 cột tạo ghi chú trống trong snapshot mới.</li>

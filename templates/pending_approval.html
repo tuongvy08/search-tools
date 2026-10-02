@@ -3,35 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Đang chờ phê duyệt</title>
+    <title>Đang chờ phê duyệt — Search Tools</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='ui_system.css', v='20261002ui2') }}">
     <style>
-        body {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
-            background-color: #f0f0f0;
-            font-family: system-ui, sans-serif;
-        }
-        .card {
-            background-color: #ffffff;
-            padding: 32px;
-            border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-            max-width: 420px;
-            text-align: center;
-        }
-        .card p { color: #555; }
-        .back-link { display: inline-block; margin-top: 16px; }
+        body.auth-page { min-height: 100vh; display: grid; place-items: center; padding: 24px; box-sizing: border-box; }
+        body.auth-page .card { max-width: 460px; padding: 32px; border-left: 6px solid #b7791f; }
+        body.auth-page .card h1 { margin: 0 0 12px; font-size: 24px; line-height: 1.25; }
+        .card p { margin: 0 0 10px; color: var(--ui-ink-2); }
+        .back-link { display: inline-block; margin-top: 14px; font-weight: 600; }
     </style>
 </head>
-<body>
-    <div class="card">
-        <h2>Đang chờ quản trị viên phê duyệt</h2>
+<body class="ui-v2 auth-page">
+    <main class="card">
+        <h1>Đang chờ quản trị viên phê duyệt</h1>
         <p>Tài khoản Google của bạn đã được xác thực, nhưng chưa được quản trị viên duyệt để truy cập ứng dụng.</p>
         <p>Vui lòng liên hệ quản trị viên để được cấp quyền.</p>
         <a class="back-link" href="/login">Quay lại trang đăng nhập</a>
-    </div>
+    </main>
 </body>
 </html>

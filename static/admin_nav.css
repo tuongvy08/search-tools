@@ -1,3 +1,4 @@
+@import url("https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap");
 /* Phase 6B1: shared admin/app navigation shell.
    Rendered by templates/_user_nav.html on every page that includes it
    (Search, Quick Quote, and every /admin/* page). Kept in its own file
@@ -326,3 +327,24 @@
     max-width: 50vw;
   }
 }
+
+
+/* Phase ui-system (2026-10-02): colour/typography only, same layout and
+   breakpoints as above. Ink bar + reagent-teal active state, matching
+   static/ui_system.css. Kept last so it only overrides paint, not structure. */
+.sq-shell-header {
+  background: #13202e;
+  font-family: "Be Vietnam Pro", system-ui, -apple-system, "Segoe UI", sans-serif;
+  border-bottom: 1px solid #22344a;
+}
+.sq-shell-brand { color: #ffffff; letter-spacing: -0.005em; }
+.sq-shell-link { color: #c6d2de; border-radius: 7px; }
+.sq-shell-link:hover { background: #1f3245; color: #ffffff; }
+.sq-shell-link.is-active { background: #0b6e73; color: #ffffff; }
+.sq-shell-link:focus-visible,
+.sq-shell-logout button:focus-visible { outline: 2px solid #7cc4c7; outline-offset: 2px; }
+.sq-shell-admin-menu { background: #13202e; border-color: #2a3e55; box-shadow: 0 14px 32px rgba(5, 12, 20, 0.45); }
+.sq-shell-role { text-transform: none; letter-spacing: 0; font-size: 0.74rem; background: #22344a; color: #dbe5ee; }
+.sq-shell-logout button { color: #f3b4ae; border-color: #5c2a2a; }
+.sq-shell-logout button:hover { background: #8a2c22; border-color: #8a2c22; color: #ffffff; }
+.sq-shell-toggle { border-color: #2a3e55; }

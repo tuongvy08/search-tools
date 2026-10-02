@@ -3,55 +3,82 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Đăng nhập</title>
+    <title>Đăng nhập — Search Tools</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='ui_system.css', v='20261002ui2') }}">
     <style>
-        body {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
-            background-color: #f0f0f0;
-            font-family: system-ui, sans-serif;
+        body.auth-page { min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 520px); }
+        .auth-brand {
+            background: var(--ui-ink); color: #dbe5ee; padding: 56px 64px;
+            display: flex; flex-direction: column; justify-content: space-between; gap: 32px;
         }
-        #login-form {
-            background-color: #ffffff;
-            padding: 24px;
-            border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-            min-width: 280px;
-        }
-        #login-form label { display: block; margin-top: 10px; }
-        #login-form input { width: 100%; box-sizing: border-box; margin-top: 4px; padding: 8px; }
-        #login-form button { margin-top: 16px; padding: 8px 16px; }
-        .hint { font-size: 12px; color: #555; margin-top: 12px; }
-        .err { color: #b00020; margin-bottom: 8px; }
+        .auth-brand-name { margin: 0; color: #fff; font-size: 17px; font-weight: 700; letter-spacing: -0.005em; }
+        body.auth-page .auth-brand h1 { margin: 0; color: #fff; font-size: 40px; line-height: 1.12; max-width: 14ch; }
+        .auth-brand p { margin: 16px 0 0; max-width: 46ch; color: #b9c7d4; font-size: 16px; }
+        .auth-sample { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; max-width: 360px; }
+        .auth-sample li { display: flex; justify-content: space-between; gap: 16px; padding: 10px 14px; border-left: 4px solid #3f8f93; background: rgb(255 255 255 / 5%); border-radius: 4px; font-size: 14px; }
+        .auth-sample .mono { color: #fff; font-family: var(--ui-mono); }
+        .auth-panel { display: grid; place-items: center; padding: 48px 32px; background: var(--ui-paper); }
+        #login-form { width: 100%; max-width: 360px; }
+        body.auth-page #login-form h2 { margin: 0 0 6px; font-size: 26px; }
+        .auth-lead { margin: 0 0 24px; color: var(--ui-muted); }
+        #login-form label { display: block; margin: 16px 0 6px; font-weight: 600; font-size: 14px; color: var(--ui-ink-2); }
+        #login-form label span { font-weight: 400; color: var(--ui-muted); }
+        #login-form input { width: 100%; box-sizing: border-box; min-height: 44px; padding: 10px 12px; border: 1px solid var(--ui-line-strong); border-radius: 8px; font: inherit; color: var(--ui-ink); }
+        #login-form input:focus { outline: none; border-color: var(--ui-accent); box-shadow: 0 0 0 3px var(--ui-accent-soft); }
+        #login-form button { width: 100%; min-height: 46px; margin-top: 22px; border: 1px solid var(--ui-accent); border-radius: 8px; background: var(--ui-accent); color: #fff; font: inherit; font-weight: 600; font-size: 15.5px; cursor: pointer; }
+        #login-form button:hover { background: var(--ui-accent-hover); border-color: var(--ui-accent-hover); }
         .google-btn {
-            display: block; width: 100%; box-sizing: border-box; text-align: center;
-            padding: 8px 16px; margin-bottom: 12px; border: 1px solid #ccc; border-radius: 6px;
-            background: #fff; color: #444; text-decoration: none; font-weight: 600;
+            display: flex; align-items: center; justify-content: center; min-height: 46px; box-sizing: border-box;
+            border: 1px solid var(--ui-line-strong); border-radius: 8px; background: var(--ui-paper);
+            color: var(--ui-ink); text-decoration: none; font-weight: 600;
         }
-        .divider { text-align: center; color: #999; font-size: 12px; margin: 12px 0; }
+        .google-btn:hover { background: var(--ui-paper-2); }
+        .divider { display: flex; align-items: center; gap: 12px; margin: 20px 0 4px; color: var(--ui-muted); font-size: 13px; }
+        .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--ui-line); }
+        .hint { margin: 18px 0 0; font-size: 13px; color: var(--ui-muted); }
+        .err { margin: 0 0 16px; padding: 10px 12px; border-radius: 8px; background: var(--ui-danger-soft); color: var(--ui-danger); }
+        @media (max-width: 860px) {
+            body.auth-page { grid-template-columns: 1fr; }
+            .auth-brand { padding: 28px 20px; gap: 18px; }
+            body.auth-page .auth-brand h1 { font-size: 28px; max-width: none; }
+            .auth-sample { display: none; }
+            .auth-panel { padding: 32px 20px 48px; place-items: start center; }
+        }
     </style>
 </head>
-<body>
-    <form action="/login" method="post" id="login-form">
-        <h2 style="margin-top:0;">Đăng nhập</h2>
-        {% if error %}
-        <p class="err">{{ error }}</p>
-        {% endif %}
-        {% if google_auth_enabled %}
-        <a class="google-btn" href="/auth/google" id="google-login-btn">Đăng nhập bằng Google</a>
-        <p class="divider">hoặc</p>
-        {% endif %}
-        <label for="username">Tên đăng nhập <span style="font-weight:normal;color:#666;">(tuỳ chọn)</span></label>
-        <input type="text" name="username" id="username" autocomplete="username" placeholder="Để trống nếu dùng mật khẩu cũ">
+<body class="ui-v2 auth-page">
+    <section class="auth-brand" aria-label="Giới thiệu">
+        <p class="auth-brand-name">Search Tools</p>
+        <div>
+            <h1>Tra cứu hóa chất, đúng giá, đúng quy định.</h1>
+            <p>Tìm sản phẩm theo tên, mã hoặc CAS, xem tồn kho và tình trạng quản lý trước khi báo giá cho khách.</p>
+        </div>
+        <ul class="auth-sample" aria-hidden="true">
+            <li><span class="mono">64-17-5</span><span>Ethanol</span></li>
+            <li><span class="mono">75-05-8</span><span>Acetonitrile</span></li>
+            <li><span class="mono">7647-14-5</span><span>Sodium chloride</span></li>
+        </ul>
+    </section>
+    <main class="auth-panel">
+        <form action="/login" method="post" id="login-form">
+            <h2>Đăng nhập</h2>
+            <p class="auth-lead">Dùng tài khoản công ty để tiếp tục.</p>
+            {% if error %}
+            <p class="err" role="alert">{{ error }}</p>
+            {% endif %}
+            {% if google_auth_enabled %}
+            <a class="google-btn" href="/auth/google" id="google-login-btn">Đăng nhập bằng Google</a>
+            <p class="divider">hoặc dùng tên đăng nhập</p>
+            {% endif %}
+            <label for="username">Tên đăng nhập <span>(tuỳ chọn)</span></label>
+            <input type="text" name="username" id="username" autocomplete="username" placeholder="Để trống nếu dùng mật khẩu cũ">
 
-        <label for="password">Mật khẩu</label>
-        <input type="password" name="password" id="password" required autocomplete="current-password">
+            <label for="password">Mật khẩu</label>
+            <input type="password" name="password" id="password" required autocomplete="current-password">
 
-        <button type="submit">Đăng nhập</button>
-        <p class="hint">Để trống tên đăng nhập và chỉ nhập mật khẩu nếu bạn vẫn dùng cách đăng nhập cũ (manager/staff).</p>
-    </form>
+            <button type="submit">Đăng nhập</button>
+            <p class="hint">Để trống tên đăng nhập và chỉ nhập mật khẩu nếu bạn vẫn dùng cách đăng nhập cũ (manager/staff).</p>
+        </form>
+    </main>
 </body>
 </html>

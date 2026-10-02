@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Quản lý Users</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20261002ui1') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
   <style>
     body { font-family: system-ui, sans-serif; max-width: 1100px; margin: 24px auto; padding: 0 12px; }
@@ -47,9 +47,11 @@
     }
   </style>
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260909c4') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='ui_system.css', v='20261002ui2') }}">
 </head>
-<body class="admin-page">
+<body class="admin-page ui-v2">
   {% include "_user_nav.html" %}
+<main class="admin-shell">
 
   <h1 style="margin-top:0;">Quản lý Users</h1>
   <p class="muted">
@@ -455,5 +457,6 @@
       });
     })();
   </script>
+</main>
 </body>
 </html>

@@ -3,18 +3,19 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{{ 'Sửa sản phẩm #' ~ product.id if product else 'Thêm sản phẩm' }} — Search Tools</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20261002ui1') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_products.css', v='20260909a') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260909c4') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='ui_system.css', v='20261002ui2') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous">
   {% if product %}<script defer src="{{ url_for('static', filename='admin_products.js', v='20260909c4') }}"></script>{% endif %}
 </head>
-<body class="admin-page"{% if product %} data-delete-preview-url="{{ url_for('admin_product_delete_preview') }}" data-delete-apply-url="{{ url_for('admin_product_delete_apply') }}" data-products-url="{{ url_for('admin_products') }}"{% endif %}>
+<body class="admin-page ui-v2"{% if product %} data-delete-preview-url="{{ url_for('admin_product_delete_preview') }}" data-delete-apply-url="{{ url_for('admin_product_delete_apply') }}" data-products-url="{{ url_for('admin_products') }}"{% endif %}>
 {% include '_user_nav.html' %}
 {% set p = product or {} %}
 <main class="product-form-main">
   <a class="back-link" href="{{ url_for('admin_products') }}">← Danh sách sản phẩm</a>
-  <header class="page-heading form-heading"><div><p class="eyebrow">{{ 'CHI TIẾT SẢN PHẨM' if product else 'SẢN PHẨM MỚI' }}</p><h1>{{ p.name or ('Sản phẩm #' ~ p.id if product else 'Thêm sản phẩm') }}</h1><p class="muted">Canonical brand là định danh chuẩn. Source brand ghi nguồn catalog và không tự suy diễn.</p></div>{% if product %}<span class="id-chip">ID {{ p.id }} · rev {{ p.revision }}</span>{% endif %}</header>
+  <header class="page-heading form-heading"><div><p class="eyebrow">{{ 'Chi tiết sản phẩm' if product else 'Sản phẩm mới' }}</p><h1>{{ p.name or ('Sản phẩm #' ~ p.id if product else 'Thêm sản phẩm') }}</h1><p class="muted">Canonical brand là định danh chuẩn. Source brand ghi nguồn catalog và không tự suy diễn.</p></div>{% if product %}<span class="id-chip">ID {{ p.id }} · rev {{ p.revision }}</span>{% endif %}</header>
   {% if message %}<div class="alert success" role="status">{{ message }}</div>{% endif %}
   {% if error %}<div class="alert error" role="alert">{{ error }}</div>{% endif %}
   <form class="product-form" method="post" action="{{ url_for('admin_product_update', product_id=p.id) if product else url_for('admin_product_create') }}">

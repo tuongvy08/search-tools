@@ -386,7 +386,10 @@ class RealPg(unittest.TestCase):
     def test_owner_role_missing_fails_closed_and_rolls_back(self):
         r = self.restore("ghost")
         self._assert_hold(r, "TEMP_RESTORE_COMMAND", populated=False)
-        self.assertRegex(r["out"], r"restore_error_first_line=pg_restore: error: .*vrf_ghost")
+        # Only a fixed label may be shown; raw tool text (role names, data) must never appear.
+        self.assertIn("restore_error_category=ROLE_MISSING", r["out"])
+        self.assertNotIn("vrf_ghost", r["out"])
+        self.assertNotIn("pg_restore:", r["out"])
 
     def test_truncated_archive_fails_closed_and_rolls_back(self):
         full = self.archive("pristine").read_bytes()
@@ -571,23 +574,34 @@ class RealPg(unittest.TestCase):
             self.assertNotIn(bad, src, bad)
 
     def test_sigkill_of_direct_child_leaves_grandchild_running_like_sudo(self):
-        """Generic POSIX fork-wait wrapper (stand-in for sudo): subprocess.run(timeout) kills only the
-        wrapper; the grandchild survives. Shows why a timed-out `sudo ... pg_restore` can finish later."""
+        """Generic POSIX fork-wait wrapper (stand-in for sudo): killing only the wrapper, as
+        subprocess.run(timeout) does, leaves the grandchild running. Shows why a timed-out
+        `sudo ... pg_restore` can finish later. Waits until the grandchild has really started
+        before the kill, so machine load cannot make the demonstration flaky."""
         d = Path(self.tmp)
+        started = d / "grandchild_started"
         marker = d / "grandchild_done"
+        for path in (started, marker):
+            if path.exists():
+                path.unlink()
         wrapper = d / "fakesudo.sh"
         wrapper.write_text('#!/bin/sh\n"$@" &\nwait\n')
         wrapper.chmod(0o755)
-        with self.assertRaises(subprocess.TimeoutExpired):
-            subprocess.run([str(wrapper), "sh", "-c", "sleep 3; touch %s" % marker], timeout=0.5,
-                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        proc = subprocess.Popen([str(wrapper), "/bin/sh", "-c", "touch %s; sleep 3; touch %s" % (started, marker)],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(100):
+            if started.exists():
+                break
+            time.sleep(0.1)
+        self.assertTrue(started.exists(), "grandchild never started")
+        proc.kill()  # what subprocess.run does on timeout: only the direct child is killed
+        proc.wait(timeout=10)
         self.assertFalse(marker.exists())
-        for _ in range(40):
+        for _ in range(60):
             if marker.exists():
                 break
             time.sleep(0.5)
         self.assertTrue(marker.exists())
-
 
 if __name__ == "__main__":
     unittest.main()

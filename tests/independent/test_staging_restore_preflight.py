@@ -15,9 +15,16 @@ from types import SimpleNamespace
 from unittest import mock
 
 
+import os
+
+# Evidence for the ABANDONED out-of-Git preflight_readonly.py (see OPERATIONS S0.1): its failures
+# are the recorded reason it was not used. Skipped by default; set
+# RUN_ABANDONED_PREFLIGHT_EVIDENCE=1 on a machine that has the file to reproduce them.
 SOURCE_PATH = pathlib.Path(
     "/Volumes/DATA/Development/_ops/search-tools/preflight_readonly.py"
 )
+if os.environ.get("RUN_ABANDONED_PREFLIGHT_EVIDENCE") != "1" or not SOURCE_PATH.is_file():
+    raise unittest.SkipTest("abandoned preflight_readonly.py evidence (opt-in, file outside Git)")
 SOURCE_BYTES = SOURCE_PATH.read_bytes()
 SOURCE = SOURCE_BYTES.decode()
 CODE = compile(ast.parse(SOURCE), str(SOURCE_PATH), "exec")

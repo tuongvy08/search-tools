@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260926d8') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20261002ui1') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='search_suggestions.css', v='20260926d7') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='search_workspace.css', v='20261002ui1') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='search_workspace.css', v='20261002ui2') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
 </head>
 <body class="search-page">
@@ -198,7 +198,7 @@
                 {% if can("VIEW_NOTE") %}<th>Note</th>{% endif %}
                 {% if can("VIEW_COMPLIANCE") %}<th>Tình trạng quản lý</th>{% endif %}
                 {% if can("VIEW_COMPLIANCE_NOTE") %}<th>Ghi chú quản lý</th>{% endif %}
-                <th>Tồn kho</th>
+                <th class="col-stock">Tồn kho</th>
             </tr>
         </thead>
         <tbody>

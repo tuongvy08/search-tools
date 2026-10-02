@@ -1,7 +1,7 @@
 <!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Chi tiết giữ quy tắc khi import</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260926d8') }}"><link rel="stylesheet" href="{{ url_for('static',filename='admin_nav.css') }}"><link rel="stylesheet" href="{{ url_for('static',filename='admin_ux.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='ui_system.css', v='20261002ui1') }}"></head><body class="admin-page ui-v2">{% include '_user_nav.html' %}<main class="admin-shell">
+<link rel="stylesheet" href="{{ url_for('static', filename='ui_system.css', v='20261002ui2') }}"></head><body class="admin-page ui-v2">{% include '_user_nav.html' %}<main class="admin-shell">
 <a href="{{ url_for('regulatory_job_detail',job_id=job_id) }}">← Tác vụ import</a><h1>Các mục được giữ / xung đột</h1>
 <p>Snapshot {{ 'xem trước' if event=='preview_completed' else 'áp dụng' }} · <time datetime="{{ created_at.isoformat() }}">{{ created_at|regulatory_vn_time }}</time> (giờ Việt Nam, UTC+7) · {{ total }} chi tiết · Trang {{ page }}</p>
 <p>{{ summary.protected_count }} quy tắc được bảo vệ giữ nguyên. Import không được ghi đè các mục này.</p>

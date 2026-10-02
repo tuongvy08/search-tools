@@ -68,8 +68,8 @@ body.ui-v2 h3 { color: var(--ui-ink); font-size: 15.5px; font-weight: 650; }
 body.ui-v2 .muted, body.ui-v2 .small, body.ui-v2 .hint, body.ui-v2 .sub, body.ui-v2 .cell-meta { color: var(--ui-muted); }
 body.ui-v2 .eyebrow { text-transform: none; letter-spacing: 0; font-size: 13.5px; font-weight: 600; color: var(--ui-muted); }
 body.ui-v2 code, body.ui-v2 kbd, body.ui-v2 .mono { font-family: var(--ui-mono); font-variant-numeric: tabular-nums; }
-body.ui-v2 :is(main, .wrap) a:not(.button):not(.btn):not(.ui-btn) { color: var(--ui-accent); text-underline-offset: 3px; }
-body.ui-v2 :is(main, .wrap) a:not(.button):not(.btn):not(.ui-btn):hover { color: var(--ui-accent-hover); }
+body.ui-v2 :is(main, .wrap) a:not(.button):not(.btn):not(.ui-btn):not(.active) { color: var(--ui-accent); text-underline-offset: 3px; }
+body.ui-v2 :is(main, .wrap) a:not(.button):not(.btn):not(.ui-btn):not(.active):hover { color: var(--ui-accent-hover); }
 body.ui-v2 :focus-visible { outline: 3px solid var(--ui-focus); outline-offset: 2px; }
 body.ui-v2 .back-link { color: var(--ui-muted); font-size: 14px; text-decoration: none; }
 body.ui-v2 .back-link:hover { color: var(--ui-ink); text-decoration: underline; }
@@ -130,6 +130,11 @@ body.ui-v2 :is(main, .wrap) tbody tr:hover { background: #f8fafb; }
 /* Selected filters, toggles and emphasis that older pages hard-code in blue. */
 body.ui-v2 .gu-filter-btn[aria-pressed="true"], body.ui-v2 .filters a.active {
   background: var(--ui-accent); border-color: var(--ui-accent); color: #fff;
+}
+/* The team directory uses underline tabs, not filled pills. */
+body.ui-v2 .team-directory .filters a.active {
+  background: transparent; color: var(--ui-accent-hover); border-color: transparent;
+  border-bottom: 2px solid var(--ui-accent);
 }
 body.ui-v2 .switch input:checked + .slider { background: var(--ui-accent); }
 body.ui-v2 .flow strong { color: var(--ui-accent-hover); }

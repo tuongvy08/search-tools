@@ -12,7 +12,7 @@ ASSET_VERSIONS = {
     'admin_quote_templates.js': '20260909c4', 'quick_quote.js': '20260910e1',
     'script.js': '20260926d8', 'styles.css': '20260926d8',
     'search_suggestions.js': '20260926d7', 'search_suggestions.css': '20260926d7',
-    'search_workspace.css': '20261002ui1',
+    'search_workspace.css': '20261002ui2',
 }
 CAPABILITY_ASSETS = {
     'script.js', 'quick_quote.js', 'styles.css',

@@ -539,16 +539,16 @@
   white-space: nowrap;
 }
 
-.search-page #results col.col-name { width: 220px; }
-.search-page #results col.col-code { width: 150px; }
-.search-page #results col.col-cas { width: 112px; }
-.search-page #results col.col-brand { width: 140px; }
-.search-page #results col.col-size { width: 110px; }
-.search-page #results col.col-price { width: 100px; }
-.search-page #results col.col-note { width: 190px; }
-.search-page #results col.col-compliance { width: 150px; }
-.search-page #results col.col-compliance-note { width: 210px; }
-.search-page #results col.col-stock { width: 300px; }
+.search-page #results col.col-name { width: 180px; }
+.search-page #results col.col-code { width: 112px; }
+.search-page #results col.col-cas { width: 108px; }
+.search-page #results col.col-brand { width: 112px; }
+.search-page #results col.col-size { width: 96px; }
+.search-page #results col.col-price { width: 88px; }
+.search-page #results col.col-note { width: 150px; }
+.search-page #results col.col-compliance { width: 128px; }
+.search-page #results col.col-compliance-note { width: 150px; }
+.search-page #results col.col-stock { width: 228px; }
 
 .search-page #results th.col-select,
 .search-page #results td.col-select {
@@ -572,7 +572,23 @@
 }
 
 .search-page #results .cell-stock {
-  min-width: 300px;
+  min-width: 228px;
+}
+
+/* Stock stays visible: when the table is wider than the screen, the stock
+   column is pinned to the right edge of the scroll area and the middle
+   columns scroll under it. Cells take their row's own background (plain,
+   selected or regulatory tint) so the row colour reads straight through. */
+.search-page #results th.col-stock,
+.search-page #results td.cell-stock {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  box-shadow: -10px 0 12px -10px rgba(19, 32, 46, 0.28);
+}
+
+.search-page #results td.cell-stock {
+  background-color: inherit;
 }
 
 .search-page #results .stock-line {
@@ -601,6 +617,12 @@
 @media (max-width: 767.98px) {
   .search-page {
     padding: 0;
+  }
+
+  .search-page #results th.col-stock,
+  .search-page #results td.cell-stock {
+    position: static;
+    box-shadow: none;
   }
 
   .search-page .search-workspace {

@@ -38,6 +38,17 @@ Search-tools là ứng dụng Flask **đang chạy production cho nhân viên c�
 ty**. Các quy tắc chung ở trên áp dụng đầy đủ; phần dưới đây bổ sung chi
 tiết riêng của project này, không thay thế phần chung.
 
+### Máy chủ và alias SSH — KHÔNG nhầm hai máy
+
+| Môi trường | Lệnh SSH (alias trên Mac của PO) | Dịch vụ | Database | Ai dùng |
+| --- | --- | --- | --- | --- |
+| **Staging** | `ssh staging` | `search-tools-staging.service`, `search-tools-import-worker.service`; mã tại `/srv/search-tools` | `search_tools_staging` (PostgreSQL 16) | Chỉ để thử, không có người dùng thật |
+| **Production** | `ssh python` | `search-tools-pg.service`, `search-tools-import-worker.service`; release tại `/opt/search-tools-pg-release-<timestamp>-<commit>-clean` | `searchtools_pg_r1_rollback_20260906_153842` (PostgreSQL 14) | **Nhân viên đang dùng** |
+
+- Hai máy có worker **cùng tên unit** `search-tools-import-worker.service`; luôn phân biệt bằng alias SSH và tên unit web/database, không chỉ bằng tên worker.
+- Lệnh cho staging không bao giờ dùng `ssh python`; lệnh cho production không bao giờ dùng `ssh staging`. Script/runbook phải ghi rõ alias đích và tự kiểm đúng máy (unit, thư mục, database) trước bước ghi.
+- Quyết định PO 2026-10-02: staging được tự do triển khai/thử; production vẫn cần PO nói rõ “đồng ý bắt đầu” cho từng lần (xem `PROJECT_STATE.md`).
+
 ### Production
 
 - Production chạy trên VPS Vultr, mỗi release nằm trong một thư mục bất

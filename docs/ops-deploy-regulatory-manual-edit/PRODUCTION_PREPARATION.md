@@ -1,5 +1,7 @@
 # Phiếu chuẩn bị triển khai production — migration033
 
+> **Đã thực hiện 2026-10-02 — THÀNH CÔNG.** Phiếu dưới đây là bản chuẩn bị lịch sử; kết quả, evidence và hai chỗ phải sửa script xem [hồ sơ release](PRODUCTION_RELEASE_2026-10-02.md).
+
 Ngày 30/09/2026. **CHỈ CHUẨN BỊ — CHƯA ĐƯỢC PHÉP TRIỂN KHAI.**
 Đưa bản đã thử đạt lên cho nhân viên thật; không làm PR3–PR5 hoặc đổi cách đăng nhập kèm theo.
 

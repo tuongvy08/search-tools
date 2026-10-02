@@ -16,4 +16,4 @@ ssh staging 'sudo -n -u deploy git -c safe.directory=/srv/search-tools -C /srv/s
 
 ## Production
 
-Chưa triển khai. Cần PR #29/#30 được duyệt, PO xem trên staging và nói “đồng ý bắt đầu” riêng; dùng quy trình release bất biến của production (`ssh python`), không dùng cách cập nhật tại chỗ của staging.
+Đã lên production 2026-10-02 cùng toàn bộ giao diện mới (`main@1d47a17`) — xem [ui-system/OPERATIONS](../ui-system/OPERATIONS.md) mục Production.

@@ -1,24 +1,42 @@
 <!doctype html>
 <html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{ 'Sửa' if rule else 'Thêm' }} quy tắc</title>
+<title>{{ 'Quy tắc #' ~ rule.id if rule else 'Thêm quy tắc thủ công' }}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css') }}">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_regulatory.css', v='20261002ui1') }}">
 <script defer src="{{ url_for('static', filename='regulatory_manual.js',v='033v2-display1') }}"></script>
-</head><body class="admin-page">{% include '_user_nav.html' %}
-<main class="admin-shell"><a href="{{ url_for('regulatory_rules') }}">← Danh sách quy tắc</a>
-<h1>{{ 'Quy tắc #' ~ rule.id if rule else 'Thêm quy tắc thủ công' }}</h1>
-<p class="state-banner">Quy tắc áp dụng toàn danh mục, không giới hạn hãng. Quy tắc tên có thể khớp nhiều sản phẩm. Kết quả cuối còn phụ thuộc thứ tự ưu tiên và ngoại lệ sản phẩm.</p>
-{% if rule %}<p>{{ 'Đang áp dụng' if rule.is_active else 'Ngừng áp dụng' }} · Phiên bản {{ rule.revision }}{% if rule.manual_protected %} · Được bảo vệ khi import{% endif %}</p>{% endif %}
-<section class="admin-card"><form id="manualRuleForm" data-save-url="{{ url_for('regulatory_rule_save') }}" data-check-url="{{ url_for('regulatory_rule_check') }}">
+</head><body class="admin-page regulatory-page">{% include '_user_nav.html' %}
+{% set status_map = {} %}{% for status in statuses %}{% set _ = status_map.update({status.id: status}) %}{% endfor %}
+{% set st = status_map.get(rule.status_id) if rule else None %}
+<main class="admin-shell">
+<a class="rg-back" href="{{ url_for('regulatory_rules') }}">← Danh sách quy tắc</a>
+{% if rule %}
+<header class="rg-specimen"{% if st %} style="--reg-bg:{{ st.color_bg }};--reg-fg:{{ st.color_fg }}{% if st.color_hex %};--reg-hue:{{ st.color_hex }}{% endif %}"{% endif %}>
+  <h1>Quy tắc #{{ rule.id }}</h1>
+  <p class="rg-specimen-value"><span class="rg-mono">{{ rule.match_value }}</span><span class="rg-type">{{ field_labels[rule.match_field] }}</span></p>
+  <p class="rg-specimen-meta"><span class="rg-chip {{ st.color_css if st else '' }}">{{ rule.rule_label }}</span>
+    <span class="rg-state{{ '' if rule.is_active else ' is-off' }}">{{ 'Đang áp dụng' if rule.is_active else 'Ngừng áp dụng' }}</span>
+    <span>Phiên bản {{ rule.revision }}</span>{% if rule.manual_protected %}<span class="rg-protected">Được bảo vệ khi import</span>{% endif %}</p>
+</header>
+{% else %}
+<header class="rg-head rg-new-head"><div><h1>Thêm quy tắc thủ công</h1></div></header>
+{% endif %}
+<p class="rg-scope">Quy tắc áp dụng toàn danh mục, không giới hạn hãng. Quy tắc theo tên có thể khớp nhiều sản phẩm. Kết quả cuối còn phụ thuộc thứ tự ưu tiên tình trạng và ngoại lệ sản phẩm.</p>
+
+<section class="admin-card"><h2>{{ 'Sửa quy tắc' if rule else 'Nội dung quy tắc' }}</h2>
+<p class="muted">Bấm “Xem trước thay đổi” để đối chiếu trước / sau; chưa có gì được lưu cho tới khi bạn xác nhận.</p>
+<form id="manualRuleForm" class="rg-form" data-save-url="{{ url_for('regulatory_rule_save') }}" data-check-url="{{ url_for('regulatory_rule_check') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="request_id" value="{{ request_id }}">
-<label>Thao tác <select name="action">{% if rule %}<option value="edit">Sửa nội dung</option><option value="{{ 'deactivate' if rule.is_active else 'restore' }}">{{ 'Ngừng áp dụng' if rule.is_active else 'Khôi phục' }}</option>{% else %}<option value="create">Thêm mới</option>{% endif %}</select></label>
-<label>Loại đối chiếu {% if rule %}<input type="hidden" name="match_field" value="{{ rule.match_field }}"><input value="{{ field_labels[rule.match_field] }}" readonly>{% else %}<select name="match_field">{% for key,label in field_labels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select>{% endif %}</label>
-<label>Giá trị <input name="match_value" value="{{ rule.match_value if rule else '' }}" maxlength="500" required></label>
-<label>Tình trạng <select name="status_id">{% for status in statuses %}<option value="{{ status.id }}"{{ ' selected' if rule and rule.status_id==status.id else '' }}>{{ status.label }}</option>{% endfor %}</select></label>
-<label>Ghi chú <textarea name="note" maxlength="4000">{{ rule.note or '' if rule else '' }}</textarea></label>
-<label>Lý do (bắt buộc khi đổi tình trạng hoặc ngừng áp dụng) <textarea name="reason" maxlength="1000"></textarea></label>
-<button type="submit" id="manualPreview">Xem trước</button>
+<label class="rg-field"><span>Thao tác</span><select name="action">{% if rule %}<option value="edit">Sửa nội dung</option><option value="{{ 'deactivate' if rule.is_active else 'restore' }}">{{ 'Ngừng áp dụng' if rule.is_active else 'Khôi phục' }}</option>{% else %}<option value="create">Thêm mới</option>{% endif %}</select></label>
+<label class="rg-field"><span>Loại đối chiếu</span>{% if rule %}<input type="hidden" name="match_field" value="{{ rule.match_field }}"><input value="{{ field_labels[rule.match_field] }}" readonly>{% else %}<select name="match_field">{% for key,label in field_labels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select>{% endif %}</label>
+<label class="rg-field"><span>Giá trị (CAS, mã hoặc tên)</span><input name="match_value" class="rg-mono" value="{{ rule.match_value if rule else '' }}" maxlength="500" required></label>
+<label class="rg-field"><span>Tình trạng</span><select name="status_id">{% for status in statuses %}<option value="{{ status.id }}"{{ ' selected' if rule and rule.status_id==status.id else '' }}>{{ status.label }}</option>{% endfor %}</select></label>
+<label class="rg-field rg-wide"><span>Ghi chú</span><textarea name="note" maxlength="4000">{{ rule.note or '' if rule else '' }}</textarea></label>
+<label class="rg-field rg-wide"><span>Lý do <span class="rg-hint">bắt buộc khi đổi tình trạng hoặc ngừng áp dụng</span></span><textarea name="reason" maxlength="1000"></textarea></label>
+<div class="rg-form-actions"><button type="submit" id="manualPreview">Xem trước thay đổi</button></div>
 <div id="manualError" role="alert"></div>
 <section id="manualReview" hidden><h2>Đối chiếu trước / sau</h2><div id="manualComparison"></div><div id="manualWarnings" role="status"></div>
 <button type="button" id="manualConfirm">Xác nhận lưu</button></section>
@@ -27,11 +45,13 @@
 <script id="regulatoryRuleData" type="application/json">{{ (rule or {})|tojson }}</script>
 <script id="regulatoryFieldLabels" type="application/json">{{ field_labels|tojson }}</script>
 {% if rule %}<section class="admin-card"><h2>Lịch sử thủ công</h2>
-<p class="muted">Thời gian theo giờ Việt Nam (UTC+7).</p>
+<p class="muted">Mới nhất ở trên. Thời gian theo giờ Việt Nam (UTC+7).</p>
+{% if events %}<div class="rg-timeline">
 {% for event in events %}<article><h3>{{ {'created':'Thêm mới','edited':'Sửa nội dung','deactivated':'Ngừng áp dụng','restored':'Khôi phục'}[event.event] }}</h3>
-<p><time datetime="{{ event.created_at.isoformat() }}">{{ event.created_at|regulatory_vn_time }}</time> · {{ event.actor_label }} (ID {{ event.actor_id_snapshot }})</p><p>Lý do: {{ event.reason or 'Không bắt buộc' }}</p>
+<p class="rg-event-meta"><time datetime="{{ event.created_at.isoformat() }}">{{ event.created_at|regulatory_vn_time }}</time><span>{{ event.actor_label }} (ID {{ event.actor_id_snapshot }})</span></p><p class="rg-event-reason">Lý do: {{ event.reason or 'Không bắt buộc' }}</p>
 <div class="table-wrap"><table><thead><tr><th>Nội dung</th><th>Trước</th><th>Sau</th></tr></thead><tbody>
 {% for key,label in [('match_value','Giá trị'),('rule_label','Tình trạng'),('note','Ghi chú'),('is_active','Áp dụng'),('manual_protected','Bảo vệ'),('revision','Phiên bản')] %}<tr><th>{{ label }}</th>{% for state in [event.before_json,event.after_json] %}<td>{% if key in ['is_active','manual_protected'] %}{{ 'Có' if state.get(key) is sameas true else ('Không' if state.get(key) is sameas false else '—') }}{% else %}{{ state.get(key,'—') }}{% endif %}</td>{% endfor %}</tr>{% endfor %}
-</tbody></table></div></article>{% else %}<p>Chưa có lịch sử sửa tay. Không suy đoán nguồn gốc dữ liệu trước phase.</p>{% endfor %}
-<nav aria-label="Phân trang lịch sử">{% if page>1 %}<a href="{{ url_for('regulatory_rule_detail',rule_id=rule.id,page=page-1) }}">← Trang trước</a>{% endif %}{% if has_next %}<a href="{{ url_for('regulatory_rule_detail',rule_id=rule.id,page=page+1) }}">Trang sau →</a>{% endif %}</nav>
+</tbody></table></div></article>{% endfor %}
+</div>{% else %}<p>Chưa có lần sửa tay nào. Nguồn gốc dữ liệu trước khi có tính năng sửa tay không được ghi lại.</p>{% endif %}
+<nav class="rg-pager" aria-label="Phân trang lịch sử">{% if page>1 %}<a href="{{ url_for('regulatory_rule_detail',rule_id=rule.id,page=page-1) }}">Mới hơn</a>{% endif %}{% if has_next %}<a href="{{ url_for('regulatory_rule_detail',rule_id=rule.id,page=page+1) }}">Cũ hơn</a>{% endif %}</nav>
 </section>{% endif %}</main></body></html>

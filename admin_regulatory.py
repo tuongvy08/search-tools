@@ -79,6 +79,18 @@ def _color_swatches():
     ]
 
 
+def _decorate_status(row):
+    """Presentation colours for one status row (same resolution as the overview page)."""
+    status = dict(row)
+    status["color_hex"] = valid_color_hex(status.get("color_hex"))
+    status["color_key"] = effective_color_key(status.get("color_key"), status.get("stable_key"))
+    color_value = status["color_hex"] or status["color_key"]
+    status["color_token"] = effective_color_token(color_value, status.get("stable_key"))
+    status["color_css"] = color_css(color_value, status.get("stable_key"))
+    status["color_bg"], status["color_fg"] = color_pair(color_value, status.get("stable_key"))
+    return status
+
+
 def _status_snapshot(row):
     color_hex = valid_color_hex(row.get("color_hex"))
     return {
@@ -128,7 +140,7 @@ def register(app, require_admin, actor):
         with jobs.connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
             result = manual.list_rules(cur, request.args)
             cur.execute('SELECT * FROM regulatory_statuses ORDER BY priority,id')
-            statuses = cur.fetchall()
+            statuses = [_decorate_status(item) for item in cur.fetchall()]
         return render_template('admin_regulatory_rules.html', statuses=statuses, filters=request.args,
                                field_labels=FIELD_LABELS, **result)
 
@@ -143,7 +155,7 @@ def register(app, require_admin, actor):
             manual.require_schema(cur)
             row = manual.get_rule(cur, rule_id) if rule_id else None
             cur.execute('SELECT * FROM regulatory_statuses ORDER BY priority,id')
-            statuses = cur.fetchall()
+            statuses = [_decorate_status(item) for item in cur.fetchall()]
             cur.execute('SELECT count(*) AS total FROM regulatory_rule_manual_events WHERE rule_id=%s', (rule_id,))
             total = cur.fetchone()['total']
             cur.execute('''SELECT * FROM regulatory_rule_manual_events WHERE rule_id=%s
@@ -210,20 +222,7 @@ def register(app, require_admin, actor):
                        FROM regulatory_statuses s LEFT JOIN regulatory_rules r ON r.status_id=s.id
                        GROUP BY s.id ORDER BY s.priority,s.id"""
                 )
-                statuses = [dict(row) for row in cur.fetchall()]
-                for status in statuses:
-                    status["color_hex"] = valid_color_hex(status.get("color_hex"))
-                    status["color_key"] = effective_color_key(
-                        status.get("color_key"), status.get("stable_key")
-                    )
-                    color_value = status["color_hex"] or status["color_key"]
-                    status["color_token"] = effective_color_token(
-                        color_value, status.get("stable_key")
-                    )
-                    status["color_css"] = color_css(color_value, status.get("stable_key"))
-                    status["color_bg"], status["color_fg"] = color_pair(
-                        color_value, status.get("stable_key")
-                    )
+                statuses = [_decorate_status(item) for item in cur.fetchall()]
             recent = jobs.list_jobs()
         except Exception:
             statuses, recent = [], []

@@ -1,0 +1,66 @@
+/* Quick Quote on the Search Tools design system (phase ui-system, wave 5).
+   Loaded by quick_quote.html only, after styles.css and admin_nav.css.
+   Paint only: brand colour, type, page frame. Semantic category colours
+   (match type, lifecycle "exported", warnings) are intentionally kept. */
+
+body.quick-quote-page {
+  --qq-primary: #0b6e73;
+  --qq-primary-hover: #08575b;
+  --qq-primary-active: #064a4d;
+  --qq-neutral-bg: #ffffff;
+  --qq-neutral-hover: #f2f8f8;
+  --qq-neutral-text: #3c4b5c;
+  --qq-subtle: #f5f7f9;
+  --qq-border: #d5dce3;
+  --qq-border-strong: #b6c1cc;
+  --qq-text: #13202e;
+  --qq-muted: #5d6b7a;
+  --qq-focus: #7cc4c7;
+  --qq-shadow-card: none;
+  /* The legacy layout constrains <body>; constrain the content instead so the
+     shared navigation bar runs edge to edge. */
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  background: #eef1f4;
+  color: #13202e;
+  font-family: "Be Vietnam Pro", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+body.quick-quote-page .qq-header,
+body.quick-quote-page .qq-layout {
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 24px;
+  padding-right: 24px;
+  box-sizing: border-box;
+}
+body.quick-quote-page .qq-header { text-align: left; padding-top: 28px; margin-bottom: 18px; }
+body.quick-quote-page .qq-layout { padding-bottom: 56px; }
+body.quick-quote-page .qq-header h1 { margin: 0; color: #13202e; font-size: 30px; line-height: 1.15; text-align: left; letter-spacing: -0.01em; }
+body.quick-quote-page .qq-subtitle { margin: 8px 0 6px; color: #3c4b5c; }
+body.quick-quote-page .qq-nav a { color: #0b6e73; font-weight: 600; text-decoration: none; }
+body.quick-quote-page .qq-nav a:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+body.quick-quote-page .qq-card { background: #ffffff; border: 1px solid #d5dce3; border-radius: 12px; }
+body.quick-quote-page .qq-card-title { color: #13202e; }
+body.quick-quote-page #qqMatchBtn { box-shadow: none; }
+body.quick-quote-page :focus-visible { outline-color: #7cc4c7; }
+
+/* Brand-coloured selections that the legacy sheet hard-codes in blue. */
+body.quick-quote-page .qq-segment.is-active { background: #0b6e73; border-color: #0b6e73; color: #ffffff; }
+body.quick-quote-page .qq-file-drop.is-dragover { border-color: #0b6e73; background: #e2f0f0; }
+body.quick-quote-page .qq-brand-chip { background: #e2f0f0; color: #08575b; }
+body.quick-quote-page .qq-brand-chip-remove { color: #08575b; }
+body.quick-quote-page .qq-brand-option.is-selected { background: #e2f0f0; color: #08575b; }
+body.quick-quote-page .qq-summary-chip,
+body.quick-quote-page .qq-group-status { background: #e2f0f0; color: #08575b; }
+body.quick-quote-page .qq-fallback-toggle-btn { color: #0b6e73; }
+
+@media (max-width: 700px) {
+  body.quick-quote-page .qq-header,
+  body.quick-quote-page .qq-layout { padding-left: 16px; padding-right: 16px; }
+  body.quick-quote-page .qq-header { padding-top: 18px; }
+  body.quick-quote-page .qq-header h1 { font-size: 25px; }
+}

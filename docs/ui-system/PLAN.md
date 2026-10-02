@@ -23,8 +23,8 @@ PO yêu cầu 2026-10-02 sau khi xem giao diện quản trị quy tắc mới tr
 | Quy tắc (mẫu) | `feat/admin-regulatory-ui` (PR #30) | Staging, PO khen |
 | 1 + 2 | `feat/ui-system` | Xong local: `ui_system.css`, thanh điều hướng mới; 8 trang (sản phẩm, form sản phẩm, tồn kho, form tồn, trung tâm nhập, mạng/IP, lịch sử đăng nhập, bảo vệ quy tắc). 1233 test + 8 DOM OK; tự review ảnh chụp. **Đã lên staging** (`a8cdae2`). |
 | 3 | `feat/ui-system` | Xong local: người dùng, nhóm/quyền, mẫu báo giá, tỷ giá, brand compliance, nhập dữ liệu. Biến màu cũ (`--primary`, `--blue`…) trỏ về token; phạm vi `main` mở rộng sang `.wrap`. 1233 test + 8 DOM OK. **Đã lên staging** (`0ba845a`). |
-| 4 | — | Chưa làm |
-| 5 | — | Chưa làm |
+| 4 | `feat/ui-system` | Xong local: đăng nhập (2 cột, khối giới thiệu nền mực + form), chờ duyệt. 91 test auth OK. |
+| 5 | `feat/ui-system` | Xong local: Tra cứu (đổi token `--sw-*`, font, khung trang; nới cột CAS) và Quick Quote (`static/quick_quote_ui.css`: token `--qq-*`, khung trang, màu chọn; giữ màu ngữ nghĩa loại khớp/“đã xuất”). Không đổi JavaScript, nhãn copy Excel giữ nguyên. Kiểm bằng app chạy local + dữ liệu mẫu + ảnh chụp Chrome headless. 1233 test + 8 DOM OK. |
 
 ## Ghi chú kỹ thuật đợt 1–2
 
@@ -32,3 +32,9 @@ PO yêu cầu 2026-10-02 sau khi xem giao diện quản trị quy tắc mới tr
 - Bỏ các nhãn in hoa kiểu “QUẢN TRỊ · …” chỉ lặp tiêu đề; giữ nhãn có thông tin (mã tác vụ, bước 1/2).
 - Đổi khóa cache `admin_nav.css` thành `20261002ui1` ở mọi template để trình duyệt tải thanh điều hướng mới.
 - Test `test_phase6c4_admin_ux` nới cách so `class="admin-page"` để cho phép thêm class (`ui-v2`), giữ nguyên ý “trang quản trị phải dùng lớp chung”; bổ sung `v=` còn thiếu cho `styles.css` ở 3 trang quy tắc (lỗi có sẵn từ PR #22).
+
+## Ghi chú kỹ thuật đợt 4–5
+
+- Tra cứu và Quick Quote **không** bật `ui-v2` (tránh quy tắc chung chạm bảng/nút do JavaScript tạo); chỉ đổi biến màu sẵn có của từng trang và khung trang.
+- Đổi khóa cache `search_workspace.css` → `20261002ui1` (và cập nhật pin trong `test_static_asset_versions`).
+- Tiêu đề cột kết quả (Name, Code, Cas, Unit_Price…) giữ nguyên vì JavaScript dùng làm tiêu đề khi copy sang Excel và test khóa `<th>Code</th>`.

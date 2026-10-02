@@ -4,19 +4,20 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Thêm / sửa tồn kho — Search Tools</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260926d8') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20261002ui1') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260910d2') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='ui_system.css', v='20261002ui1') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_stock.css', v='20260926d6') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous">
   <script defer src="{{ url_for('static', filename='admin_ux.js', v='20260909d1') }}"></script>
   <script defer src="{{ url_for('static', filename='admin_stock.js', v='20260926d6') }}"></script>
 </head>
-<body class="admin-page">
+<body class="admin-page ui-v2">
 {% include '_user_nav.html' %}
 <main class="stock-shell stock-page">
   <a class="back-link" href="{{ url_for('admin_stock', **selected) }}">← Về tồn hiện hành</a>
   <section class="stock-panel stock-editor">
-    <p class="eyebrow">Tồn kho · {{ '02 — Xem thay đổi' if preview else '01 — Nhập dữ liệu' }}</p>
+    <p class="eyebrow">{{ 'Bước 2/2: Xem thay đổi' if preview else 'Bước 1/2: Nhập dữ liệu' }}</p>
     <h1>{{ 'Sửa dòng tồn' if form and form.item_id else 'Thêm tồn mới' }}</h1>
     <p>Chỉ thay đổi dòng đã chọn; lịch sử cũ được giữ nguyên. Giá này không dùng cho báo giá.</p>
     {% if error %}<div class="state-banner state-error" role="alert" tabindex="-1" autofocus>{{ error }}</div>{% endif %}

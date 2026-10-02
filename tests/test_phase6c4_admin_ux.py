@@ -20,7 +20,8 @@ class AdminUxContractTests(unittest.TestCase):
         for name in ADMIN_TEMPLATES:
             with self.subTest(name=name):
                 source = (TEMPLATES / name).read_text(encoding="utf-8")
-                self.assertIn('class="admin-page"', source)
+                # Pages may add further body classes (e.g. the ui-v2 design system) after admin-page.
+                self.assertRegex(source, r'<body[^>]*\bclass="admin-page(?: [^"]*)?"')
                 self.assertIn("filename='admin_ux.css'", source)
 
     def test_shared_css_cannot_restyle_search_or_quick_quote(self):

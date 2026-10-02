@@ -1,0 +1,138 @@
+/* Search Tools design system (phase ui-system, 2026-10-02).
+   Derived from the regulatory admin redesign the PO approved (see
+   docs/admin-regulatory-ui/SCOPE.md and docs/ui-system/PLAN.md).
+   Opt-in: only pages whose <body> has class "ui-v2" are affected, and it
+   only re-paints existing markup (cards, panels, buttons, forms, tables,
+   alerts); page behaviour and markup contracts stay unchanged.
+   Load AFTER styles.css/admin_ux.css and BEFORE any page-specific CSS. */
+
+@import url("https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap");
+
+body.ui-v2 {
+  --ui-ink: #13202e;
+  --ui-ink-2: #3c4b5c;
+  --ui-muted: #5d6b7a;
+  --ui-line: #d5dce3;
+  --ui-line-strong: #b6c1cc;
+  --ui-canvas: #eef1f4;
+  --ui-paper: #ffffff;
+  --ui-paper-2: #f5f7f9;
+  --ui-accent: #0b6e73;
+  --ui-accent-hover: #08575b;
+  --ui-accent-soft: #e2f0f0;
+  --ui-danger: #b42318;
+  --ui-danger-soft: #fdecea;
+  --ui-ok: #1f7a4d;
+  --ui-ok-soft: #e6f4ec;
+  --ui-warn-ink: #7a4b00;
+  --ui-warn-soft: #fff6dc;
+  --ui-focus: #7cc4c7;
+  --ui-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* Re-point the older admin tokens so existing page CSS follows the system. */
+  --admin-ink: var(--ui-ink);
+  --admin-muted: var(--ui-muted);
+  --admin-line: var(--ui-line);
+  --admin-surface: var(--ui-paper);
+  --admin-canvas: var(--ui-canvas);
+  --admin-primary: var(--ui-accent);
+  --admin-danger: var(--ui-danger);
+  background: var(--ui-canvas);
+  color: var(--ui-ink);
+  font-family: "Be Vietnam Pro", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+/* Page frame: the legacy styles.css pads <body>; ui-v2 pages pad their main column instead,
+   so the shared navigation bar runs edge to edge. :where() keeps page rules in charge. */
+body.ui-v2 { margin: 0; padding: 0; max-width: none; }
+:where(body.ui-v2) .admin-shell { max-width: 1320px; margin: 0 auto; padding: 28px 32px 72px; box-sizing: border-box; }
+:where(body.ui-v2) .admin-shell-narrow { max-width: 960px; }
+@media (max-width: 700px) { :where(body.ui-v2) .admin-shell { padding: 18px 16px 56px; } }
+
+/* Type */
+body.ui-v2 h1 { color: var(--ui-ink); font-size: 30px; line-height: 1.15; font-weight: 700; letter-spacing: -0.01em; text-align: left; }
+body.ui-v2 h2 { color: var(--ui-ink); font-size: 19px; line-height: 1.3; font-weight: 650; letter-spacing: 0; }
+body.ui-v2 h3 { color: var(--ui-ink); font-size: 15.5px; font-weight: 650; }
+body.ui-v2 .muted, body.ui-v2 .small, body.ui-v2 .hint, body.ui-v2 .sub, body.ui-v2 .cell-meta { color: var(--ui-muted); }
+body.ui-v2 .eyebrow { text-transform: none; letter-spacing: 0; font-size: 13.5px; font-weight: 600; color: var(--ui-muted); }
+body.ui-v2 code, body.ui-v2 kbd, body.ui-v2 .mono { font-family: var(--ui-mono); font-variant-numeric: tabular-nums; }
+body.ui-v2 main a:not(.button):not(.btn):not(.ui-btn) { color: var(--ui-accent); text-underline-offset: 3px; }
+body.ui-v2 main a:not(.button):not(.btn):not(.ui-btn):hover { color: var(--ui-accent-hover); }
+body.ui-v2 :focus-visible { outline: 3px solid var(--ui-focus); outline-offset: 2px; }
+body.ui-v2 .back-link { color: var(--ui-muted); font-size: 14px; text-decoration: none; }
+body.ui-v2 .back-link:hover { color: var(--ui-ink); text-decoration: underline; }
+
+/* Surfaces: flat paper on the lab-grey canvas, one radius family. */
+body.ui-v2 .card, body.ui-v2 .panel, body.ui-v2 .admin-card {
+  background: var(--ui-paper); border: 1px solid var(--ui-line); border-radius: 12px; box-shadow: none;
+}
+
+/* Buttons */
+body.ui-v2 main button:not(.sq-shell-link):not([class*="sq-shell"]),
+body.ui-v2 .button, body.ui-v2 .btn, body.ui-v2 .ui-btn {
+  font-family: inherit; font-weight: 600; border-radius: 8px;
+}
+body.ui-v2 .button.primary, body.ui-v2 .btn-primary, body.ui-v2 button.primary, body.ui-v2 .ui-btn,
+body.ui-v2 main button[type=submit]:not(.secondary):not(.danger):not(.btn-secondary):not(.link):not(.gu-filter-btn) {
+  background: var(--ui-accent); border: 1px solid var(--ui-accent); color: #fff;
+}
+body.ui-v2 .button.primary:hover, body.ui-v2 .btn-primary:hover, body.ui-v2 button.primary:hover, body.ui-v2 .ui-btn:hover,
+body.ui-v2 main button[type=submit]:not(.secondary):not(.danger):not(.btn-secondary):not(.link):not(.gu-filter-btn):hover {
+  background: var(--ui-accent-hover); border-color: var(--ui-accent-hover); color: #fff;
+}
+body.ui-v2 .button.secondary, body.ui-v2 .btn-secondary, body.ui-v2 button.secondary, body.ui-v2 .ui-btn.secondary {
+  background: var(--ui-paper); border: 1px solid var(--ui-line-strong); color: var(--ui-ink);
+}
+body.ui-v2 .button.secondary:hover, body.ui-v2 .btn-secondary:hover, body.ui-v2 button.secondary:hover, body.ui-v2 .ui-btn.secondary:hover { background: var(--ui-paper-2); color: var(--ui-ink); }
+body.ui-v2 .button.danger, body.ui-v2 .btn-danger, body.ui-v2 button.danger {
+  background: var(--ui-paper); border: 1px solid #e3a59e; color: var(--ui-danger);
+}
+body.ui-v2 .button.danger:hover, body.ui-v2 .btn-danger:hover, body.ui-v2 button.danger:hover { background: var(--ui-danger); border-color: var(--ui-danger); color: #fff; }
+body.ui-v2 button:disabled, body.ui-v2 .button[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+
+/* Form controls */
+body.ui-v2 main input:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=file]):not([type=range]),
+body.ui-v2 main select, body.ui-v2 main textarea {
+  border: 1px solid var(--ui-line-strong); border-radius: 8px; background: var(--ui-paper);
+  color: var(--ui-ink); font-family: inherit; font-size: 14.5px;
+}
+body.ui-v2 main input:focus, body.ui-v2 main select:focus, body.ui-v2 main textarea:focus {
+  outline: none; border-color: var(--ui-accent); box-shadow: 0 0 0 3px var(--ui-accent-soft);
+}
+body.ui-v2 main input[readonly], body.ui-v2 main input:disabled, body.ui-v2 main select:disabled { background: var(--ui-paper-2); color: var(--ui-ink-2); }
+body.ui-v2 main input[type=checkbox], body.ui-v2 main input[type=radio] { accent-color: var(--ui-accent); }
+body.ui-v2 label, body.ui-v2 .lbl, body.ui-v2 .field > span:first-child { color: var(--ui-ink-2); }
+
+/* Tables */
+body.ui-v2 .table-wrap, body.ui-v2 .table-scroll, body.ui-v2 .gu-table-scroll, body.ui-v2 .lh-table-scroll {
+  border: 1px solid var(--ui-line); border-radius: 10px; background: var(--ui-paper);
+}
+body.ui-v2 main table { background: var(--ui-paper); border-collapse: collapse; }
+body.ui-v2 main thead th {
+  background: var(--ui-paper-2); color: var(--ui-muted); font-size: 13px; font-weight: 600;
+  letter-spacing: 0; text-transform: none;
+}
+body.ui-v2 main th, body.ui-v2 main td { border-color: var(--ui-line); }
+body.ui-v2 main tbody tr:hover { background: #f8fafb; }
+
+/* Step markers (real sequences only) */
+body.ui-v2 .step-mark { background: var(--ui-accent-soft); color: var(--ui-accent); }
+
+/* Feedback */
+body.ui-v2 .alert, body.ui-v2 .state-banner { border-radius: 8px; border: 1px solid transparent; }
+body.ui-v2 .alert-danger, body.ui-v2 .alert.error, body.ui-v2 .state-error { background: var(--ui-danger-soft); color: var(--ui-danger); border-color: #f3c7c1; }
+body.ui-v2 .alert-success, body.ui-v2 .alert.success, body.ui-v2 .state-success { background: var(--ui-ok-soft); color: var(--ui-ok); border-color: #c4e3d1; }
+body.ui-v2 .state-notice, body.ui-v2 .alert-warning, body.ui-v2 .stale-banner { background: var(--ui-warn-soft); color: var(--ui-warn-ink); border-color: #f0dca6; }
+body.ui-v2 .err, body.ui-v2 .error:not(.alert) { color: var(--ui-danger); }
+body.ui-v2 .ok, body.ui-v2 .success:not(.alert) { color: var(--ui-ok); }
+body.ui-v2 .badge, body.ui-v2 .pill { border-radius: 999px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+body.ui-v2 .empty-state, body.ui-v2 .empty { color: var(--ui-muted); }
+
+/* Dialogs */
+body.ui-v2 dialog { border: 1px solid var(--ui-line); border-radius: 12px; color: var(--ui-ink); }
+body.ui-v2 dialog::backdrop { background: rgb(19 32 46 / 45%); }
+
+@media (max-width: 700px) {
+  body.ui-v2 h1 { font-size: 25px; }
+}

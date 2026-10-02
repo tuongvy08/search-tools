@@ -4,20 +4,21 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Quản lý sản phẩm — Search Tools</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20261002ui1') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_products.css', v='20260909a') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260909c4') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='ui_system.css', v='20261002ui1') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous">
   <script defer src="{{ url_for('static', filename='admin_products.js', v='20260909c4') }}"></script>
 </head>
-<body class="admin-page" data-delete-preview-url="{{ url_for('admin_product_delete_preview') }}"
+<body class="admin-page ui-v2" data-delete-preview-url="{{ url_for('admin_product_delete_preview') }}"
       data-delete-apply-url="{{ url_for('admin_product_delete_apply') }}"
       data-products-url="{{ url_for('admin_products') }}">
 {% include '_user_nav.html' %}
 <main class="products-main">
   <header class="page-heading">
     <div>
-      <p class="eyebrow">QUẢN TRỊ · CATALOG</p>
+      
       <h1>Quản lý sản phẩm</h1>
       <p class="muted">Tìm, kiểm tra và sửa từng dòng. Nhập số lượng lớn vẫn thực hiện tại Import Center.</p>
     </div>
@@ -106,7 +107,7 @@
 
 <dialog id="delete-dialog" class="delete-dialog" aria-labelledby="delete-title">
   <form method="dialog"><button class="dialog-close" aria-label="Đóng hộp xác nhận">×</button></form>
-  <p class="eyebrow">THAO TÁC PHÁ HỦY</p><h2 id="delete-title">Xác nhận phạm vi xóa</h2>
+  <p class="eyebrow">Không thể hoàn tác sau khi xác nhận</p><h2 id="delete-title">Xác nhận phạm vi xóa</h2>
   <p id="delete-summary" class="delete-summary"></p>
   <p class="muted small">Preview có hiệu lực 5 phút và chỉ dùng một lần. Nếu dữ liệu đổi, hệ thống sẽ từ chối.</p>
   <label for="delete-confirmation">Nhập <strong id="delete-phrase"></strong> để tiếp tục</label>

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Giới hạn IP văn phòng</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20260905a') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20261002ui1') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
   <style>
     body { font-family: system-ui, sans-serif; max-width: 900px; margin: 24px auto; padding: 0 12px; }
@@ -18,9 +18,11 @@
     .muted { color: #555; font-size: 0.95rem; }
   </style>
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260909c4') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='ui_system.css', v='20261002ui1') }}">
 </head>
-<body class="admin-page">
+<body class="admin-page ui-v2">
   {% include "_user_nav.html" %}
+<main class="admin-shell admin-shell-narrow">
   <h1>Giới hạn IP (văn phòng)</h1>
 
   <div class="card muted">
@@ -112,5 +114,6 @@
   <div class="card muted">
     <p><b>Production (Vultr):</b> đặt <code>DISABLE_IP_ALLOWLIST=0</code> (hoặc xóa), thêm rule bằng env hoặc DB. Trên máy dev đặt <code>DISABLE_IP_ALLOWLIST=1</code> để không bị khóa.</p>
   </div>
+</main>
 </body>
 </html>

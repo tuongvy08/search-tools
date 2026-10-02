@@ -22,7 +22,7 @@ PO yêu cầu 2026-10-02 sau khi xem giao diện quản trị quy tắc mới tr
 | --- | --- | --- |
 | Quy tắc (mẫu) | `feat/admin-regulatory-ui` (PR #30) | Staging, PO khen |
 | 1 + 2 | `feat/ui-system` | Xong local: `ui_system.css`, thanh điều hướng mới; 8 trang (sản phẩm, form sản phẩm, tồn kho, form tồn, trung tâm nhập, mạng/IP, lịch sử đăng nhập, bảo vệ quy tắc). 1233 test + 8 DOM OK; tự review ảnh chụp. **Đã lên staging** (`a8cdae2`). |
-| 3 | — | Chưa làm |
+| 3 | `feat/ui-system` | Xong local: người dùng, nhóm/quyền, mẫu báo giá, tỷ giá, brand compliance, nhập dữ liệu. Biến màu cũ (`--primary`, `--blue`…) trỏ về token; phạm vi `main` mở rộng sang `.wrap`. 1233 test + 8 DOM OK. |
 | 4 | — | Chưa làm |
 | 5 | — | Chưa làm |
 

@@ -131,8 +131,8 @@
       border-radius: 999px;
       font-size: 0.78rem;
       font-weight: 700;
-      background: #dbeafe;
-      color: #1e40af;
+      background: #e2f0f0;
+      color: #08575b;
     }
     .pill-fixed { background: #f1f5f9; color: #475569; }
 
@@ -182,13 +182,14 @@
     }
   </style>
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260909c4') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='ui_system.css', v='20261002ui1') }}">
 </head>
-<body class="admin-page">
+<body class="admin-page ui-v2">
   {% include "_user_nav.html" %}
 
   <div class="wrap">
     <header class="page-header">
-      <h1><i class="fas fa-money-bill-wave" style="color: #2563eb;"></i> Quản lý Tỷ giá Trung tâm</h1>
+      <h1>Quản lý Tỷ giá Trung tâm</h1>
       <p class="sub">
         Mô hình: <code>Product → Canonical Brand → Currency → Tỷ giá hiện hành</code>.
         Cập nhật tỷ giá một currency sẽ áp dụng ngay cho toàn bộ brand dùng currency đó ở lần đọc tiếp theo.

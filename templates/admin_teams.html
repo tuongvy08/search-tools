@@ -8,9 +8,11 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_teams.css', v='20260908c2') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260909c4') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='ui_system.css', v='20261002ui1') }}">
 </head>
-<body class="admin-page">
+<body class="admin-page ui-v2">
   {% include "_user_nav.html" %}
+<main class="admin-shell">
 
   {% macro brand_picker(picker_id, checked_brands) %}
   {#
@@ -51,7 +53,7 @@
   </div>
   {% endmacro %}
 
-  <div class="page-heading"><div><p class="eyebrow">QUẢN TRỊ TRUY CẬP</p>
+  <div class="page-heading"><div>
     <h1>Team & quyền truy cập</h1>
     <p class="muted">Cấu hình chung cho mọi thành viên trong team.</p></div>
     <a class="secondary-link" href="{{ url_for('admin_users') }}"><i class="fas fa-user-cog" aria-hidden="true"></i> Quản lý thành viên</a>
@@ -398,5 +400,6 @@
       });
     })();
   </script>
+</main>
 </body>
 </html>

@@ -36,6 +36,15 @@ body.ui-v2 {
   --admin-canvas: var(--ui-canvas);
   --admin-primary: var(--ui-accent);
   --admin-danger: var(--ui-danger);
+  /* ...and the per-page palettes older pages declare on :root (shadowed here for descendants). */
+  --primary: var(--ui-accent);
+  --primary-hover: var(--ui-accent-hover);
+  --blue: var(--ui-accent);
+  --border-focus: var(--ui-accent);
+  --ink: var(--ui-ink);
+  --muted: var(--ui-muted);
+  --line: var(--ui-line);
+  --border: var(--ui-line);
   background: var(--ui-canvas);
   color: var(--ui-ink);
   font-family: "Be Vietnam Pro", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -48,7 +57,9 @@ body.ui-v2 {
 body.ui-v2 { margin: 0; padding: 0; max-width: none; }
 :where(body.ui-v2) .admin-shell { max-width: 1320px; margin: 0 auto; padding: 28px 32px 72px; box-sizing: border-box; }
 :where(body.ui-v2) .admin-shell-narrow { max-width: 960px; }
-@media (max-width: 700px) { :where(body.ui-v2) .admin-shell { padding: 18px 16px 56px; } }
+/* Older pages wrap content in .wrap: give it the same frame. */
+:where(body.ui-v2) .wrap { max-width: 1320px; margin: 0 auto; padding: 28px 32px 72px; box-sizing: border-box; }
+@media (max-width: 700px) { :where(body.ui-v2) .admin-shell, :where(body.ui-v2) .wrap { padding: 18px 16px 56px; } }
 
 /* Type */
 body.ui-v2 h1 { color: var(--ui-ink); font-size: 30px; line-height: 1.15; font-weight: 700; letter-spacing: -0.01em; text-align: left; }
@@ -57,8 +68,8 @@ body.ui-v2 h3 { color: var(--ui-ink); font-size: 15.5px; font-weight: 650; }
 body.ui-v2 .muted, body.ui-v2 .small, body.ui-v2 .hint, body.ui-v2 .sub, body.ui-v2 .cell-meta { color: var(--ui-muted); }
 body.ui-v2 .eyebrow { text-transform: none; letter-spacing: 0; font-size: 13.5px; font-weight: 600; color: var(--ui-muted); }
 body.ui-v2 code, body.ui-v2 kbd, body.ui-v2 .mono { font-family: var(--ui-mono); font-variant-numeric: tabular-nums; }
-body.ui-v2 main a:not(.button):not(.btn):not(.ui-btn) { color: var(--ui-accent); text-underline-offset: 3px; }
-body.ui-v2 main a:not(.button):not(.btn):not(.ui-btn):hover { color: var(--ui-accent-hover); }
+body.ui-v2 :is(main, .wrap) a:not(.button):not(.btn):not(.ui-btn) { color: var(--ui-accent); text-underline-offset: 3px; }
+body.ui-v2 :is(main, .wrap) a:not(.button):not(.btn):not(.ui-btn):hover { color: var(--ui-accent-hover); }
 body.ui-v2 :focus-visible { outline: 3px solid var(--ui-focus); outline-offset: 2px; }
 body.ui-v2 .back-link { color: var(--ui-muted); font-size: 14px; text-decoration: none; }
 body.ui-v2 .back-link:hover { color: var(--ui-ink); text-decoration: underline; }
@@ -69,16 +80,16 @@ body.ui-v2 .card, body.ui-v2 .panel, body.ui-v2 .admin-card {
 }
 
 /* Buttons */
-body.ui-v2 main button:not(.sq-shell-link):not([class*="sq-shell"]),
+body.ui-v2 :is(main, .wrap) button:not(.sq-shell-link):not([class*="sq-shell"]),
 body.ui-v2 .button, body.ui-v2 .btn, body.ui-v2 .ui-btn {
   font-family: inherit; font-weight: 600; border-radius: 8px;
 }
 body.ui-v2 .button.primary, body.ui-v2 .btn-primary, body.ui-v2 button.primary, body.ui-v2 .ui-btn,
-body.ui-v2 main button[type=submit]:not(.secondary):not(.danger):not(.btn-secondary):not(.link):not(.gu-filter-btn) {
+body.ui-v2 :is(main, .wrap) button[type=submit]:not(.secondary):not(.danger):not(.btn-secondary):not(.link):not(.gu-filter-btn) {
   background: var(--ui-accent); border: 1px solid var(--ui-accent); color: #fff;
 }
 body.ui-v2 .button.primary:hover, body.ui-v2 .btn-primary:hover, body.ui-v2 button.primary:hover, body.ui-v2 .ui-btn:hover,
-body.ui-v2 main button[type=submit]:not(.secondary):not(.danger):not(.btn-secondary):not(.link):not(.gu-filter-btn):hover {
+body.ui-v2 :is(main, .wrap) button[type=submit]:not(.secondary):not(.danger):not(.btn-secondary):not(.link):not(.gu-filter-btn):hover {
   background: var(--ui-accent-hover); border-color: var(--ui-accent-hover); color: #fff;
 }
 body.ui-v2 .button.secondary, body.ui-v2 .btn-secondary, body.ui-v2 button.secondary, body.ui-v2 .ui-btn.secondary {
@@ -92,29 +103,40 @@ body.ui-v2 .button.danger:hover, body.ui-v2 .btn-danger:hover, body.ui-v2 button
 body.ui-v2 button:disabled, body.ui-v2 .button[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
 
 /* Form controls */
-body.ui-v2 main input:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=file]):not([type=range]),
-body.ui-v2 main select, body.ui-v2 main textarea {
+body.ui-v2 :is(main, .wrap) input:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=file]):not([type=range]),
+body.ui-v2 :is(main, .wrap) select, body.ui-v2 :is(main, .wrap) textarea {
   border: 1px solid var(--ui-line-strong); border-radius: 8px; background: var(--ui-paper);
   color: var(--ui-ink); font-family: inherit; font-size: 14.5px;
 }
-body.ui-v2 main input:focus, body.ui-v2 main select:focus, body.ui-v2 main textarea:focus {
+body.ui-v2 :is(main, .wrap) input:focus, body.ui-v2 :is(main, .wrap) select:focus, body.ui-v2 :is(main, .wrap) textarea:focus {
   outline: none; border-color: var(--ui-accent); box-shadow: 0 0 0 3px var(--ui-accent-soft);
 }
-body.ui-v2 main input[readonly], body.ui-v2 main input:disabled, body.ui-v2 main select:disabled { background: var(--ui-paper-2); color: var(--ui-ink-2); }
-body.ui-v2 main input[type=checkbox], body.ui-v2 main input[type=radio] { accent-color: var(--ui-accent); }
+body.ui-v2 :is(main, .wrap) input[readonly], body.ui-v2 :is(main, .wrap) input:disabled, body.ui-v2 :is(main, .wrap) select:disabled { background: var(--ui-paper-2); color: var(--ui-ink-2); }
+body.ui-v2 :is(main, .wrap) input[type=checkbox], body.ui-v2 :is(main, .wrap) input[type=radio] { accent-color: var(--ui-accent); }
 body.ui-v2 label, body.ui-v2 .lbl, body.ui-v2 .field > span:first-child { color: var(--ui-ink-2); }
 
 /* Tables */
 body.ui-v2 .table-wrap, body.ui-v2 .table-scroll, body.ui-v2 .gu-table-scroll, body.ui-v2 .lh-table-scroll {
   border: 1px solid var(--ui-line); border-radius: 10px; background: var(--ui-paper);
 }
-body.ui-v2 main table { background: var(--ui-paper); border-collapse: collapse; }
-body.ui-v2 main thead th {
+body.ui-v2 :is(main, .wrap) table { background: var(--ui-paper); border-collapse: collapse; }
+body.ui-v2 :is(main, .wrap) thead th {
   background: var(--ui-paper-2); color: var(--ui-muted); font-size: 13px; font-weight: 600;
   letter-spacing: 0; text-transform: none;
 }
-body.ui-v2 main th, body.ui-v2 main td { border-color: var(--ui-line); }
-body.ui-v2 main tbody tr:hover { background: #f8fafb; }
+body.ui-v2 :is(main, .wrap) th, body.ui-v2 :is(main, .wrap) td { border-color: var(--ui-line); }
+body.ui-v2 :is(main, .wrap) tbody tr:hover { background: #f8fafb; }
+
+/* Selected filters, toggles and emphasis that older pages hard-code in blue. */
+body.ui-v2 .gu-filter-btn[aria-pressed="true"], body.ui-v2 .filters a.active {
+  background: var(--ui-accent); border-color: var(--ui-accent); color: #fff;
+}
+body.ui-v2 .switch input:checked + .slider { background: var(--ui-accent); }
+body.ui-v2 .flow strong { color: var(--ui-accent-hover); }
+body.ui-v2 .flow { background: var(--ui-accent-soft); border-color: #b9dcdc; }
+
+/* Small labels some pages set in tracked capitals: sentence case like the rest. */
+body.ui-v2 .meta-label, body.ui-v2 .field label, body.ui-v2 .field span.lbl { text-transform: none; letter-spacing: 0; }
 
 /* Step markers (real sequences only) */
 body.ui-v2 .step-mark { background: var(--ui-accent-soft); color: var(--ui-accent); }

@@ -6,6 +6,7 @@
   <title>Nhập dữ liệu — Admin</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20261002ui1') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260909c4') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='ui_system.css', v='20261002ui1') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
   <style>
     :root {
@@ -77,8 +78,8 @@
       width: 12px;
       height: 12px;
       margin-right: 6px;
-      border: 2px solid #93c5fd;
-      border-top-color: #2563eb;
+      border: 2px solid #9fcfcf;
+      border-top-color: #0b6e73;
       border-radius: 50%;
       vertical-align: -2px;
       animation: spin 0.7s linear infinite;
@@ -196,8 +197,8 @@
     .btn-ghost:hover { background: #f8fafc; color: var(--text); }
 
     .preview-card {
-      border-color: #93c5fd;
-      background: linear-gradient(180deg, #fff 0%, #f8fafc 100%);
+      border-color: #9fcfcf;
+      background: #ffffff;
     }
     .preview-meta {
       font-size: 0.9rem;
@@ -308,7 +309,7 @@
     }
   </style>
 </head>
-<body class="admin-page">
+<body class="admin-page ui-v2">
   {% include "_user_nav.html" %}
   <div class="wrap">
     <header>

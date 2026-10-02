@@ -47,9 +47,11 @@
     }
   </style>
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css', v='20260909c4') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='ui_system.css', v='20261002ui1') }}">
 </head>
-<body class="admin-page">
+<body class="admin-page ui-v2">
   {% include "_user_nav.html" %}
+<main class="admin-shell">
 
   <h1 style="margin-top:0;">Quản lý Users</h1>
   <p class="muted">
@@ -455,5 +457,6 @@
       });
     })();
   </script>
+</main>
 </body>
 </html>

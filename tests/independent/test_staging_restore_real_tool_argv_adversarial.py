@@ -539,6 +539,7 @@ class RealToolArgvTests(unittest.TestCase):
                             r"ambiguous option|doesn't allow an argument|invalid .* provider|"
                             r"invalid locale provider", re.I)
         checked = 0
+        tools = []
         for argv, _ in host.calls:
             if argv[0] != "sudo":
                 continue
@@ -546,6 +547,7 @@ class RealToolArgvTests(unittest.TestCase):
             rest = list(rest)
             rest[rest.index("-h") + 1] = "/nonexistent-socket-dir-verifier"
             tool = os.path.basename(binary)
+            tools.append(tool)
             cmd = [DOCKER, "run", "--rm", "--network", "none", "--entrypoint", "env", IMAGE, "-i"]
             cmd += ["%s=%s" % kv for kv in env.items()] + [tool] + rest
             result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
@@ -553,7 +555,9 @@ class RealToolArgvTests(unittest.TestCase):
             self.assertIn("nonexistent-socket-dir-verifier", result.stderr)  # got as far as connecting
             self.assertNotEqual(result.returncode, 0)
             checked += 1
-        self.assertGreaterEqual(checked, 8)
+        # S1.1 builds exactly four PostgreSQL argv: read source, createdb, write label/ACL, read temp.
+        self.assertEqual(checked, 4)
+        self.assertEqual(tools, ["psql", "createdb", "psql", "psql"])
 
     @unittest.skipUnless(docker_image_available(), "docker image postgres:16-alpine not available")
     def test_real_createdb_rejects_the_original_failing_option(self):

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Báo giá → Đơn hàng — Search Tools</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260926d8') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20261002ui1') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous">
+  <link rel="stylesheet" href="{{ url_for('static', filename='ui_system.css', v='20261002ui2') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='quote_to_order.css', v='20261004q4') }}">
+  <script defer src="{{ url_for('static', filename='quote_to_order.js', v='20261004q4') }}"></script>
+</head>
+<body class="admin-page ui-v2 qto-page">
+{% include '_user_nav.html' %}
+<main class="wrap qto-shell">
+  <header class="qto-header">
+    <h1>Báo giá → Đơn hàng</h1>
+    <p class="lead">Tải một hoặc nhiều file báo giá (.xlsx), tick chọn các mặt hàng khách đặt, sửa số lượng hoặc thông tin ngay trên bảng,
+      rồi tải về file “bảng hàng hóa” để import vào phần mềm Base. File báo giá không được lưu trên hệ thống.</p>
+  </header>
+
+  <div class="qto-layout">
+    <section class="card qto-card" aria-labelledby="qtoUploadTitle">
+      <div class="section-heading"><div><h2 id="qtoUploadTitle">Tải file báo giá</h2></div><span class="step-mark" aria-hidden="true">01</span></div>
+      <label class="file-zone" id="qtoDrop" for="qtoFile">
+        <strong>Chọn file báo giá</strong>
+        <span>.xlsx · tối đa {{ config.limits.maxFiles }} file, mỗi file không quá {{ (config.limits.maxFileBytes // 1048576) }} MB · hoặc kéo thả vào đây</span>
+        <input type="file" id="qtoFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple>
+      </label>
+      <div id="qtoMessages" class="qto-messages" role="status" aria-live="polite"></div>
+      <div id="qtoFiles" class="qto-files"></div>
+    </section>
+
+    <section class="card qto-card qto-guide" aria-labelledby="qtoGuideTitle">
+      <div class="section-heading"><div><h2 id="qtoGuideTitle">Lưu ý nhanh</h2></div></div>
+      <ul class="check-list">
+        <li>Dòng tiêu đề của báo giá mặc định ở dòng 16. Nếu file khác (ví dụ dòng 11 hoặc 13), hệ thống vẫn tìm được nhưng sẽ cảnh báo để bạn kiểm tra; mỗi file có số dòng tiêu đề riêng.</li>
+        <li>Hệ thống tự nhận diện cột theo tên cột. Cột nào chưa nhận ra, hãy chọn lại ở mục “Ghép cột” của từng file.</li>
+        <li>Các cột có (*) là bắt buộc. Loại hàng chỉ có “Nhập khẩu” hoặc “Mua trong nước”.</li>
+        <li>Đơn giá lấy từ cột “Đơn giá có VAT”. Thành tiền = Số lượng × Đơn giá.</li>
+        <li>“Giá bán tối thiểu” để trống (hoặc báo giá không có cột này) thì khi xuất sẽ bằng Đơn giá.</li>
+        <li>“Ghi chú nội bộ” của báo giá không được đưa sang file đơn hàng.</li>
+        <li>Nút tải về chỉ mở khi mọi dòng đã chọn đủ thông tin và số lượng lớn hơn 0.</li>
+      </ul>
+    </section>
+  </div>
+
+  <section class="card qto-card" id="qtoListCard" aria-labelledby="qtoListTitle" hidden>
+    <div class="section-heading"><div><h2 id="qtoListTitle">Chọn hàng và chỉnh số liệu</h2></div><span class="step-mark" aria-hidden="true">02</span></div>
+    <div class="qto-toolbar">
+      <input type="search" id="qtoFilter" placeholder="Lọc theo tên / code / hãng / báo giá nguồn…" aria-label="Lọc danh sách hàng" size="38">
+      <button type="button" class="secondary" id="qtoSelectVisible">Chọn các dòng đang hiện</button>
+      <button type="button" class="secondary" id="qtoSelectNone">Bỏ chọn tất cả</button>
+      <button type="button" class="secondary" id="qtoAddRow"><i class="fas fa-plus" aria-hidden="true"></i> Thêm dòng trống</button>
+    </div>
+    <div class="qto-table-wrap table-wrap" id="qtoTableWrap">
+      <table class="qto-table" id="qtoTable">
+        <thead id="qtoHead"></thead>
+        <tbody id="qtoBody"></tbody>
+      </table>
+    </div>
+    <div class="qto-footer">
+      <div class="qto-summary" id="qtoSummary" aria-live="polite"></div>
+      <div class="qto-actions">
+        <button type="button" id="qtoDownload"><i class="fas fa-download" aria-hidden="true"></i> Tải file đơn hàng</button>
+      </div>
+    </div>
+    <p class="qto-blockers" id="qtoBlockers" role="alert"></p>
+  </section>
+</main>
+<script id="qtoConfig" type="application/json">{{ config|tojson }}</script>
+<script id="qtoCsrf" type="application/json">{{ csrf_token()|tojson }}</script>
+</body>
+</html>

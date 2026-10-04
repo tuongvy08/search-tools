@@ -282,3 +282,7 @@ Phase mới: người dùng đã duyệt spec với điều chỉnh ngày 2026-0
 PO đã xác nhận UAT browser local 8/8 và polish hiển thị 4/4 đạt. Tests và
 verifier phạm vi ảnh hưởng đã đạt. Bước kế tiếp: review PR; merge và deploy
 cần phê duyệt riêng, chưa thực hiện. Không đổi nghiệp vụ.
+
+## Báo giá → Đơn hàng (PO chốt 2026-10-04)
+
+Menu cho team có quyền Quick Quote: upload nhiều file báo giá `.xlsx`, tick chọn và sửa hàng, tải file "bảng hàng hóa" để import vào phần mềm Base. Đơn giá lấy từ cột "Đơn giá có VAT"; Thành tiền = SL × Đơn giá; giá mua dự kiến = "Giá nhập chưa VAT"; "Ghi chú nội bộ" không đưa sang; Loại hàng ∈ {Nhập khẩu, Mua trong nước}; chặn tải khi dòng đã chọn thiếu trường bắt buộc. Chi tiết và điểm còn mở: [docs/quote-to-order/SCOPE.md](quote-to-order/SCOPE.md).

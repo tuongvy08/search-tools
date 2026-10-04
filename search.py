@@ -33,6 +33,7 @@ import admin_google_users
 import admin_lifecycle
 import admin_login_history
 import admin_teams
+import quote_to_order
 import auth_google
 import session_security
 import admin_permissions
@@ -145,6 +146,10 @@ app.register_blueprint(admin_login_history.admin_login_history_bp)
 # that module's docstring.
 app.register_blueprint(admin_teams.admin_teams_bp)
 app.register_blueprint(admin_lifecycle.admin_lifecycle_bp)
+
+# Menu "Báo giá -> Đơn hàng": upload báo giá (.xlsx), chọn/sửa dòng, tải file bảng hàng hóa.
+# Dùng quyền QUICK_QUOTE; không lưu file phía server. Xem docstring quote_to_order.py.
+app.register_blueprint(quote_to_order.bp)
 
 
 @app.after_request

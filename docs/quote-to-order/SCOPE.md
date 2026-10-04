@@ -32,4 +32,4 @@ Branch `feat/quote-to-order` (từ `ops/production-ui-release`), mức MEDIUM, *
 1. Công thức thật của ô "Đơn giá có VAT" (hiện tạm: giá chưa VAT × (1 + thuế), làm tròn đồng) — cần file báo giá thật đã điền để đối chiếu.
 2. "Đơn giá mua dự kiến" đang giữ nguyên số chưa VAT — nên thử import một file vào phần mềm để xác nhận.
 3. Nhớ ghép cột chung cho cả team (lưu DB) chưa làm; nếu cần là việc riêng, cần duyệt (đổi cơ sở dữ liệu).
-4. Chưa deploy staging/production.
+4. **Staging (`ssh staging`) — 2026-10-04:** commit `ee56710` từ `900a5f9`, gói bundle `search-tools-q2o-900a5f9-to-ee56710.bundle` SHA256 `8dc76cfb7fb80be9212e6fea0a3aa9d24421d37d852b6941dadca029f3dc1995`. Gate: HEAD cũ `900a5f9`, working tree sạch, bundle verify OK, FETCH_HEAD đúng; checkout detach `/srv/search-tools`; chỉ restart `search-tools-staging.service`. Smoke: web/worker active, `/login` 200, `quote_to_order.css/js` 200, log 0 lỗi; trang `/quote-to-order/` khi chưa đăng nhập từ IP ngoài văn phòng trả 403 giống Quick Quote (IP allowlist). Quay lại: `checkout --detach 900a5f9… && restart`. Chưa production.

@@ -15,7 +15,7 @@
   var COLUMNS = [
     ['name', 'Tên hàng', 'wide'], ['code', 'Code', ''], ['cas', 'Cas', ''], ['brand', 'Hãng', ''], ['unit', 'ĐVT', 'narrow'],
     ['qty', 'Số lượng', 'num'], ['price', 'Đơn giá (có VAT)', 'num'], ['amount', 'Thành tiền', 'num readonly'],
-    ['cost', 'Giá mua dự kiến', 'num'], ['type', 'Loại hàng', ''], ['note_goods', 'Ghi chú về hàng hóa', 'wide'],
+    ['cost', 'Giá mua dự kiến', 'num'], ['type', 'Loại hàng', ''], ['warehouse', 'Kho yêu cầu', ''], ['note_goods', 'Ghi chú về hàng hóa', 'wide'],
     ['note_other', 'Ghi chú khác', 'wide'], ['min_price', 'Giá bán tối thiểu', 'num']
   ];
 
@@ -101,6 +101,7 @@
     if (!entry || !entry.titles) return null;
     var mapping = {};
     FIELDS.forEach(function (f) {
+      if (!(f.key in entry.titles)) { mapping[f.key] = meta.mapping[f.key]; return; }   // trường thêm sau khi lưu: giữ tự nhận diện
       var title = entry.titles[f.key];
       var col = title == null ? null : meta.columns.filter(function (c) { return c.title === title; })[0];
       mapping[f.key] = col ? col.index : null;
@@ -360,7 +361,7 @@
         if (f.required && n == null) issues.push({ key: f.key, text: 'Thiếu ' + f.label });
       } else if (f.kind === 'choice') {
         if (raw === '') { if (f.required) issues.push({ key: f.key, text: 'Thiếu ' + f.label }); }
-        else if (CONFIG.typeChoices.indexOf(raw) < 0) issues.push({ key: f.key, text: f.label + ' không hợp lệ' });
+        else if (f.choices.indexOf(raw) < 0) issues.push({ key: f.key, text: f.label + ' không hợp lệ' });
       } else if (f.required && raw === '') {
         issues.push({ key: f.key, text: 'Thiếu ' + f.label });
       }
@@ -421,11 +422,11 @@
       var td = el('td', { class: 'qto-cell qto-col-' + key, 'data-col': key });
       if (key === 'amount') {
         td.appendChild(el('span', { class: 'qto-amount' }));
-      } else if (key === 'type') {
-        var select = el('select', { 'data-key': key, 'aria-label': 'Loại hàng dòng ' + (index + 1) });
+      } else if (FIELD_BY_KEY[key] && FIELD_BY_KEY[key].kind === 'choice') {
+        var select = el('select', { 'data-key': key, 'aria-label': c[1] + ' dòng ' + (index + 1) });
         select.appendChild(el('option', { value: '', text: '— chọn —' }));
-        CONFIG.typeChoices.forEach(function (t) { select.appendChild(el('option', { value: t, text: t })); });
-        select.value = row.raw.type;
+        FIELD_BY_KEY[key].choices.forEach(function (t) { select.appendChild(el('option', { value: t, text: t })); });
+        select.value = row.raw[key];
         select.addEventListener('change', function () { onEdit(row, key, select.value, tr); });
         td.appendChild(select);
       } else {

@@ -7,6 +7,7 @@ Branch `feat/quote-to-order` (từ `ops/production-ui-release`), mức MEDIUM, *
 - Upload **một hoặc nhiều** file báo giá `.xlsx` → gộp **một danh sách** (có cột "Báo giá nguồn") → một file đơn hàng. Trùng Code giữa các báo giá: giữ hai dòng riêng, cảnh báo "Trùng Code".
 - Quyền dùng: team có `QUICK_QUOTE` (đã kèm `VIEW_PRICE`). Không thêm quyền mới, không sửa `team_permissions.py`.
 - Loại hàng chỉ có `Nhập khẩu` | `Mua trong nước`.
+- **Kho yêu cầu (*)** (PO thêm 2026-10-05, cột cuối của mẫu Base): chỉ có `Hà Nội` | `Hồ Chí Minh`; bắt buộc; tự nhận diện cột "Kho yêu cầu"/"Kho"/"Kho hàng" trong báo giá (chấp nhận viết tắt HN/HCM, không dấu); không có cột hoặc giá trị lạ thì để trống và người dùng chọn trên bảng. Mẫu `assets/quote_to_order/bang-hang-hoa_template.xlsx` thay bằng mẫu 14 cột mới. **Chưa release**: production đang chạy `3ceb295` (13 cột).
 - Giá: `Đơn giá (*)` ← **"Đơn giá có VAT"**; `Thành tiền` = Số lượng × Đơn giá (ghi giá trị, không ghi công thức); `Đơn giá mua dự kiến` ← "Giá nhập chưa VAT" giữ nguyên số; `Giá bán tối thiểu`: nếu báo giá không có cột này, hoặc ô trống/0 thì **bằng Đơn giá** (đã gồm VAT; PO chốt 2026-10-04), có giá trị riêng thì giữ nguyên; ghép tay được và người dùng sửa được trên bảng.
 - "Ghi chú hàng hóa" và "Ghi chú khác" được đưa sang, người dùng sửa/xóa/gõ thêm trước khi xuất. "Ghi chú nội bộ" không bao giờ đưa sang.
 - Bảng **sửa từng ô như Excel**, thêm dòng trống, xóa dòng. Số lượng đặt có thể khác báo giá (cho thập phân, cho lớn hơn).

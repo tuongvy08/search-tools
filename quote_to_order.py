@@ -57,6 +57,14 @@ DEFAULT_HEADER_ROW = 16                 # PO: dòng tiêu đề mặc định c�
 DEFAULT_VAT_RATE = Decimal("0.08")
 DEFAULT_SHEET = "BG"
 TYPE_CHOICES = ("Nhập khẩu", "Mua trong nước")
+WAREHOUSE_CHOICES = ("Hà Nội", "Hồ Chí Minh")
+# Cách viết khác của cùng một giá trị lựa chọn (đã chuẩn hóa) -> giá trị chuẩn của Base.
+CHOICE_SYNONYMS = {
+    "hn": "Hà Nội", "ha noi": "Hà Nội", "hanoi": "Hà Nội",
+    "hcm": "Hồ Chí Minh", "tphcm": "Hồ Chí Minh", "tp hcm": "Hồ Chí Minh", "tp.hcm": "Hồ Chí Minh",
+    "ho chi minh": "Hồ Chí Minh", "hochiminh": "Hồ Chí Minh",
+    "nhap khau": "Nhập khẩu", "mua trong nuoc": "Mua trong nước",
+}
 
 # ---------------------------------------------------------------------------
 # CẤU HÌNH MAPPING – chỗ duy nhất cần sửa nếu form thay đổi
@@ -74,6 +82,7 @@ QUOTE_HEADERS = {
     "price": ("đơn giá có vat (vnđ)", "đơn giá có vat", "đơn giá gồm vat (vnđ)", "đơn giá gồm vat"),
     "cost": ("giá nhập chưa vat", "giá nhập", "đơn giá mua"),
     "type": ("loại hàng", "loại"),
+    "warehouse": ("kho yêu cầu", "kho", "kho hàng", "kho xuất"),
     "note_goods": ("ghi chú hàng hóa", "ghi chú về hàng hóa"),
     "note_other": ("ghi chú khác",),
     # Form báo giá không có cột này: để trống thì khi xuất sẽ bằng Đơn giá (xem build_order_file).
@@ -103,6 +112,7 @@ ORDER_COLUMNS = {
     "Loại hàng (*)": "type",
     "Ghi chú về hàng hóa": "note_goods",
     "Ghi chú khác": "note_other",
+    "Kho yêu cầu (*)": "warehouse",
 }
 
 # kind: text | num | choice. Trường mappable=False không cho ghép cột.
@@ -115,7 +125,8 @@ FIELD_META = {
     "qty": {"label": "Số lượng", "required": True, "kind": "num"},
     "price": {"label": "Đơn giá", "required": True, "kind": "num"},
     "cost": {"label": "Đơn giá mua dự kiến", "required": False, "kind": "num"},
-    "type": {"label": "Loại hàng", "required": True, "kind": "choice"},
+    "type": {"label": "Loại hàng", "required": True, "kind": "choice", "choices": TYPE_CHOICES},
+    "warehouse": {"label": "Kho yêu cầu", "required": True, "kind": "choice", "choices": WAREHOUSE_CHOICES},
     "note_goods": {"label": "Ghi chú về hàng hóa", "required": False, "kind": "text", "max_len": 2000},
     "note_other": {"label": "Ghi chú khác", "required": False, "kind": "text", "max_len": 2000},
     "min_price": {"label": "Giá bán tối thiểu", "required": False, "kind": "num"},
@@ -217,12 +228,18 @@ def calc_price_ex_vat(cost: Decimal, margin: Decimal) -> Decimal | None:
     return excel_roundup(cost / (Decimal(1) - margin), -4)
 
 
-def normalize_type(value) -> str:
+def normalize_choice(value, choices) -> str:
+    """Giá trị lựa chọn chuẩn của Base, hoặc "" nếu không nhận ra."""
     key = norm_header(value)
-    for choice in TYPE_CHOICES:
+    for choice in choices:
         if key == norm_header(choice):
             return choice
-    return ""
+    synonym = CHOICE_SYNONYMS.get(key, "")
+    return synonym if synonym in choices else ""
+
+
+def normalize_type(value) -> str:
+    return normalize_choice(value, TYPE_CHOICES)
 
 
 # ---------------------------------------------------------------------------
@@ -417,7 +434,9 @@ def parse_quote(raw: bytes, *, sheet: str | None = None, header_row: int | None 
             if key == "min_price" and value is not None and value <= 0:
                 value = None                        # ô có nhưng chưa có giá trị -> coi như trống
             item[key] = py_number(value) if value is not None else None
-        item["type"] = normalize_type(cell(row, chosen["type"]))
+        for key, meta in FIELD_META.items():
+            if meta["kind"] == "choice":
+                item[key] = normalize_choice(cell(row, chosen[key]), meta["choices"])
         item["source_row"] = offset
         items.append(item)
         if len(items) > MAX_ROWS_PER_FILE:
@@ -462,7 +481,7 @@ def clean_order_rows(rows) -> tuple[list[dict], list[dict]]:
                     row[key] = number
             else:
                 row[key] = clean_text(value)
-                if row[key] and row[key] not in TYPE_CHOICES:
+                if row[key] and row[key] not in meta["choices"]:
                     invalid.append(label)
         for key, meta in FIELD_META.items():
             if not meta["required"] or meta["label"] in invalid:
@@ -549,9 +568,9 @@ def index():
     if denied is not None:
         return denied
     config = {
-        "fields": [{"key": key, **{k: meta[k] for k in ("label", "required", "kind")}}
+        "fields": [{"key": key, **{k: meta[k] for k in ("label", "required", "kind")},
+                    **({"choices": list(meta["choices"])} if "choices" in meta else {})}
                    for key, meta in FIELD_META.items()],
-        "typeChoices": list(TYPE_CHOICES),
         "limits": {"maxFiles": MAX_FILES, "maxRows": MAX_ORDER_ROWS, "maxFileBytes": MAX_XLSX_BYTES},
         "urls": {"parse": url_for("quote_to_order.parse"), "export": url_for("quote_to_order.export")},
     }

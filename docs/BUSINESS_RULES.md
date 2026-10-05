@@ -285,4 +285,4 @@ cần phê duyệt riêng, chưa thực hiện. Không đổi nghiệp vụ.
 
 ## Báo giá → Đơn hàng (PO chốt 2026-10-04)
 
-Menu cho team có quyền Quick Quote: upload nhiều file báo giá `.xlsx`, tick chọn và sửa hàng, tải file "bảng hàng hóa" để import vào phần mềm Base. Đơn giá lấy từ cột "Đơn giá có VAT"; Thành tiền = SL × Đơn giá; giá mua dự kiến = "Giá nhập chưa VAT"; "Ghi chú nội bộ" không đưa sang; Loại hàng ∈ {Nhập khẩu, Mua trong nước}; chặn tải khi dòng đã chọn thiếu trường bắt buộc. Chi tiết và điểm còn mở: [docs/quote-to-order/SCOPE.md](quote-to-order/SCOPE.md).
+Menu cho team có quyền Quick Quote: upload nhiều file báo giá `.xlsx`, tick chọn và sửa hàng, tải file "bảng hàng hóa" để import vào phần mềm Base. Đơn giá lấy từ cột "Đơn giá có VAT"; Thành tiền = SL × Đơn giá; giá mua dự kiến = "Giá nhập chưa VAT"; "Ghi chú nội bộ" không đưa sang; Loại hàng ∈ {Nhập khẩu, Mua trong nước}; Kho yêu cầu ∈ {Hà Nội, Hồ Chí Minh} (bắt buộc, thêm 2026-10-05); chặn tải khi dòng đã chọn thiếu trường bắt buộc. Chi tiết và điểm còn mở: [docs/quote-to-order/SCOPE.md](quote-to-order/SCOPE.md).

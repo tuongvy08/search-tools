@@ -23,7 +23,7 @@ FORM_HEADERS = [
     "TT", "Tên hàng", "Code", "Cas", "Hãng", "Đơn vị tính", "Số lượng", "Đơn giá có VAT (VNĐ)",
     "Đơn giá chưa VAT (VNĐ)", "Thành tiền gồm VAT (VNĐ)", "Thời gian đặt hàng", "Đơn giá trước giảm (Nếu có)",
     "Ghi chú hàng hóa", "Ghi chú khác", "Ghi chú nội bộ", "Phụ Lục", "Giá bán chưa VAT", "%LN",
-    "Giá nhập chưa VAT", "Loại Hàng",
+    "Giá nhập chưa VAT", "Loại Hàng", "Kho yêu cầu",
 ]
 
 
@@ -44,6 +44,7 @@ def make_quote(items, *, header_row=10, formulas=True, cached=None, footer=("T�
         mapping = {"name": "Tên hàng", "code": "Code", "cas": "Cas", "brand": "Hãng", "unit": "Đơn vị tính",
                    "qty": "Số lượng", "note_goods": "Ghi chú hàng hóa", "note_other": "Ghi chú khác",
                    "internal": "Ghi chú nội bộ", "cost": "Giá nhập chưa VAT", "margin": "%LN", "type": "Loại Hàng",
+                   "warehouse": "Kho yêu cầu",
                    "phu_luc": "Phụ Lục"}
         for key, title in mapping.items():
             if key in item and title in pos:
@@ -91,7 +92,7 @@ def add_cached_values(raw, values):
 
 
 ITEM = dict(name="Benzene", code="M-502-01N", cas="71-43-2", brand="AccuStandard", unit="1g", qty=3,
-            cost=8500000, margin=0.15, type="Nhập khẩu", note_goods="HSD 12 tháng", note_other="Có phép",
+            cost=8500000, margin=0.15, type="Nhập khẩu", warehouse="Hà Nội", note_goods="HSD 12 tháng", note_other="Có phép",
             internal="BÍ MẬT NỘI BỘ", phu_luc="PL-1")
 
 
@@ -227,6 +228,20 @@ class ParseQuoteTests(unittest.TestCase):
         item = q.parse_quote(raw, mapping={"price": cols["Đơn giá chưa VAT (VNĐ)"]})["items"][0]
         self.assertEqual(item["price"], 10000000)
 
+    def test_warehouse_column_is_detected_and_normalized(self):
+        items = [dict(ITEM, warehouse="Hà Nội"), dict(ITEM, warehouse="hồ chí minh"), dict(ITEM, warehouse="HCM"),
+                 dict(ITEM, warehouse="ha noi"), dict(ITEM, warehouse="Đà Nẵng"), dict(ITEM, warehouse=None)]
+        result = q.parse_quote(make_quote(items))
+        self.assertIsNotNone(result["auto_mapping"]["warehouse"])
+        self.assertEqual([i["warehouse"] for i in result["items"]],
+                         ["Hà Nội", "Hồ Chí Minh", "Hồ Chí Minh", "Hà Nội", "", ""])
+
+    def test_quote_without_warehouse_column_leaves_it_for_the_user(self):
+        headers = [h for h in FORM_HEADERS if h != "Kho yêu cầu"]
+        result = q.parse_quote(make_quote([ITEM], headers=headers))
+        self.assertIn("warehouse", result["unmapped_required"])
+        self.assertEqual(result["items"][0]["warehouse"], "")
+
     def test_code_and_cas_stay_text_and_types_are_normalized(self):
         items = [dict(name="A", code="00123", cas="64-17-5", brand="b", unit="g", qty=1, type="nhập khẩu"),
                  dict(name="B", code=456.0, cas="1-2-3", brand="b", unit="g", qty=1, type="mua trong nước"),
@@ -265,7 +280,7 @@ class ParseQuoteTests(unittest.TestCase):
 
 def valid_row(**overrides):
     row = dict(name="Benzene", code="M-502-01N", cas="71-43-2", brand="AccuStandard", unit="1g", qty=2,
-               price=10800000, cost=8500000, min_price=None, type="Nhập khẩu",
+               price=10800000, cost=8500000, min_price=None, type="Nhập khẩu", warehouse="Hà Nội",
                note_goods="HSD 12 tháng", note_other="Có phép")
     row.update(overrides)
     return row
@@ -316,6 +331,14 @@ class ExportTests(unittest.TestCase):
         self.assertEqual(q.parse_quote(raw)["auto_mapping"]["min_price"], cols["Giá bán tối thiểu"])
         self.assertIsNone(q.parse_quote(raw)["items"][0]["min_price"])
 
+    def test_warehouse_is_written_to_the_last_column(self):
+        wb = self.build([valid_row(warehouse="Hồ Chí Minh"), valid_row(warehouse="Hà Nội")])
+        ws = wb["Exported file"]
+        header = {c.value: c.column for c in ws[1]}
+        self.assertEqual(list(header)[-1], "Kho yêu cầu (*)")
+        self.assertEqual([ws.cell(r, header["Kho yêu cầu (*)"]).value for r in (2, 3)], ["Hồ Chí Minh", "Hà Nội"])
+        self.assertEqual(ws.cell(2, header["Kho yêu cầu (*)"]).data_type, "s")
+
     def test_text_starting_with_equals_is_not_a_formula(self):
         wb = self.build([valid_row(name="=1+1", note_other="@SUM(A1)")])
         cell = wb["Exported file"]["A2"]
@@ -342,11 +365,13 @@ class ExportTests(unittest.TestCase):
     def test_validation_flags_missing_and_invalid_fields(self):
         rows = [valid_row(), valid_row(name="", code=" "), valid_row(qty=0), valid_row(qty=None), valid_row(qty=-1),
                 valid_row(price=None), valid_row(type=""), valid_row(type="Khác"), valid_row(qty="abc"),
-                valid_row(unit="", brand="")]
+                valid_row(unit="", brand=""), valid_row(warehouse=""), valid_row(warehouse="Đà Nẵng")]
         clean, errors = q.clean_order_rows(rows)
         self.assertEqual(len(clean), 1)
         by_index = {e["index"]: e for e in errors}
-        self.assertEqual(sorted(by_index), list(range(1, 10)))
+        self.assertEqual(sorted(by_index), list(range(1, 12)))
+        self.assertIn("Kho yêu cầu", by_index[10]["missing"])
+        self.assertIn("Kho yêu cầu", by_index[11]["invalid"])
         self.assertEqual(by_index[1]["missing"], ["Tên hàng", "Code"])
         self.assertIn("Số lượng", by_index[2]["invalid"])
         self.assertIn("Số lượng", by_index[3]["missing"])

@@ -28,6 +28,10 @@ Không commit `.env`, password, token, API key, private key hoặc dữ liệu n
 
 `.gitignore` không bảo vệ file đã được theo dõi và không thay thế review diff. Khi phát hiện secret trong Git, báo người dùng mà không lặp lại giá trị; xác định phạm vi lộ và đề xuất thu hồi/thay secret. Thao tác trên secret production vẫn cần quyền phù hợp. Xóa khỏi bản hiện tại không xóa khỏi lịch sử; sửa lịch sử Git là thao tác riêng cần được phép.
 
+## Dịch vụ AI bên thứ ba (Codex/ChatGPT)
+
+Nội dung gửi cho Codex/ChatGPT rời khỏi máy và nằm ngoài kiểm soát của dự án. Chỉ gửi mã nguồn, diff, tài liệu, test và `.env.example`; không gửi `.env`, secret, nội dung database, dữ liệu khách hàng/giá thật, log chưa che hay thông tin hạ tầng production. Chạy Codex từ bản xuất sạch của Git ở chế độ chỉ-đọc, không chạy trong thư mục làm việc. Chi tiết: mục 12 của [quy trình](docs/DEVELOPMENT_WORKFLOW.md).
+
 ## Báo cáo bảo mật
 
 Search-tools chưa có kênh báo cáo bảo mật riêng. Nếu chia sẻ project cho người khác, chủ project cần bổ sung kênh riêng tư trước. Không đưa secret, dữ liệu nhạy cảm hoặc chi tiết khai thác vào issue công khai.

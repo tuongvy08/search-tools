@@ -133,6 +133,13 @@ Không đưa cho verifier: lịch sử hội thoại, kế hoạch sửa lỗi, 
 
 Verifier có quyền đọc toàn bộ source (read-only), bị cấm sửa application code, cấm truy cập production, cấm git push; chỉ được viết vào `specs/<task>/VERIFICATION_RESULT.md` và test độc lập của riêng nó nếu cần (`tests/independent/`). Với mỗi claim, verifier phải thử ít nhất một negative/adversarial case — một input hoặc trạng thái được nghĩ ra để cố làm implementation sai — không chỉ đọc lại test agent chính đã viết.
 
+### Chạy verifier trong Claude Code
+
+Claude Code không có file cấu hình quyền cho subagent như `.opencode/agent/verifier.md`, nên cách ly nằm ở lời gọi và ở bước kiểm tra sau:
+
+- Gọi một subagent mới (không dùng lại subagent cũ) với đúng các trường đã liệt kê ở trên; nội dung lời gọi bắt đầu bằng chỉ dẫn lấy từ `.opencode/agent/verifier.md` (cố chứng minh implementation sai, ≥ 1 adversarial case mỗi claim, phân loại FAIL, không đề xuất cách sửa, chỉ ghi vào `specs/<task>/VERIFICATION_RESULT.md` và `tests/independent/**`).
+- Ngay sau khi verifier xong, agent chính chạy `git status` và `git diff` và xác nhận verifier không chạm file nào ngoài hai đường dẫn được phép, không push, không chạm production. Nếu có file khác bị đổi, coi lần chạy là FAIL về quy trình: hoàn nguyên phần ngoài phạm vi (chỉ phần do verifier tạo, không đụng thay đổi có sẵn) và chạy lại verifier với ngữ cảnh sạch.
+
 ### Khi verifier FAIL
 
 Mỗi lần FAIL, verifier phân loại theo đúng một trong bốn loại và ghi vào `VERIFICATION_RESULT.md`:
@@ -163,6 +170,28 @@ Khi verifier PASS toàn bộ claim, agent chính trình bày theo đúng cấu t
 4. Có tình huống nghiệp vụ quan trọng nào chưa được test?
 5. Residual risk còn lại có chấp nhận được không?
 
-Với task HIGH nhạy cảm — database/migration, dữ liệu production, phân quyền — nên có thêm một lượt review độc lập bằng model của nhà cung cấp khác với agent chính (ví dụ người dùng gửi link PR hoặc branch cho Claude), sau khi verifier PASS và trước khi approve merge. Lý do: agent chính và verifier hiện cùng dòng model nên có thể cùng bỏ sót một chỗ. Lượt review này đối chiếu PR với `VERIFICATION.md`, không thay thế verifier hay 5 câu hỏi trên.
+Với task HIGH nhạy cảm — database/migration, dữ liệu production, phân quyền, ghi dữ liệu qua API — bắt buộc có thêm một lượt review độc lập bằng model của nhà cung cấp khác với agent chính (mặc định: Codex chỉ-đọc theo mục 12), sau khi verifier PASS và trước khi approve merge. Lý do: agent chính và verifier cùng dòng model nên có thể cùng bỏ sót một chỗ. Lượt review này đối chiếu diff với `VERIFICATION.md`, không thay thế verifier hay 5 câu hỏi trên. Khi Codex là bên triển khai thì verifier và lượt review chéo do Claude đảm nhiệm.
 
 Chỉ sau khi người dùng approve, task mới được báo READY FOR USER TEST hoặc DONE theo mục 7.
+
+## 12. Phối hợp Claude Code và Codex (ChatGPT)
+
+Mục đích: tận dụng hạn mức của cả hai nhà cung cấp và có người kiểm tra khác dòng model, mà không làm lộ dữ liệu hay để hai AI sửa chồng nhau. Codex CLI cài bằng Homebrew (`brew install --cask codex`), đăng nhập bằng tài khoản ChatGPT; không đặt API key OpenAI trong repo.
+
+### Vai trò
+
+- **Mặc định — Codex chỉ đọc:** review chéo diff, rà `VERIFICATION.md`, tìm lỗ hổng. Không sửa file, không chạy lệnh ghi. Claude Code là bên triển khai.
+- **Bàn giao khi hết hạn mức:** chỉ khi bên đang làm hết hạn mức mà bên kia còn, và chỉ với task LOW/MEDIUM, hoặc HIGH đã qua bước Plan và đã có `VERIFICATION.md` khóa. Codex (hoặc Claude) tiếp tục làm trên chính branch của task.
+- **Mỗi lúc chỉ một bên sửa code.** Bên đang làm phải commit hoặc ghi rõ thay đổi chưa commit vào mục "Việc đang mở" của PROJECT_STATE.md (branch, đã xong gì, bước kế tiếp, lệnh test) trước khi bàn giao; bên nhận đọc mục đó cùng `git status` và `git diff` rồi mới làm. Quyền commit/push/PR/deploy vẫn theo phạm vi PO đã cho, không tự mở rộng khi đổi bên.
+- **Verifier không được cùng dòng model với bên triển khai khi có thể:** Codex triển khai → Claude verifier; Claude triển khai → verifier subagent của Claude cộng thêm lượt Codex chỉ-đọc cho HIGH nhạy cảm.
+
+### Dữ liệu được phép gửi cho Codex/ChatGPT
+
+- Được: mã nguồn, diff, tài liệu, spec, test, `.env.example`, kết quả test đã che secret.
+- Cấm: `.env` và mọi giá trị secret/token/khóa, dump hoặc nội dung database, bảng giá và dữ liệu khách hàng/nhân viên thật, log chưa che, địa chỉ/đường dẫn hạ tầng production, kết quả truy vấn production.
+- Cách chạy bắt buộc để không đọc nhầm `.env`: không chạy Codex trong thư mục làm việc. Xuất bản sạch từ Git (`git archive <commit> | tar -x -C <thư mục tạm>`, chỉ gồm file đã theo dõi, không có `.env`), rồi chạy `codex exec --sandbox read-only --ephemeral --skip-git-repo-check -C <thư mục tạm> "<lời nhờ>"`. Lời nhờ chỉ chứa yêu cầu, đường dẫn spec và phạm vi cần xét; không chứa suy luận của bên triển khai (đúng tinh thần mục 11). Xóa thư mục tạm sau khi xong.
+- Codex không được truy cập production, không có SSH tới `staging`/`python`, không chạm database thật; mọi ranh giới của SECURITY.md áp dụng cho cả hai công cụ.
+
+### Ghi nhận
+
+Lượt Codex review ghi vào `specs/<task>/VERIFICATION_RESULT.md` (mục "Cross-vendor review"): phạm vi đã gửi, kết luận, phát hiện. Claude chuyển phát hiện vào repair theo quy tắc ngân sách ở mục 11, không tự bỏ qua phát hiện của Codex mà chưa nêu lý do.

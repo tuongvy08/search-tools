@@ -45,7 +45,8 @@ Tôi là chủ dự án, KHÔNG có chuyên môn kỹ thuật. Vì vậy:
 - Ưu tiên thay đổi nhỏ nhất đáp ứng yêu cầu; giữ kiến trúc, quy ước và dependency hiện có. Ghi nhận vấn đề ngoài phạm vi riêng, không tiện thể sửa.
 - Với bug: tái hiện nếu có thể, đọc log đã che secret, xác định nguyên nhân, sửa nguyên nhân và kiểm tra hồi quy; ghi rõ nếu chỉ là workaround.
 - LOW có thể chủ động làm; MEDIUM cần kiểm chứng hồi quy kỹ. HIGH cần kế hoạch và phê duyệt trước bước rủi ro; xem ranh giới cụ thể trong quy trình và SECURITY.md. HIGH bắt buộc verifier độc lập không chia sẻ suy luận với agent chính, theo mục 11 của quy trình đầy đủ — không tự báo DONE chỉ dựa trên developer test hoặc AI tự đánh giá.
-- Task HIGH chỉ thực hiện trong OpenCode, nơi verifier đã được cấu hình (`.opencode/agent/`). Nếu đang chạy bằng công cụ khác (ví dụ Claude Code) mà task được phân loại HIGH, dừng trước bước implement và báo người dùng; không tự kiểm tra thay cho verifier.
+- Task HIGH thực hiện được trong Claude Code hoặc OpenCode, miễn có verifier độc lập theo mục 11 của quy trình: trong Claude Code là subagent ngữ cảnh sạch, trong OpenCode là `.opencode/agent/verifier.md`. Agent triển khai không tự kiểm tra thay verifier. HIGH nhạy cảm (database/migration, dữ liệu production, phân quyền, ghi dữ liệu qua API) cần thêm một lượt đánh giá khác dòng model bằng Codex chỉ-đọc.
+- Claude Code và Codex phối hợp theo mục 12 của quy trình: Codex mặc định chỉ đọc/đánh giá; chỉ khi bên kia hết hạn mức mới bàn giao việc, mỗi lúc chỉ một bên sửa code. Không gửi `.env`, secret, dữ liệu thật hay thông tin production cho Codex/ChatGPT.
 - Kiểm tra phù hợp, review diff và cập nhật tài liệu. Không báo DONE khi test liên quan fail, chưa kiểm chứng đủ hoặc chưa đáp ứng yêu cầu.
 - Lượt thường báo ngắn; báo cáo đầy đủ (thay đổi, kiểm tra, rủi ro, checklist nghiệm thu quan sát được) chỉ ở checkpoint. Dùng phạm vi phê duyệt hiện hành trong PROJECT_STATE.md; không hỏi lại mỗi lượt nếu phạm vi không đổi.
 

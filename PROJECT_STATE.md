@@ -9,7 +9,7 @@ Cập nhật: 2026-10-02. Đây là trạng thái hiện hành; các mốc cũ g
 - **RELEASE PRODUCTION GIAO DIỆN MỚI — HOÀN TẤT 2026-10-02:** production (`ssh python`) chạy `1d47a1738a57c39d18ef44a721fb1bc6cfdbd16c` tại `/opt/search-tools-pg-release-20261002T104253Z-1d47a17-clean` (PR #29 → #30 → #31 đã gộp). `PRODUCTION UI SWITCH PASS`, số liệu giữ nguyên, postflight đạt, **PO kiểm tra ứng dụng ổn**. Quy trình nhẹ prepare/switch (không migration, tự quay về nếu lỗi), verifier độc lập PASS sau một vòng sửa. Evidence + hash: [ui-system/OPERATIONS](docs/ui-system/OPERATIONS.md). Branch hồ sơ `ops/production-ui-release`.
 
 - Phase vừa xong: giao diện mới (admin-regulatory-ui #30, ui-system #31, hồ sơ release 033 #29; `main@1d47a17`) và trước đó regulatory-manual-edit / migration033. PR tính năng #22 (`main@2ec9b6c`), trạng thái #23, quy trình #24, phiếu chuẩn bị #25, thử phục hồi #26, trạng thái #27, dọn test #28 đều đã merge; `main@730654c`.
-- Staging (`ssh staging`): chạy `c650c77` (branch `feat/quote-to-order-warehouse`, cột Kho yêu cầu; nội dung code = `main@09610a1`, deploy 2026-10-05), có 033. Trước đó `fc2672a` / `ee56710`.
+- Staging (`ssh staging`): chạy `f77cffb` = `main` (deploy 2026-10-05; so với bản đang chạy trước đó `c650c77` chỉ khác tài liệu nên không restart; code ứng dụng giống production `09610a1`), có 033. Trước đó `c650c77` / `fc2672a` / `ee56710`.
 - Production (`ssh python`): chạy `09610a1` tại `/opt/search-tools-pg-release-20261005T101557Z-09610a1-clean` (cột Kho yêu cầu, release 2026-10-05; trước đó `3ceb295`), có 033.
 - Artifact triển khai đã chạy nằm ngoài Git tại `/Volumes/DATA/Development/_ops/search-tools/` (hash trong hồ sơ release); bản khóa gốc ở `locked-2026-09-30/`. PR3 sẽ đưa script đã chạy vào Git.
 

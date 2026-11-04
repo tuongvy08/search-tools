@@ -2,7 +2,7 @@
 
 PO đã nghiệm thu local, cho commit/push/PR và triển khai/kiểm chứng staging.
 PR: https://github.com/tuongvy08/search-tools/pull/41 (OPEN, chưa merge).
-Trạng thái: **kiểm chứng kỹ thuật staging PASS; chờ đăng nhập để UAT giao diện**.
+Trạng thái: **kiểm chứng kỹ thuật và smoke giao diện staging PASS; sẵn sàng PO nghiệm thu staging**.
 Production chưa thay đổi; không chạy công cụ dọn nhãn trên staging/production.
 
 ## Phiên bản và phạm vi
@@ -80,9 +80,24 @@ Chỉ bổ sung đúng IPv4 quản trị hiện tại (địa chỉ host /32) v�
 
 V1/V2: review/mock + hậu kiểm thật đạt. [Lượt review độc lập riêng](../../specs/staging-https-access/LIVE_REVIEW.md) không finding chặn và tự chạy curl xác nhận login 200/TLS=0/admin ẩn danh 302; không kiểm SSH/firewall/service/browser. Các phần đó do agent chính kiểm trực tiếp như evidence trên, không gán cho verifier. Đây là khôi phục kết nối, không thay thế UAT sau đăng nhập.
 
-## Phần còn thiếu
+## Kiểm thử giao diện sau đăng nhập — 2026-11-04
 
-Đã mở URL HTTPS staging thật cạnh chat, nhờ PO đăng nhập tài khoản quản trị để thử menu, form, thông báo CAS sai và kết quả tìm kiếm thực tế. Chưa ghi UAT này là PASS. Kiểm chứng HTTP/SQL phía server không thay thế nghiệm thu phiên đăng nhập thật.
+PO đã đăng nhập HTTPS staging. Agent kiểm bằng tab riêng cùng phiên, không nhập credential, không thay cấu hình quyền. Đây là smoke browser do agent thực hiện, không tự coi là PO đã nghiệm thu staging.
+
+- Menu trên danh sách/thêm/sửa đồng bộ: Quản trị active, mục Quy tắc quản lý có `aria-current=page`, biểu tượng Font Awesome có glyph thật. Mở menu rồi Escape đóng đúng. Đã kiểm ảnh form desktop và menu thu gọn trong tab cạnh chat.
+- Form thêm chỉ có loại CAS. Sáu lựa chọn tình trạng staging không có nhãn CAS. **Staging vốn không có hai nhãn sai của production**, nên quan sát này không chứng minh đã dọn dữ liệu production; khả năng loại nhãn sai khỏi lựa chọn đã được kiểm bằng fixture local.
+- Nhập `６２９-１４-１` → báo “CAS chỉ dùng chữ số thông thường 0-9 và dấu -. Hãy nhập lại, ví dụ: 64-17-5.” Không có nút xác nhận lưu.
+- Đổi thành `629-14-1` → preview hiện trước/sau đúng giá trị/tình trạng, có nút xác nhận. **Không bấm lưu**; rời form rồi tìm tất cả quy tắc CAS này vẫn là 0 hàng.
+- Quy tắc tên Diethyl ether `#6010` vẫn tồn tại, hiển thị “Không dùng đối chiếu — quy tắc tên/mã cũ”. Chi tiết chỉ có thao tác “Ngừng quy tắc cũ”; loại/giá trị/ghi chú readonly, tình trạng disabled. Không ngừng hoặc sửa hàng này.
+- Search `629-14-1` trả 15 sản phẩm, đều đúng CAS; gồm 5 hàng CATO. Cả 15 cột tình trạng và ghi chú quản lý trống: không còn cảnh báo lấy từ tên Diethyl ether. Đây là hành vi ứng dụng theo dữ liệu staging, không phải kết luận pháp lý hóa chất.
+- Đối chứng `60-29-7`: 61 hàng đúng CAS có “Kiểm soát đặc biệt nhóm 1”, khớp quy tắc CAS đang áp dụng `#5825`. Search có 10 hàng CAS khác chứa chuỗi tìm kiếm (`18960-29-7`, `5460-29-7`, `92960-29-7`), tất cả không nhận cảnh báo này. Việc tìm kiếm chuỗi rộng vẫn giữ; phân loại khớp CAS chính xác.
+- Trang sửa CAS `#5825` cho sửa nội dung/ngừng áp dụng, loại CAS readonly và CAS editable, đúng chính sách; không sửa hoặc xác nhận lưu.
+
+Không xuất/copy giá, không lưu dữ liệu quy tắc/sản phẩm trong lượt browser. Phần lưu/transaction, ưu tiên hãng bật/tắt và liên kết gán riêng hỏng dựa trên 211 test độc lập/local cùng 7 trường hợp TEMP rollback đã chạy tại staging; lượt browser không thay cờ hãng hoặc tạo dữ liệu thử giữ lại. Không cần chạy lại toàn bộ test vì không đổi application code.
+
+## Phần cần PO duyệt tiếp
+
+Smoke kỹ thuật và browser đã đạt. PO chưa nghiệm thu staging/cho merge PR hoặc phát hành production. Hai nhãn sai và quy tắc dữ liệu production vẫn giữ nguyên; kiểm tham chiếu và dọn là thao tác riêng sau phê duyệt. Không coi kết quả staging là bằng chứng đã sửa production.
 
 CI GitHub: không có workflow/check được cấu hình, PR báo không có checks;
 không gọi đó là CI PASS. Chưa duyệt merge hoặc production. Dọn nhãn cần

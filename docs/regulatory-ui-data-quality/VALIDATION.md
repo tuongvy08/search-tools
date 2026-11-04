@@ -29,7 +29,7 @@ Chỉ dùng Read/Glob/Grep, hash nguồn giữ nguyên. Bản gốc nhận xét:
 Các lưu ý thấp/ngoài phạm vi được giữ ở OPERATIONS; không coi là quyền
 thực thi production. Browser local đã kiểm trong lần trước; bổ sung v2
 chỉ đổi validation backend, HTTP đã chứng minh lỗi hướng dẫn nhập lại.
-PO đã nghiệm thu local, đã commit `e33b0a2`, push và tạo PR #41; staging technical smoke PASS. UAT đăng nhập còn chờ, xem [STAGING](STAGING.md). Chưa merge hoặc ghi production.
+PO đã nghiệm thu local, đã commit `e33b0a2`, push và tạo PR #41; staging technical smoke PASS. Browser smoke sau đăng nhập PASS, gồm 15 hàng CAS 629-14-1 và đối chứng 61 hàng CAS 60-29-7; xem [STAGING](STAGING.md). Chờ PO nghiệm thu staging. Chưa merge hoặc ghi production.
 
 ### LỊCH SỬ — Checkpoint trước bổ sung
 

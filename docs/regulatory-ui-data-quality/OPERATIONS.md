@@ -1,7 +1,7 @@
 # Chuẩn bị phát hành quy tắc CAS — 2026-11-02
 
 Đã commit/push/PR #41 và triển khai code `e33b0a2` trên staging sau PO duyệt
-ngày 2026-11-04; [hậu kiểm kỹ thuật PASS](STAGING.md), chờ UAT đăng nhập.
+ngày 2026-11-04; [hậu kiểm kỹ thuật + browser PASS](STAGING.md), chờ PO nghiệm thu staging.
 Phạm vi PO đã duyệt: local và staging; xem giao diện production để đối chiếu.
 Phần ghi production phải được duyệt riêng sau kiểm chứng độc lập.
 

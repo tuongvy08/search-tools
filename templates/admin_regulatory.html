@@ -19,7 +19,7 @@
 <main class="admin-shell">
   <header class="rg-head">
     <div><h1>Quy tắc quản lý</h1>
-      <p class="lead">Quyết định sản phẩm nào bị chặn hoặc được xuất báo giá, theo CAS, mã hoặc tên sản phẩm.</p></div>
+      <p class="lead">Quy tắc tự động đối chiếu chính xác theo CAS. Tình trạng gán riêng chỉ ưu tiên khi hãng bật ưu tiên thủ công.</p></div>
     {% if not job %}<div class="rg-actions">
       <a class="rg-btn" href="{{ url_for('regulatory_rules') }}">Tìm và sửa quy tắc</a>
       <a class="rg-btn secondary" href="{{ url_for('regulatory_rule_new') }}">Thêm quy tắc thủ công</a>
@@ -88,6 +88,7 @@
       {% for status in statuses %}
         <li class="regulatory-row {{ status.color_css }}" data-status-color-preview style="--reg-bg:{{ status.color_bg }};--reg-fg:{{ status.color_fg }}{% if status.color_hex %};--reg-hue:{{ status.color_hex }}{% endif %}">
           <div class="status-summary"><span class="priority">{{ loop.index }}</span><div><strong class="compliance-badge {{ status.color_css }}">{{ status.label }}</strong>
+            {% if not status.valid_label %}<span class="rg-policy-block">Tên tình trạng không hợp lệ; không dùng để thêm quy tắc. Cần kiểm tra liên kết trước khi dọn dữ liệu.</span>{% endif %}
             <span>{{ status.rule_count }} quy tắc đang áp dụng, {% if status.export_policy == 'BLOCK' %}<span class="rg-policy-block">chặn xuất báo giá</span>{% else %}cho xuất báo giá{% endif %}</span></div></div>
           <div class="status-actions">
             <form method="post" action="{{ url_for('regulatory_status_action') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="status_id" value="{{ status.id }}"><input type="hidden" name="action" value="up"><button class="secondary compact" aria-label="Đưa {{ status.label }} lên" {% if loop.first %}disabled{% endif %}>↑</button></form>
@@ -126,10 +127,10 @@
       <form method="post" enctype="multipart/form-data" action="{{ url_for('regulatory_upload') }}" data-submit-once>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="submission_key" value="{{ submission_key }}">
         <ol class="rg-steps">
-          <li><div><span class="rg-step-title">Tải tệp mẫu theo loại đối chiếu</span>
-            <div class="template-links"><a href="{{ url_for('regulatory_template', field='cas') }}">Mẫu CAS</a><a href="{{ url_for('regulatory_template', field='code') }}">Mẫu Code</a><a href="{{ url_for('regulatory_template', field='name') }}">Mẫu Tên</a></div></div></li>
+          <li><div><span class="rg-step-title">Tải tệp mẫu đối chiếu CAS</span>
+            <div class="template-links"><a href="{{ url_for('regulatory_template', field='cas') }}">Mẫu CAS</a></div></div></li>
           <li><div><label class="rg-field"><span class="rg-step-title">Chọn tệp Excel .xlsx (tối đa {{ max_mb }} MB)</span><input type="file" name="file" accept=".xlsx" required></label>
-            <p class="muted rg-hint">Mỗi tệp dùng đúng một loại đối chiếu. CAS sai cấu trúc, sai số kiểm tra hoặc trùng dòng trong cùng tình trạng sẽ làm bước xem trước báo lỗi.</p></div></li>
+            <p class="muted rg-hint">Chỉ nhận cột CAS, Tình trạng quản lý và Ghi chú quản lý. Tên/mã không được dùng thay CAS. CAS sai cấu trúc, sai số kiểm tra hoặc trùng dòng trong cùng tình trạng sẽ làm bước xem trước báo lỗi.</p></div></li>
           <li><fieldset class="rg-modes"><legend class="rg-step-title">Chọn cách áp dụng</legend>
             <label class="rg-option"><input type="radio" name="mode" value="upsert" checked><span>Thêm / cập nhật, giữ các dòng ngoài tệp<small>An toàn nhất: chỉ thêm mới hoặc sửa các dòng có trong tệp.</small></span></label>
             <label class="rg-option"><input type="radio" name="mode" value="replace_scoped"><span>Thay đúng nhóm trường + tình trạng có trong file<small>Xóa các quy tắc cùng nhóm không có trong tệp; sẽ phải nhập số lượng xóa để xác nhận.</small></span></label>

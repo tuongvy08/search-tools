@@ -146,7 +146,7 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
                         team_id=team_id,username=f"reg_{marker}")
         return client
 
-    def test_cross_field_priority_substring_notes_and_blank_no_match(self):
+    def test_cas_priority_ignores_name_code_and_blank_cas(self):
         self._rule("PHU_LUC_II", "cas", "50-00-0", "ghi chú CAS")
         self._rule("CAM_NHAP", "code", "CODE-X", "ghi chú Z")
         self._rule("CAM_NHAP", "name", "Formaldehyde", "ghi chú A")
@@ -159,9 +159,9 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
         data = self._admin_client().get("/search", query_string={"query": ""}).get_json()["results"]
         by_code = {row["Name"]: row for row in data}
         self.assertEqual(by_code["Dung dịch Formaldehyde chuẩn"]["Compliance_Status"], "CẤM NHẬP")
-        self.assertEqual(by_code["Dung dịch Formaldehyde chuẩn"]["Compliance_Note"], "ghi chú A\nghi chú Z")
+        self.assertEqual(by_code["Dung dịch Formaldehyde chuẩn"]["Compliance_Note"], "ghi chú A")
         self.assertEqual(by_code["Dung dịch Formaldehyde chuẩn"]["Compliance_Export_Policy"], "BLOCK")
-        self.assertEqual(by_code["Không CAS"]["Compliance_Status"], "CẤM NHẬP")
+        self.assertEqual(by_code["Không CAS"]["Compliance_Status"], "")
         self.assertEqual(by_code["Không khớp"]["Compliance_Status"], "")
 
     def test_manual_allow_and_rename_keep_stable_policy(self):
@@ -223,7 +223,7 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
         note_a='A'*2500
         note_b='B'*2500
         expected=note_a+'\n'+note_b
-        self._rule('PHU_LUC_II','cas','50-00-0',note_a)
+        self._rule('PHU_LUC_II','cas','50-00-0',expected)
         self._rule('PHU_LUC_II','code','LONG-NOTE',note_b)
         with self.conn.cursor() as cur:
             cur.execute("""INSERT INTO products(name,code,cas,brand,size,ship,price)
@@ -258,18 +258,18 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
 
         duplicate_path = Path(os.environ["IMPORT_UPLOAD_DIR"]) / "duplicate.xlsx"
         duplicate_path.write_bytes(_workbook_bytes(
-            ["Code", "Tình trạng quản lý", "Ghi chú quản lý"],
-            [["X", "CẤM NHẬP", "a"], ["x", "CẤM NHẬP", "b"]],
+            ["CAS", "Tình trạng quản lý", "Ghi chú quản lý"],
+            [["50-00-0", "CẤM NHẬP", "a"], ["50-00-0", "CẤM NHẬP", "b"]],
         ).read())
         rows = regulatory_import_jobs._parse_workbook(duplicate_path)
         with self.conn.cursor() as cur:
-            with self.assertRaisesRegex(ImportProblem, "trùng Code"):
+            with self.assertRaisesRegex(ImportProblem, "trùng CAS"):
                 regulatory_import_jobs.build_plan(cur, rows, "upsert")
 
         replace_path = Path(os.environ["IMPORT_UPLOAD_DIR"]) / "replace.xlsx"
         replace_path.write_bytes(_workbook_bytes(
-            ["Code", "Tình trạng quản lý", "Ghi chú quản lý"],
-            [["NEW-CODE", "CẤM NHẬP", "new"]],
+            ["CAS", "Tình trạng quản lý", "Ghi chú quản lý"],
+            [["50-00-0", "CẤM NHẬP", "new"]],
         ).read())
         rows = regulatory_import_jobs._parse_workbook(replace_path)
         with self.conn:
@@ -280,14 +280,14 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
                 regulatory_import_jobs.apply_plan(cur, rows, "replace_scoped", plan)
         with self.conn.cursor() as cur:
             cur.execute("SELECT match_field,match_value FROM regulatory_rules ORDER BY match_field,match_value")
-            self.assertEqual(cur.fetchall(), [("cas", "64-17-5"), ("code", "NEW-CODE")])
+            self.assertEqual(cur.fetchall(), [("cas", "50-00-0"), ("code", "OLD-CODE")])
             stale = regulatory_import_jobs.build_plan(cur, rows, "upsert")
             cur.execute("UPDATE regulatory_statuses SET updated_at=now(),label='CẤM NHẬP mới' WHERE stable_key='CAM_NHAP'")
             with self.assertRaisesRegex(ImportProblem, "đổi từ lúc xem trước"):
                 regulatory_import_jobs.apply_plan(cur, rows, "upsert", stale)
 
     def test_new_status_is_allow_and_last(self):
-        rows = [{"row_number": 2, "match_field": "code", "match_value": "NEW",
+        rows = [{"row_number": 2, "match_field": "cas", "match_value": "50-00-0",
                  "status_label": "Theo dõi nội bộ", "note": ""}]
         with self.conn:
             with self.conn.cursor() as cur:
@@ -353,13 +353,12 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
 
     def test_color_validation_stale_guard_policy_independence_and_no_product_write(self):
         client = self._admin_client()
-        self._rule("CAM_NHAP", "code", "COLOR-BLOCK", "Vẫn chặn theo chính sách")
         self._rule("CAM_NHAP", "cas", "50-00-0", "Màu chung cho tra cứu CAS")
-        self._rule("DUOC_BAN", "code", "COLOR-ALLOW", "Vẫn cho xuất theo chính sách")
+        self._rule("DUOC_BAN", "cas", "64-17-5", "Vẫn cho xuất theo chính sách")
         with self.conn.cursor() as cur:
-            cur.execute("""INSERT INTO products(name,code,brand,size,ship,price)
-                           VALUES ('Blocked green','COLOR-BLOCK','Brand A','1g','1','100'),
-                                  ('Allowed red','COLOR-ALLOW','Brand A','1g','1','100')""")
+            cur.execute("""INSERT INTO products(name,code,cas,brand,size,ship,price)
+                           VALUES ('Blocked green','COLOR-BLOCK','50-00-0','Brand A','1g','1','100'),
+                                  ('Allowed red','COLOR-ALLOW','64-17-5','Brand A','1g','1','100')""")
             cur.execute("INSERT INTO brand_compliance_settings VALUES ('BRAND A',true,now())")
             cur.execute("""INSERT INTO products(name,code,cas,brand,size,ship,price,manual_compliance)
                            VALUES ('Manual final colour','COLOR-MANUAL','50-00-0','Brand A','1g','1','100','Được bán')""")
@@ -610,8 +609,8 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
 
     def test_worker_lock_serializes_and_partial_failure_rolls_back(self):
         upload = _workbook_bytes(
-            ["Code", "Tình trạng quản lý", "Ghi chú quản lý"],
-            [["LOCKED", "Tình trạng tạm", "race"]],
+            ["CAS", "Tình trạng quản lý", "Ghi chú quản lý"],
+            [["50-00-0", "Tình trạng tạm", "race"]],
         )
         job_id = regulatory_import_jobs.submit(
             FileStorage(stream=upload, filename="race.xlsx"), "upsert", "phase6d1_admin",
@@ -656,7 +655,7 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
     def test_cleanup_respects_live_job_lock_and_purges_only_terminal_jobs(self):
         completed=regulatory_import_jobs.submit(
             FileStorage(stream=_workbook_bytes(
-                ['Code','Tình trạng quản lý','Ghi chú quản lý'],[['DONE','CẤM NHẬP','done']]),
+                ['CAS','Tình trạng quản lý','Ghi chú quản lý'],[['50-00-0','CẤM NHẬP','done']]),
                 filename='done.xlsx'), 'upsert','phase6d1_admin',self.admin_id,1,
             str(__import__('uuid').uuid4()),
         )
@@ -681,7 +680,7 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
 
         live=regulatory_import_jobs.submit(
             FileStorage(stream=_workbook_bytes(
-                ['Code','Tình trạng quản lý','Ghi chú quản lý'],[['LIVE','CẤM NHẬP','live']]),
+                ['CAS','Tình trạng quản lý','Ghi chú quản lý'],[['64-17-5','CẤM NHẬP','live']]),
                 filename='live.xlsx'), 'upsert','phase6d1_admin',self.admin_id,1,
             str(__import__('uuid').uuid4()),
         )
@@ -715,7 +714,7 @@ class Phase6D1RegulatoryPgTests(unittest.TestCase):
         with self.conn.cursor() as cur:
             cur.execute('SELECT status FROM regulatory_import_jobs WHERE id=%s',(live,))
             self.assertEqual(cur.fetchone()[0],'cancelled')
-            cur.execute("SELECT count(*) FROM regulatory_rules WHERE match_field='code' AND match_value='LIVE'")
+            cur.execute("SELECT count(*) FROM regulatory_rules WHERE match_field='cas' AND match_value='64-17-5'")
             self.assertEqual(cur.fetchone()[0],0)
         regulatory_import_jobs.cleanup()
         self.assertFalse(live_path.exists())
@@ -731,9 +730,12 @@ class Phase6D1PureTests(unittest.TestCase):
             with self.assertRaises(ValueError, msg=value):
                 normalize_cas(value)
 
-    def test_name_sql_is_substring_and_no_field_order(self):
+    def test_automatic_sql_only_matches_cas(self):
         sql = product_resolver_lateral("p", "bcs")
-        self.assertIn("strpos(upper(btrim(p.name)), upper(btrim(r.match_value))) > 0", sql)
+        self.assertNotIn("strpos(", sql)
+        self.assertNotIn("p.name", sql)
+        self.assertNotIn("p.code", sql)
+        self.assertIn("r.match_field = 'cas'", sql)
         self.assertIn("ORDER BY priority, status_id", sql)
         self.assertNotIn("CASE r.match_field", sql)
 
@@ -846,7 +848,7 @@ class Phase6D1LegacyMigrationRehearsal(unittest.TestCase):
                                   "migration_028_regulatory_custom_colors.sql"}:
                             continue
                         cur.execute(pg_temp_db._read_sql(name))
-                    cur.execute("INSERT INTO products(name,code,brand) VALUES ('P','NO-WRITE','B')")
+                    cur.execute("INSERT INTO products(name,code,cas,brand) VALUES ('P','NO-WRITE','50-00-0','B')")
                     cur.execute(MIGRATION_026)
                     cur.execute("SELECT xmin::text FROM products WHERE code='NO-WRITE'")
                     product_version = cur.fetchone()[0]
@@ -854,7 +856,7 @@ class Phase6D1LegacyMigrationRehearsal(unittest.TestCase):
                     status_id, label, priority = cur.fetchone()
                     cur.execute("""INSERT INTO regulatory_rules
                                        (rule_type,rule_label,match_field,match_value,priority,is_active,status_id)
-                                   VALUES ('CAM_NHAP',%s,'code','NO-WRITE',%s,true,%s)""",
+                                   VALUES ('CAM_NHAP',%s,'cas','50-00-0',%s,true,%s)""",
                                 (label, priority, status_id))
                     cur.execute(f"""SELECT rr.rule_label,rr.export_policy,rr.source,
                                             rr.stable_key,rr.status_id,rr.color_key

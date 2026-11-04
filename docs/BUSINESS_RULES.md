@@ -37,6 +37,18 @@ nghiệp vụ thật.
 
 ## 2. Pháp chế / quản lý xuất nhập khẩu (Compliance)
 
+**Quyết định PO 2026-11-02 — đang triển khai local, chưa phát hành:** quy tắc
+tự động chỉ đối chiếu CAS chính xác, không đối chiếu tên/mã. Tình trạng
+gán trực tiếp cho từng sản phẩm chỉ ghi đè kết quả CAS khi hãng bật ưu tiên
+thủ công; mã/tên dùng nhận diện sản phẩm cần gán, không lan tình trạng bằng
+chuỗi tên. Các mô tả dưới đây áp dụng quyết định mới này; production còn
+chờ phát hành. Không có quy tắc CAS không có nghĩa sản phẩm
+được phép nhập khẩu.
+
+**Bổ sung PO 2026-11-04:** khi nhập/sửa/khôi phục quy tắc hoặc nhập Excel,
+CAS chỉ dùng số `0-9` và dấu `-`. Từ chối chữ số đặc biệt (ví dụ `６４-１７-５`)
+và hướng dẫn nhập lại `64-17-5`; không tự chuyển đổi hay sửa dữ liệu cũ.
+
 - Các trạng thái pháp chế là danh mục **hoàn toàn động và phải linh hoạt để
   người dùng đổi** (**[xác nhận từ người dùng]**, 2026-09-27) — admin được
   thêm, đổi tên, đổi thứ tự ưu tiên bất kỳ lúc nào; tên hiển thị chỉ là nhãn
@@ -61,8 +73,8 @@ nghiệp vụ thật.
   đây là cờ duy nhất quyết định "được xuất báo giá/bán hay không", tách biệt
   khỏi nhãn hiển thị và màu sắc (đổi tên/đổi màu không đổi chính sách).
   **[xác nhận từ code]** (`regulatory.py`).
-- Một sản phẩm có thể khớp nhiều rule (theo CAS, theo Code, theo Name chứa
-  chuỗi) — rule thắng là rule có `priority` nhỏ nhất (rồi tới `status_id`);
+- Một sản phẩm có thể khớp nhiều quy tắc trên cùng CAS chính xác — quy tắc
+  thắng có `priority` nhỏ nhất (rồi tới `status_id`);
   ghi chú (note) của mọi rule cùng thắng trạng thái đó được gộp lại
   (distinct, sắp theo alphabet). **[xác nhận từ code]** (LATERAL resolver
   trong `regulatory.py`).
@@ -73,8 +85,8 @@ nghiệp vụ thật.
   dữ liệu ("Lỗi dữ liệu quản lý", `BLOCK`) thay vì âm thầm bỏ qua.
   **[xác nhận từ code]**. Ý nghĩa nghiệp vụ của cơ chế này (**[xác nhận từ
   người dùng]**): override dùng để tạo **ngoại lệ Được bán tường minh cho
-  từng sản phẩm cụ thể**, cho phép xuất báo giá kể cả khi rule CAS/Code/Tên
-  tự động đang là Cấm nhập — đây là quyết định có chủ đích của người có
+  từng sản phẩm cụ thể**, cho phép xuất báo giá kể cả khi quy tắc CAS
+  đang là Cấm nhập — đây là quyết định có chủ đích của người có
   thẩm quyền (không phải lỗi hệ thống), luôn được audit; xóa override đưa
   sản phẩm về đúng kết quả tự động.
 - Thứ tự ưu tiên tổng quát: **override thủ công (nếu brand bật) → lỗi dữ liệu
@@ -220,9 +232,9 @@ nghiệp vụ thật.
   `replace_scoped` (**[xác nhận từ người dùng]**, khớp code
   `regulatory_import_jobs.py`): thay thế theo **đúng cặp (trường đối chiếu,
   trạng thái)** xuất hiện trong file, không thay toàn bộ danh mục. Ví dụ file
-  chỉ chứa quy tắc **Code/Cấm nhập** thì chỉ nhóm quy tắc Code+Cấm nhập cũ bị
-  xóa/thay; quy tắc CAS/Cấm nhập, Tên/Cấm nhập và mọi trạng thái khác được
-  giữ nguyên. File rỗng không suy diễn thành xóa mọi quy tắc — luôn xem
+  chỉ chứa quy tắc **CAS/Cấm nhập** thì chỉ nhóm CAS+Cấm nhập chưa được bảo vệ
+  bị thay; các trạng thái khác, quy tắc được bảo vệ và quy tắc tên/mã cũ được
+  giữ nguyên. File mới chỉ nhận CAS. File rỗng không suy diễn thành xóa mọi quy tắc — luôn xem
   preview trước khi xác nhận.
 - Cột tùy chọn khi import sản phẩm: `Compliance`/`Compliance_Note` (override
   pháp chế thủ công — phải có cả hai cột hoặc không có cột nào, không được
@@ -239,13 +251,15 @@ nghiệp vụ thật.
 - Dùng quyền menu `regulatory` hiện có, không tách quyền sửa riêng.
 - Tìm trong giá trị quy tắc tên/CAS/mã, lọc tình trạng và trạng thái áp dụng,
   có phân trang; chưa tìm quy tắc tác động tới một sản phẩm cụ thể.
-- Thêm/sửa giá trị, tình trạng, ghi chú; không sửa loại đối chiếu. Người sửa
+- Chỉ thêm/sửa quy tắc CAS: giá trị, tình trạng, ghi chú; không sửa loại đối chiếu. Người sửa
   tự xác nhận sau khi xem trước/sau. Trùng khóa dẫn về mục có sẵn; cùng
-  CAS/mã khác tình trạng cảnh báo nhưng vẫn cho thêm.
+  CAS khác tình trạng cảnh báo nhưng vẫn cho thêm.
 - Không xóa hẳn bằng thao tác tay hoặc với mục đã được bảo vệ; ngừng áp dụng
   và có khôi phục. Mục thuần import chưa bảo vệ vẫn theo replace_scoped cũ.
   Phạm vi C này được người dùng xác nhận ngày 2026-09-27. Lưu lịch
-  sử tay theo từng rule: người, thời gian, trước/sau. Lý do bắt buộc khi đổi
+  sử tay theo từng rule: người, thời gian, trước/sau. Theo quyết định 2026-11-02,
+  quy tắc tên/mã cũ chỉ được xem/ngừng, không sửa hoặc khôi phục và không
+  tham gia đối chiếu tự động. Lý do bắt buộc khi đổi
   tình trạng hoặc ngừng áp dụng. Import vẫn dùng nhật ký tác vụ hiện có.
 - **Điều chỉnh D của người dùng ngày 2026-09-27, thay quyết định trước đó:**
   cả upsert và replace_scoped **luôn giữ nguyên** mục thêm/sửa/ngừng thủ

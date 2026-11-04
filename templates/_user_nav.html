@@ -61,7 +61,8 @@
   {% set _ = _sq_admin_paths.append(url_for(endpoint)) %}
 {% endfor %}
 {% set _sq_products_path = url_for('admin_products') %}
-{% set _sq_admin_active = request.path in _sq_admin_paths or request.path.startswith(_sq_products_path + '/') %}
+{% set _sq_regulatory_path = url_for('admin_regulatory') %}
+{% set _sq_admin_active = request.path in _sq_admin_paths or request.path.startswith(_sq_products_path + '/') or request.path.startswith(_sq_regulatory_path + '/') %}
 <header class="sq-shell-header sq-user-nav">
   <div class="sq-shell-bar">
     <a class="sq-shell-brand" href="{{ _sq_home_path }}">
@@ -118,7 +119,7 @@
         <div class="sq-shell-admin-menu" id="sqAdminMenu">
           {% for endpoint, icon, label in _sq_admin_links if admin_can(endpoint) %}
             {% set _sq_link_path = url_for(endpoint) %}
-            {% set _sq_link_active = request.path == _sq_link_path or (endpoint == 'admin_products' and request.path.startswith(_sq_link_path + '/')) %}
+            {% set _sq_link_active = request.path == _sq_link_path or (endpoint in ['admin_products', 'admin_regulatory'] and request.path.startswith(_sq_link_path + '/')) %}
             <a class="sq-shell-link{{ ' is-active' if _sq_link_active else '' }}"
                href="{{ _sq_link_path }}"{% if _sq_link_active %} aria-current="page"{% endif %}>
               <i class="fas {{ icon }}" aria-hidden="true"></i> {{ label }}

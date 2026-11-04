@@ -1,10 +1,21 @@
 import os
+import hashlib
+import re
 import tempfile
 import unittest
 from unittest import mock
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import pg_temp_db as pg
+
+
+def fixture_cas(label):
+    """Deterministic synthetic CAS for readable fixture keys; never application data."""
+    if re.fullmatch(r'\d{2,7}-\d{2}-\d', label):
+        return label
+    body = str(1000000 + int(hashlib.sha256(label.casefold().encode()).hexdigest()[:12], 16) % 9000000) + '00'
+    check = sum(int(digit) * weight for weight, digit in enumerate(reversed(body), 1)) % 10
+    return body[:-2] + '-00-' + str(check)
 
 
 class RegulatoryCase(unittest.TestCase):
@@ -35,13 +46,16 @@ class RegulatoryCase(unittest.TestCase):
 
     def mutate(self, payload):
         import regulatory_manual
+        if payload.get('match_field') == 'cas' and 'match_value' in payload:
+            payload = dict(payload, match_value=fixture_cas(payload['match_value']))
         with self.conn, self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             return regulatory_manual.mutate(cur, payload, self.actor, self.version)
 
-    def create(self, value='ABC', field='code', status='CAM_NHAP', note='manual'):
+    def create(self, value='ABC', field='cas', status='CAM_NHAP', note='manual'):
         import uuid
         payload = dict(action='create', request_id=str(uuid.uuid4()), match_field=field,
-                       match_value=value, status_id=self.statuses[status], note=note)
+                       match_value=fixture_cas(value) if field == 'cas' else value,
+                       status_id=self.statuses[status], note=note)
         result = self.mutate(payload)
         return result['rule_id'], payload
 

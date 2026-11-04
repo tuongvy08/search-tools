@@ -2,15 +2,17 @@
 <html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{ 'Quy tắc #' ~ rule.id if rule else 'Thêm quy tắc thủ công' }}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260926d8') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20261002ui1') }}">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
 <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css') }}">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
 <link rel="stylesheet" href="{{ url_for('static', filename='admin_regulatory.css', v='20261002ui1') }}">
-<script defer src="{{ url_for('static', filename='regulatory_manual.js',v='033v2-display1') }}"></script>
+<script defer src="{{ url_for('static', filename='regulatory_manual.js',v='20261102-cas-only') }}"></script>
 </head><body class="admin-page regulatory-page">{% include '_user_nav.html' %}
 {% set status_map = {} %}{% for status in statuses %}{% set _ = status_map.update({status.id: status}) %}{% endfor %}
 {% set st = status_map.get(rule.status_id) if rule else None %}
+{% set legacy_rule = rule and rule.match_field != 'cas' %}
 <main class="admin-shell">
 <a class="rg-back" href="{{ url_for('regulatory_rules') }}">← Danh sách quy tắc</a>
 {% if rule %}
@@ -18,25 +20,26 @@
   <h1>Quy tắc #{{ rule.id }}</h1>
   <p class="rg-specimen-value"><span class="rg-mono">{{ rule.match_value }}</span><span class="rg-type">{{ field_labels[rule.match_field] }}</span></p>
   <p class="rg-specimen-meta"><span class="rg-chip {{ st.color_css if st else '' }}">{{ rule.rule_label }}</span>
-    <span class="rg-state{{ '' if rule.is_active else ' is-off' }}">{{ 'Đang áp dụng' if rule.is_active else 'Ngừng áp dụng' }}</span>
+    <span class="rg-state{{ '' if rule.is_active and not legacy_rule else ' is-off' }}">{{ 'Không dùng đối chiếu — quy tắc tên/mã cũ' if legacy_rule else ('Đang áp dụng' if rule.is_active else 'Ngừng áp dụng') }}</span>
     <span>Phiên bản {{ rule.revision }}</span>{% if rule.manual_protected %}<span class="rg-protected">Được bảo vệ khi import</span>{% endif %}</p>
 </header>
 {% else %}
 <header class="rg-head rg-new-head"><div><h1>Thêm quy tắc thủ công</h1></div></header>
 {% endif %}
-<p class="rg-scope">Quy tắc áp dụng toàn danh mục, không giới hạn hãng. Quy tắc theo tên có thể khớp nhiều sản phẩm. Kết quả cuối còn phụ thuộc thứ tự ưu tiên tình trạng và ngoại lệ sản phẩm.</p>
+<p class="rg-scope">Quy tắc tự động chỉ đối chiếu chính xác theo CAS, áp dụng toàn danh mục. Tình trạng gán riêng cho sản phẩm chỉ ghi đè kết quả CAS khi hãng bật ưu tiên thủ công.</p>
+{% if legacy_rule %}<p class="state-banner">Quy tắc tên/mã này chỉ được giữ để đối soát lịch sử, không dùng để phân loại. Có thể ngừng quy tắc cũ; muốn quản lý tự động hãy thêm quy tắc CAS đã xác minh.</p>{% endif %}
 
 <section class="admin-card"><h2>{{ 'Sửa quy tắc' if rule else 'Nội dung quy tắc' }}</h2>
 <p class="muted">Bấm “Xem trước thay đổi” để đối chiếu trước / sau; chưa có gì được lưu cho tới khi bạn xác nhận.</p>
 <form id="manualRuleForm" class="rg-form" data-save-url="{{ url_for('regulatory_rule_save') }}" data-check-url="{{ url_for('regulatory_rule_check') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="request_id" value="{{ request_id }}">
-<label class="rg-field"><span>Thao tác</span><select name="action">{% if rule %}<option value="edit">Sửa nội dung</option><option value="{{ 'deactivate' if rule.is_active else 'restore' }}">{{ 'Ngừng áp dụng' if rule.is_active else 'Khôi phục' }}</option>{% else %}<option value="create">Thêm mới</option>{% endif %}</select></label>
-<label class="rg-field"><span>Loại đối chiếu</span>{% if rule %}<input type="hidden" name="match_field" value="{{ rule.match_field }}"><input value="{{ field_labels[rule.match_field] }}" readonly>{% else %}<select name="match_field">{% for key,label in field_labels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select>{% endif %}</label>
-<label class="rg-field"><span>Giá trị (CAS, mã hoặc tên)</span><input name="match_value" class="rg-mono" value="{{ rule.match_value if rule else '' }}" maxlength="500" required></label>
-<label class="rg-field"><span>Tình trạng</span><select name="status_id">{% for status in statuses %}<option value="{{ status.id }}"{{ ' selected' if rule and rule.status_id==status.id else '' }}>{{ status.label }}</option>{% endfor %}</select></label>
-<label class="rg-field rg-wide"><span>Ghi chú</span><textarea name="note" maxlength="4000">{{ rule.note or '' if rule else '' }}</textarea></label>
+<label class="rg-field"><span>Thao tác</span><select name="action">{% if legacy_rule %}<option value="deactivate">{{ 'Ngừng quy tắc cũ' if rule.is_active else 'Quy tắc cũ đã ngừng' }}</option>{% elif rule %}<option value="edit">Sửa nội dung</option><option value="{{ 'deactivate' if rule.is_active else 'restore' }}">{{ 'Ngừng áp dụng' if rule.is_active else 'Khôi phục' }}</option>{% else %}<option value="create">Thêm mới</option>{% endif %}</select></label>
+<label class="rg-field"><span>Loại đối chiếu</span>{% if rule %}<input type="hidden" name="match_field" value="{{ rule.match_field }}"><input value="{{ field_labels[rule.match_field] }}" readonly>{% else %}<select name="match_field"><option value="cas">CAS</option></select>{% endif %}</label>
+<label class="rg-field"><span>{{ 'Giá trị quy tắc cũ' if legacy_rule else 'CAS' }}</span><input name="match_value" class="rg-mono" value="{{ rule.match_value if rule else '' }}" maxlength="500" required{{ ' readonly' if legacy_rule else '' }}></label>
+<label class="rg-field"><span>Tình trạng</span><select name="status_id"{{ ' disabled' if legacy_rule else '' }}>{% for status in statuses if status.valid_label or (rule and rule.status_id==status.id) %}<option value="{{ status.id }}"{{ ' selected' if rule and rule.status_id==status.id else '' }}{{ ' disabled' if not status.valid_label else '' }}>{{ status.label }}{{ ' — cần sửa dữ liệu' if not status.valid_label else '' }}</option>{% endfor %}</select></label>
+<label class="rg-field rg-wide"><span>Ghi chú</span><textarea name="note" maxlength="4000"{{ ' readonly' if legacy_rule else '' }}>{{ rule.note or '' if rule else '' }}</textarea></label>
 <label class="rg-field rg-wide"><span>Lý do <span class="rg-hint">bắt buộc khi đổi tình trạng hoặc ngừng áp dụng</span></span><textarea name="reason" maxlength="1000"></textarea></label>
-<div class="rg-form-actions"><button type="submit" id="manualPreview">Xem trước thay đổi</button></div>
+<div class="rg-form-actions"><button type="submit" id="manualPreview"{{ ' disabled' if legacy_rule and not rule.is_active else '' }}>Xem trước thay đổi</button></div>
 <div id="manualError" role="alert"></div>
 <section id="manualReview" hidden><h2>Đối chiếu trước / sau</h2><div id="manualComparison"></div><div id="manualWarnings" role="status"></div>
 <button type="button" id="manualConfirm">Xác nhận lưu</button></section>

@@ -81,7 +81,7 @@
           var line = document.createElement('p'); line.textContent = labels[key]+': '+display(before[key])+' → '+display(next[key]);
           comparison.appendChild(line);
         });
-        warnings.textContent = related.length ? 'Cùng CAS/mã còn có tình trạng khác; kết quả phụ thuộc ưu tiên: '+
+        warnings.textContent = related.length ? 'Cùng CAS còn có tình trạng khác; kết quả phụ thuộc ưu tiên: '+
           related.map(function (r) { return '#'+r.id+' '+r.rule_label+' ('+(r.is_active?'đang áp dụng':'ngừng áp dụng')+')'; }).join('; ') : '';
         reviewed = data; review.hidden = false; confirm.disabled = false;
       } catch (_) { showError({error:'Không kiểm tra được dữ liệu. Hãy thử lại.'}); }

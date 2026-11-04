@@ -278,6 +278,21 @@ class NavShellRouteRenderTests(unittest.TestCase):
         self.assertIsNotNone(trigger_match)
         self.assertNotIn("is-active", trigger_match.group(0))
 
+    def test_regulatory_subpages_keep_parent_menu_active(self):
+        from flask import render_template
+        for path in ('/admin/regulatory/rules', '/admin/regulatory/rules/new',
+                     '/admin/regulatory/rules/123', '/admin/regulatory/jobs/test/protection',
+                     '/admin/regulatory-other'):
+            with self.subTest(path=path), search.app.test_request_context(path):
+                from flask import session
+                set_authenticated_session(session, is_admin=True, username='nav_test')
+                body = render_template('_user_nav.html')
+                trigger = re.search(r'<button[^>]*id="sqAdminTrigger"[^>]*>', body).group(0)
+                link = re.search(r'<a class="[^"]*"\s+href="/admin/regulatory"[^>]*>', body).group(0)
+                expected = path != '/admin/regulatory-other'
+                self.assertEqual('is-active' in trigger, expected)
+                self.assertEqual('is-active' in link, expected)
+
     def test_logout_form_present_and_posts_with_csrf_for_both_roles(self):
         for is_admin in (True, False):
             with self.subTest(is_admin=is_admin):

@@ -1,8 +1,10 @@
 # Checkpoint để PO xem xét — 2026-11-04
 
-Branch: `codex/fix-regulatory-menu-status`. Chưa commit/phát hành.
+Branch: `codex/fix-regulatory-menu-status`. Đã commit `e33b0a2`, push và tạo
+PR #41; code đã lên staging, chưa merge/phát hành production.
 PO đã nghiệm thu local và cho commit/push/tạo PR, triển khai/kiểm chứng staging
 ngày 2026-11-04. Chưa duyệt merge hoặc production.
+Kiểm chứng kỹ thuật staging PASS; UAT giao diện còn chờ đăng nhập, xem [STAGING](STAGING.md).
 Verifier v2 PASS V1–V6; review chéo chỉ đọc đã xong, không có finding chặn.
 Nghiệp vụ đã chốt: tự động đối chiếu CAS; tình trạng gán riêng chỉ thắng khi
 hãng bật ưu tiên; không tự chuyển CAS chữ số đặc biệt sang số thông thường.
@@ -66,10 +68,10 @@ hãng bật ưu tiên; không tự chuyển CAS chữ số đặc biệt sang s�
 - Verifier độc lập: PASS về HTTP/HTML/DOM; browser local do agent chính kiểm.
 - Giới hạn: chưa nghiệm thu trình duyệt trên staging/production với bản mới.
 
-## Bước kế tiếp cần duyệt
+## Bước kế tiếp
 
-PO duyệt checkpoint và cho commit/push/tạo PR để lưu bản
-sửa và tiến hành thử trên staging theo quyền hiện hành. Production/dọn nhãn
+PO đã nghiệm thu local, cho commit/push/tạo PR và triển khai staging.
+PR #41 đã mở, staging technical smoke PASS; hoàn tất UAT giao diện sau đăng nhập. Production/dọn nhãn
 vẫn là bước duyệt riêng theo [OPERATIONS](OPERATIONS.md), có kiểm tra trước/sau.
 
 Ảnh hưởng cần chấp nhận trước phát hành: quy tắc tên/mã chung ngừng tạo cảnh

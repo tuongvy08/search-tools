@@ -29,9 +29,9 @@ Chỉ dùng Read/Glob/Grep, hash nguồn giữ nguyên. Bản gốc nhận xét:
 Các lưu ý thấp/ngoài phạm vi được giữ ở OPERATIONS; không coi là quyền
 thực thi production. Browser local đã kiểm trong lần trước; bổ sung v2
 chỉ đổi validation backend, HTTP đã chứng minh lỗi hướng dẫn nhập lại.
-Chưa commit/push/deploy hoặc ghi production.
+PO đã nghiệm thu local, đã commit `e33b0a2`, push và tạo PR #41; staging technical smoke PASS. UAT đăng nhập còn chờ, xem [STAGING](STAGING.md). Chưa merge hoặc ghi production.
 
-### Checkpoint trước bổ sung
+### LỊCH SỬ — Checkpoint trước bổ sung
 
 PO đã làm rõ và duyệt tiếp tục: tự động chỉ đối chiếu CAS, tình trạng gán
 riêng thắng khi hãng bật ưu tiên. Không triển khai đề xuất loại trừ từng

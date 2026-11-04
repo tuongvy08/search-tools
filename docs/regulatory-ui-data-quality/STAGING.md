@@ -78,7 +78,7 @@ Chỉ bổ sung đúng IPv4 quản trị hiện tại (địa chỉ host /32) v�
 - Web/worker/Nginx đều active, HEAD vẫn `e33b0a2`, checkout sạch. Browser URL HTTPS thật hiện form đăng nhập.
 - Hoàn tác nếu cần: đối chiếu rule rồi chỉ `ufw delete allow from <same-observed-peer> to any port 443 proto tcp`; chưa cần thực hiện. IP mạng động đổi lần nữa có thể cần cập nhật /32; không mở HTTPS mọi nguồn để tránh việc đó.
 
-V1/V2: review/mock + hậu kiểm thật đạt. V3: runtime do agent chính kiểm đạt; verifier không truy cập server và không tuyên bố tự chạy live. Đây là khôi phục kết nối, không thay thế UAT sau đăng nhập.
+V1/V2: review/mock + hậu kiểm thật đạt. [Lượt review độc lập riêng](../../specs/staging-https-access/LIVE_REVIEW.md) không finding chặn và tự chạy curl xác nhận login 200/TLS=0/admin ẩn danh 302; không kiểm SSH/firewall/service/browser. Các phần đó do agent chính kiểm trực tiếp như evidence trên, không gán cho verifier. Đây là khôi phục kết nối, không thay thế UAT sau đăng nhập.
 
 ## Phần còn thiếu
 

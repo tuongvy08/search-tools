@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import regulatory_manual as manual
-from regulatory_manual_support import RegulatoryCase
+from regulatory_manual_support import RegulatoryCase, fixture_cas
 
 
 class HttpTests(RegulatoryCase):
@@ -17,7 +17,7 @@ class HttpTests(RegulatoryCase):
         client=self.client()
         for url in ['/admin/regulatory','/admin/regulatory/rules','/admin/regulatory/rules/new']:
             self.assertEqual(client.get(url).status_code,200)
-        data=dict(action='create',request_id=str(uuid.uuid4()),match_field='code',match_value='HTTP',
+        data=dict(action='create',request_id=str(uuid.uuid4()),match_field='cas',match_value=fixture_cas('HTTP'),
                   status_id=self.statuses['CAM_NHAP'],note='<script>alert(1)</script>')
         self.assertEqual(self.post(client,data,False).status_code,400)
         response=self.post(client,data)
@@ -43,7 +43,7 @@ class HttpTests(RegulatoryCase):
         self.assertEqual(len(self.rows('SELECT * FROM regulatory_rule_manual_events')),1)
 
     def test_concurrent_same_request_and_same_key_are_single_write(self):
-        payload=dict(action='create',request_id=str(uuid.uuid4()),match_field='code',match_value='RACE',
+        payload=dict(action='create',request_id=str(uuid.uuid4()),match_field='cas',match_value=fixture_cas('RACE'),
                      status_id=self.statuses['CAM_NHAP'],note='one')
         barrier=threading.Barrier(2)
         def run(data):
@@ -59,8 +59,8 @@ class HttpTests(RegulatoryCase):
         self.assertEqual(len(self.rows('SELECT * FROM regulatory_rules')),1)
         barrier=threading.Barrier(2)
         with ThreadPoolExecutor(max_workers=2) as pool:
-            results=list(pool.map(run,[dict(payload,request_id=str(uuid.uuid4()),match_value='SECOND'),
-                                       dict(payload,request_id=str(uuid.uuid4()),match_value='SECOND')]))
+            results=list(pool.map(run,[dict(payload,request_id=str(uuid.uuid4()),match_value=fixture_cas('SECOND')),
+                                       dict(payload,request_id=str(uuid.uuid4()),match_value=fixture_cas('SECOND'))]))
         self.assertEqual(results.count(409),1)
         self.assertEqual(len(self.rows('SELECT * FROM regulatory_rule_manual_events')),2)
 

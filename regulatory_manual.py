@@ -7,7 +7,7 @@ import re
 import uuid
 
 import admin_permissions
-from regulatory import acquire_regulatory_lock, clean_text, normalize_match_value
+from regulatory import CAS_ONLY_MESSAGE, acquire_regulatory_lock, clean_text, normalize_match_value, normalize_status_label
 
 PAGE_SIZE = 50
 
@@ -112,8 +112,8 @@ def mutate(cur, payload, actor_id, auth_version):
                               expected_revision=positive_int(payload.get('expected_revision'), 'Phiên bản'))
         if action in ('create', 'edit'):
             field = payload.get('match_field')
-            if field not in ('cas', 'code', 'name'):
-                raise ManualProblem('Loại đối chiếu không hợp lệ.')
+            if field != 'cas':
+                raise ManualProblem(CAS_ONLY_MESSAGE)
             normalized.update(match_field=field,
                               match_value=normalize_match_value(field, text_input(payload.get('match_value'), 500)),
                               status_id=positive_int(payload.get('status_id'), 'Tình trạng'),
@@ -131,13 +131,30 @@ def mutate(cur, payload, actor_id, auth_version):
     before = None if action == 'create' else get_rule(cur, normalized['rule_id'], lock=True)
     if before and before['revision'] != normalized['expected_revision']:
         raise ManualProblem('Quy tắc đã thay đổi. Hãy tải lại trang trước khi xác nhận.', 409)
+    if before and before['match_field'] != 'cas' and action != 'deactivate':
+        raise ManualProblem(CAS_ONLY_MESSAGE)
+    if action == 'restore':
+        try:
+            normalize_match_value('cas', before['match_value'])
+        except ValueError as exc:
+            raise ManualProblem(str(exc)) from None
+        cur.execute('SELECT label FROM regulatory_statuses WHERE id=%s', (before['status_id'],))
+        try:
+            normalize_status_label(cur.fetchone()['label'])
+        except ValueError as exc:
+            raise ManualProblem(str(exc)) from None
     if action in ('create', 'edit'):
         field, value, status_id = (normalized[k] for k in ('match_field', 'match_value', 'status_id'))
         if before and field != before['match_field']:
             raise ManualProblem('Không được sửa loại đối chiếu.')
-        cur.execute('SELECT id FROM regulatory_statuses WHERE id=%s', (status_id,))
-        if not cur.fetchone():
+        cur.execute('SELECT id,label FROM regulatory_statuses WHERE id=%s', (status_id,))
+        status = cur.fetchone()
+        if not status:
             raise ManualProblem('Tình trạng không tồn tại.')
+        try:
+            normalize_status_label(status['label'])
+        except ValueError as exc:
+            raise ManualProblem(str(exc)) from None
         if before and before['status_id'] != status_id and not reason:
             raise ManualProblem('Đổi tình trạng phải nhập lý do.')
         collision(cur, status_id, field, value, before['id'] if before else None)

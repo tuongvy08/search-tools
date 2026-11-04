@@ -5,14 +5,14 @@ from openpyxl import Workbook
 from psycopg2.extras import RealDictCursor
 import regulatory_import_jobs as jobs
 from import_engine import ImportProblem
-from regulatory_manual_support import RegulatoryCase
+from regulatory_manual_support import RegulatoryCase, fixture_cas
 
 
 def workbook(rows):
     wb = Workbook(); ws = wb.active
-    ws.append(['Code','Tình trạng quản lý','Ghi chú quản lý'])
+    ws.append(['CAS','Tình trạng quản lý','Ghi chú quản lý'])
     for row in rows:
-        ws.append(row)
+        ws.append([fixture_cas(row[0]), *row[1:]])
     stream = BytesIO(); wb.save(stream); stream.seek(0)
     return stream
 
@@ -51,7 +51,7 @@ class ImportTests(RegulatoryCase):
                                  request_id=str(uuid.uuid4()),reason='stop'))
                 absent, _ = self.create(prefix+'absent')
                 pure = self.rows("""INSERT INTO regulatory_rules(status_id,rule_type,rule_label,match_field,match_value,note)
-                    VALUES (%s,'','','code',%s,'pure') RETURNING id""",(self.statuses['CAM_NHAP'],prefix+'pure'))[0]['id']
+                    VALUES (%s,'','','cas',%s,'pure') RETURNING id""",(self.statuses['CAM_NHAP'],fixture_cas(prefix+'pure')))[0]['id']
                 before = self.rows('SELECT * FROM regulatory_rules WHERE id=ANY(%s) ORDER BY id',([a,inactive,absent],))
                 job_id = self.upload(mode,[[prefix+'old','CẤM NHẬP','file'],
                     [prefix+'current','CẤM NHẬP',''],[prefix+'inactive','CẤM NHẬP','file'],[prefix+'new','CẤM NHẬP','file']])
@@ -65,7 +65,7 @@ class ImportTests(RegulatoryCase):
                 self.apply(job_id)
                 self.assertEqual(self.rows('SELECT * FROM regulatory_rules WHERE id=ANY(%s) ORDER BY id',([a,inactive,absent],)),before)
                 self.assertEqual(bool(self.rows('SELECT id FROM regulatory_rules WHERE id=%s',(pure,))),mode=='upsert')
-                self.assertFalse(self.rows('SELECT id FROM regulatory_rules WHERE match_value=%s',(prefix+'old',)))
+                self.assertFalse(self.rows('SELECT id FROM regulatory_rules WHERE match_value=%s',(fixture_cas(prefix+'old'),)))
                 self.rows("UPDATE regulatory_import_jobs SET expires_at=now()-interval '1 second' WHERE id=%s",(job_id,))
                 jobs.cleanup()
                 self.assertIsNone(self.job(job_id)['preview'])
@@ -81,7 +81,7 @@ class ImportTests(RegulatoryCase):
         plan = self.job(job_id)['preview']
         self.mutate(dict(original,action='edit',rule_id=rule,expected_revision=1,request_id=str(uuid.uuid4()),note='later'))
         with self.conn, self.conn.cursor() as cur:
-            rows=[dict(row_number=2,match_field='code',match_value='ABC',status_label='CẤM NHẬP',note='file')]
+            rows=[dict(row_number=2,match_field='cas',match_value=fixture_cas('ABC'),status_label='CẤM NHẬP',note='file')]
             with self.assertRaisesRegex(ImportProblem,'đổi'):
                 jobs.apply_plan(cur,rows,'upsert',plan)
             with self.assertRaisesRegex(ImportProblem,'cũ'):
@@ -108,10 +108,11 @@ class ImportTests(RegulatoryCase):
         self.assertEqual(len(self.rows('SELECT id FROM regulatory_rules')),53)
 
     def test_actual_eight_mib_boundary_without_truncation(self):
-        self.rows("""INSERT INTO regulatory_rules(status_id,rule_type,rule_label,match_field,match_value,note,manual_protected)
-            SELECT %s,'','','code','SIZE-'||lpad(n::text,4,'0'),repeat('M',4000),true
-            FROM generate_series(1,1000) n""",(self.statuses['CAM_NHAP'],))
-        rows=[dict(row_number=i+2,match_field='code',match_value='SIZE-'+str(i+1).zfill(4),
+        with self.conn, self.conn.cursor() as cur:
+            cur.executemany("""INSERT INTO regulatory_rules(status_id,rule_type,rule_label,match_field,match_value,note,manual_protected)
+                VALUES (%s,'','','cas',%s,repeat('M',4000),true)""",
+                [(self.statuses['CAM_NHAP'], fixture_cas('SIZE-'+str(i+1).zfill(4))) for i in range(1000)])
+        rows=[dict(row_number=i+2,match_field='cas',match_value=fixture_cas('SIZE-'+str(i+1).zfill(4)),
                    status_label='CẤM NHẬP',note='F'*4000) for i in range(1000)]
         with self.conn.cursor() as cur:
             with mock.patch.object(jobs,'PROTECTION_DETAILS_MAX_BYTES',32*1024*1024):

@@ -12,6 +12,7 @@ from typing import Any, Optional
 
 EXPORT_ALLOW = "ALLOW"
 EXPORT_BLOCK = "BLOCK"
+CAS_ONLY_MESSAGE = "Quy tắc tự động chỉ đối chiếu CAS. Hãy dùng cột CAS; không suy tình trạng từ tên hoặc mã sản phẩm."
 REGULATORY_LOCK_KEY = 62402601
 MATCH_FIELDS = ("cas", "code", "name")
 MATCH_FIELD_LABELS = {"cas": "CAS", "code": "Code", "name": "Tên"}
@@ -74,6 +75,19 @@ def clean_text(value: Any, *, max_chars: int = 4000) -> str:
     return text
 
 
+def normalize_status_label(value: Any) -> str:
+    """Keep the catalog dynamic, but reject a CAS pasted into the status column."""
+    label = clean_text(value, max_chars=120)
+    if not label:
+        raise RegulatoryError("Tên tình trạng không được để trống.")
+    if _CAS_RE.fullmatch(label):
+        raise RegulatoryError(
+            "Tình trạng phải là tên phân loại, không phải mã CAS. "
+            "Hãy chuyển mã CAS sang cột CAS hoặc ô Giá trị đối chiếu."
+        )
+    return label
+
+
 def acquire_regulatory_lock(cur) -> None:
     """Serialize status/rule mutations with product imports using those statuses."""
     cur.execute("SELECT pg_advisory_xact_lock(%s)", (REGULATORY_LOCK_KEY,))
@@ -82,6 +96,11 @@ def acquire_regulatory_lock(cur) -> None:
 def normalize_cas(value: Any) -> str:
     """Validate a single CAS Registry Number and return canonical hyphen form."""
     text = clean_text(value, max_chars=32)
+    if not text.isascii():
+        raise RegulatoryError(
+            "CAS chỉ dùng chữ số thông thường 0-9 và dấu -. "
+            "Hãy nhập lại, ví dụ: 64-17-5."
+        )
     match = _CAS_RE.fullmatch(text)
     if not match:
         raise RegulatoryError("CAS phải có dạng 2-7 chữ số, dấu gạch, 2 chữ số, dấu gạch, 1 chữ số.")
@@ -247,7 +266,7 @@ def product_resolver_lateral(
     """Return the one shared LATERAL resolver used by all product entrypoints.
 
     Note ordering is lexical after exact-text deduplication. It is deterministic
-    and deliberately independent of match field (CAS/Code/Name).
+    Automatic rules match CAS only. Brand-enabled product overrides remain first.
     """
     p = product_alias
     b = setting_alias
@@ -269,15 +288,9 @@ def product_resolver_lateral(
                        s.priority, s.stable_key, s.label, s.export_policy
                 FROM regulatory_rules r
                 JOIN regulatory_statuses s ON s.id = r.status_id
-                WHERE r.is_active = TRUE
-                  AND (
-                    (r.match_field = 'cas' AND NULLIF(btrim({p}.cas), '') IS NOT NULL
-                      AND upper(btrim({p}.cas)) = upper(btrim(r.match_value)))
-                    OR (r.match_field = 'code' AND NULLIF(btrim({p}.code), '') IS NOT NULL
-                      AND upper(btrim({p}.code)) = upper(btrim(r.match_value)))
-                    OR (r.match_field = 'name' AND NULLIF(btrim({p}.name), '') IS NOT NULL
-                      AND strpos(upper(btrim({p}.name)), upper(btrim(r.match_value))) > 0)
-                  )
+                WHERE r.is_active = TRUE AND r.match_field = 'cas'
+                  AND NULLIF(btrim({p}.cas), '') IS NOT NULL
+                  AND upper(btrim({p}.cas)) = upper(btrim(r.match_value))
             ), winning_status AS (
                 SELECT status_id FROM matched ORDER BY priority, status_id LIMIT 1
             ), automatic_choice AS (
@@ -347,6 +360,7 @@ def catalog_fingerprint(cur) -> str:
     cur.execute(
         """
         SELECT jsonb_build_object(
+          'matching_policy', 'cas-only-v1',
           'statuses', COALESCE((SELECT jsonb_agg(jsonb_build_array(id,stable_key,label,priority,export_policy,
                                                                    COALESCE(to_jsonb(regulatory_statuses)->>'color_hex',
                                                                             to_jsonb(regulatory_statuses)->>'color_key'))

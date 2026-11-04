@@ -5,7 +5,7 @@ import uuid
 from psycopg2.extras import Json
 
 import regulatory_import_jobs as jobs
-from regulatory_manual_support import RegulatoryCase
+from regulatory_manual_support import RegulatoryCase, fixture_cas
 from regulatory_presentation import vietnam_time
 from test_regulatory_manual_import import workbook
 
@@ -28,7 +28,7 @@ class DisplayHttpTests(RegulatoryCase):
 
     def test_manual_labels_boolean_missing_and_vietnam_history_are_read_only(self):
         client=self.client()
-        for field,value,label in [('cas','50-00-0','CAS'),('code','DISPLAY','Mã sản phẩm'),('name','Tên mẫu','Tên sản phẩm')]:
+        for field,value,label in [('cas','50-00-0','CAS')]:
             rule,_=self.create(value,field,note='<img src=x onerror=alert(1)>')
             self.mutate(dict(action='deactivate',rule_id=rule,expected_revision=1,
                              request_id=str(uuid.uuid4()),reason='Ngừng để kiểm tra'))
@@ -59,7 +59,7 @@ class DisplayHttpTests(RegulatoryCase):
         for count,status in [(0,'CAM_NHAP'),(1,'PHU_LUC_II'),(3,'PHU_LUC_III')]:
             for i in range(count):
                 self.rows("""INSERT INTO regulatory_rules(status_id,rule_type,rule_label,match_field,match_value)
-                    VALUES (%s,'','','code',%s)""",(self.statuses[status],f'REMOVE-{count}-{i}'))
+                    VALUES (%s,'','','cas',%s)""",(self.statuses[status],fixture_cas(f'REMOVE-{count}-{i}')))
             label=self.rows('SELECT label FROM regulatory_statuses WHERE id=%s',(self.statuses[status],))[0]['label']
             response=client.post('/admin/regulatory/upload',data={'csrf_token':'regulatory-test-csrf',
                 'mode':'replace_scoped','submission_key':str(uuid.uuid4()),

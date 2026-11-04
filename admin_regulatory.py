@@ -11,6 +11,7 @@ from psycopg2.extras import Json, RealDictCursor
 
 from import_engine import ImportProblem, limit
 from regulatory import (
+    CAS_ONLY_MESSAGE,
     EXPORT_ALLOW,
     REGULATORY_SWATCHES,
     acquire_regulatory_lock,
@@ -20,6 +21,7 @@ from regulatory import (
     effective_color_key,
     effective_color_token,
     normalize_color_hex,
+    normalize_status_label,
     stable_key_for_label,
     valid_color_hex,
 )
@@ -82,6 +84,11 @@ def _color_swatches():
 def _decorate_status(row):
     """Presentation colours for one status row (same resolution as the overview page)."""
     status = dict(row)
+    try:
+        normalize_status_label(status['label'])
+        status['valid_label'] = True
+    except ValueError:
+        status['valid_label'] = False
     status["color_hex"] = valid_color_hex(status.get("color_hex"))
     status["color_key"] = effective_color_key(status.get("color_key"), status.get("stable_key"))
     color_value = status["color_hex"] or status["color_key"]
@@ -193,8 +200,8 @@ def register(app, require_admin, actor):
             raise manual.ManualProblem('Dữ liệu kiểm tra không hợp lệ.')
         from regulatory import normalize_match_value
         field = data.get('match_field')
-        if field not in ('cas', 'code', 'name'):
-            raise manual.ManualProblem('Loại đối chiếu không hợp lệ.')
+        if field != 'cas':
+            raise manual.ManualProblem(CAS_ONLY_MESSAGE)
         try:
             value = normalize_match_value(field, manual.text_input(data.get('match_value'), 500))
         except ValueError as exc:
@@ -202,9 +209,14 @@ def register(app, require_admin, actor):
         status_id = manual.positive_int(data.get('status_id'), 'Tình trạng')
         owner = manual.positive_int(data['rule_id'], 'ID') if data.get('rule_id') else None
         with jobs.connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute('SELECT 1 FROM regulatory_statuses WHERE id=%s', (status_id,))
-            if not cur.fetchone():
+            cur.execute('SELECT label FROM regulatory_statuses WHERE id=%s', (status_id,))
+            status = cur.fetchone()
+            if not status:
                 raise manual.ManualProblem('Tình trạng không tồn tại.')
+            try:
+                normalize_status_label(status['label'])
+            except ValueError as exc:
+                raise manual.ManualProblem(str(exc)) from None
             manual.collision(cur, status_id, field, value, owner)
             related = manual.related_rules(cur, field, value, status_id, owner)
         return jsonify(related=related)
@@ -218,7 +230,7 @@ def register(app, require_admin, actor):
         try:
             with jobs.connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
-                    """SELECT s.*,count(r.id) FILTER (WHERE r.is_active) AS rule_count
+                    """SELECT s.*,count(r.id) FILTER (WHERE r.is_active AND r.match_field='cas') AS rule_count
                        FROM regulatory_statuses s LEFT JOIN regulatory_rules r ON r.status_id=s.id
                        GROUP BY s.id ORDER BY s.priority,s.id"""
                 )
@@ -253,9 +265,7 @@ def register(app, require_admin, actor):
                 acquire_regulatory_lock(cur)
                 _revalidate_mutation_actor(cur, actor_user_id, expected_auth_version)
                 if action == "add":
-                    label = clean_text(request.form.get("label"), max_chars=120)
-                    if not label:
-                        raise ImportProblem("Tên tình trạng không được để trống.")
+                    label = normalize_status_label(request.form.get("label"))
                     cur.execute("SELECT COALESCE(max(priority),0)+10 AS next_priority FROM regulatory_statuses")
                     priority = cur.fetchone()["next_priority"]
                     cur.execute(
@@ -271,10 +281,8 @@ def register(app, require_admin, actor):
                     )
                 elif action == "rename":
                     status_id = int(request.form.get("status_id", "0"))
-                    label = clean_text(request.form.get("label"), max_chars=120)
+                    label = normalize_status_label(request.form.get("label"))
                     revision = request.form.get("revision", "")
-                    if not label:
-                        raise ImportProblem("Tên tình trạng không được để trống.")
                     cur.execute("SELECT * FROM regulatory_statuses WHERE id=%s FOR UPDATE", (status_id,))
                     before = cur.fetchone()
                     if not before or str(before["updated_at"]) != revision:
@@ -370,7 +378,7 @@ def register(app, require_admin, actor):
         denied = guard()
         if denied is not None:
             return denied
-        labels = {"cas": "CAS", "code": "Code", "name": "Tên"}
+        labels = {"cas": "CAS"}
         if field not in labels:
             abort(404)
         wb = Workbook()

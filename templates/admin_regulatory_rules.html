@@ -2,7 +2,8 @@
 <html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Tìm và sửa quy tắc</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260926d8') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_nav.css', v='20261002ui1') }}">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" />
 <link rel="stylesheet" href="{{ url_for('static', filename='admin_ux.css') }}">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
@@ -13,7 +14,7 @@
 <a class="rg-back" href="{{ url_for('admin_regulatory') }}">← Quy tắc quản lý</a>
 <header class="rg-head">
   <div><h1>Tìm và sửa quy tắc</h1>
-    <p class="lead">Tìm theo một phần CAS, mã hoặc tên. Mở một quy tắc để sửa, ngừng áp dụng hoặc xem lịch sử.</p></div>
+    <p class="lead">Quy tắc tự động chỉ đối chiếu CAS. Có thể tìm tên/mã để xem lại quy tắc cũ; các quy tắc đó không còn dùng để đối chiếu.</p></div>
   <div class="rg-actions"><a class="rg-btn" href="{{ url_for('regulatory_rule_new') }}">Thêm quy tắc thủ công</a></div>
 </header>
 
@@ -32,7 +33,7 @@
 <td><a class="rg-value" href="{{ url_for('regulatory_rule_detail',rule_id=row.id) }}" aria-label="Mở quy tắc #{{ row.id }}: {{ row.match_value }}">{{ row.match_value }}</a><span class="rg-type">{{ field_labels[row.match_field] }}</span></td>
 <td><span class="rg-chip {{ st.color_css if st else '' }}"{% if st %} style="--reg-bg:{{ st.color_bg }};--reg-fg:{{ st.color_fg }}{% if st.color_hex %};--reg-hue:{{ st.color_hex }}{% endif %}"{% endif %}>{{ row.rule_label }}</span></td>
 <td>{% if row.note %}<span class="rg-note" title="{{ row.note }}">{{ row.note }}</span>{% endif %}</td>
-<td><span class="rg-state{{ '' if row.is_active else ' is-off' }}">{{ 'Đang áp dụng' if row.is_active else 'Ngừng áp dụng' }}</span>{% if row.manual_protected %}<span class="rg-protected">Được bảo vệ khi import</span>{% endif %}</td>
+<td><span class="rg-state{{ '' if row.is_active and row.match_field == 'cas' else ' is-off' }}">{{ 'Không dùng đối chiếu — quy tắc tên/mã cũ' if row.match_field != 'cas' else ('Đang áp dụng' if row.is_active else 'Ngừng áp dụng') }}</span>{% if row.manual_protected %}<span class="rg-protected">Được bảo vệ khi import</span>{% endif %}</td>
 </tr>
 {% else %}<tr><td colspan="5" class="empty-state">Không có quy tắc phù hợp. Thử bớt bộ lọc hoặc chỉ nhập một phần CAS/mã.</td></tr>{% endfor %}</tbody></table></div>
 <nav class="rg-pager" aria-label="Phân trang quy tắc">{% if page>1 %}<a href="{{ url_for('regulatory_rules',page=page-1,q=filters.get('q',''),field=filters.get('field',''),status_id=filters.get('status_id',''),state=filters.get('state','active')) }}">Trang trước</a>{% endif %}

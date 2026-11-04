@@ -1,7 +1,7 @@
 import uuid
 from psycopg2.extras import RealDictCursor
 import regulatory_manual as manual
-from regulatory_manual_support import RegulatoryCase
+from regulatory_manual_support import RegulatoryCase, fixture_cas
 
 
 class ServiceTests(RegulatoryCase):
@@ -9,7 +9,7 @@ class ServiceTests(RegulatoryCase):
         rule, create = self.create()
         self.assertTrue(self.mutate(create)['replayed'])
         edit = dict(action='edit', rule_id=rule, expected_revision=1, request_id=str(uuid.uuid4()),
-                    match_field='code', match_value='DEF', status_id=self.statuses['DUOC_BAN'],
+                    match_field='cas', match_value='DEF', status_id=self.statuses['DUOC_BAN'],
                     note='changed', reason='approved')
         self.mutate(edit)
         self.assertTrue(self.mutate(create)['replayed'])  # original create must not recreate old key
@@ -22,8 +22,8 @@ class ServiceTests(RegulatoryCase):
         self.assertEqual((row['revision'], row['is_active'], row['manual_protected']), (4, True, True))
         events = self.rows('SELECT * FROM regulatory_rule_manual_events ORDER BY id')
         self.assertEqual([e['event'] for e in events], ['created','edited','deactivated','restored'])
-        self.assertEqual(events[1]['before_json']['match_value'], 'ABC')
-        self.assertEqual(events[1]['after_json']['match_value'], 'DEF')
+        self.assertEqual(events[1]['before_json']['match_value'], fixture_cas('ABC'))
+        self.assertEqual(events[1]['after_json']['match_value'], fixture_cas('DEF'))
         self.assertEqual(events[0]['actor_id_snapshot'], self.actor)
         self.assertEqual(len(self.rows('SELECT * FROM regulatory_rule_manual_keys')), 2)
         with self.assertRaises(manual.ManualProblem):
@@ -44,7 +44,7 @@ class ServiceTests(RegulatoryCase):
         self.assertEqual(error.exception.rule_id, rule)
         # Owner can return to own key, not another rule.
         self.mutate(dict(base, match_value='ABC', expected_revision=2, request_id=str(uuid.uuid4())))
-        self.assertEqual(self.rows('SELECT match_value FROM regulatory_rules')[0]['match_value'], 'ABC')
+        self.assertEqual(self.rows('SELECT match_value FROM regulatory_rules')[0]['match_value'], fixture_cas('ABC'))
         with self.assertRaises(manual.ManualProblem):
             self.create('123-45-6', 'cas')
 
@@ -75,7 +75,7 @@ class ServiceTests(RegulatoryCase):
 
     def test_list_filters_literal_wildcards_pagination(self):
         for i in range(103):
-            self.create('CODE%_' + str(i))
+            self.rows("INSERT INTO regulatory_rules(status_id,rule_type,rule_label,match_field,match_value) VALUES (%s,'','','code',%s)", (self.statuses['CAM_NHAP'], 'CODE%_' + str(i)))
         self.create('not a wildcard')
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             first = manual.list_rules(cur, dict(q='%_'))

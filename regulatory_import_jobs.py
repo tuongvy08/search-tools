@@ -18,6 +18,7 @@ import import_jobs
 import regulatory_manual as manual
 from import_engine import ImportProblem, inspect_workbook, limit
 from regulatory import (
+    CAS_ONLY_MESSAGE,
     EXPORT_ALLOW,
     MATCH_FIELD_LABELS,
     REGULATORY_LOCK_KEY,
@@ -25,6 +26,7 @@ from regulatory import (
     catalog_fingerprint,
     clean_text,
     normalize_match_value,
+    normalize_status_label,
     normalized_identity,
     stable_key_for_label,
 )
@@ -236,6 +238,8 @@ def _parse_workbook(path: Path):
             )
         field_header = fields[0]
         field = _FIELD_HEADERS[field_header]
+        if field != 'cas':
+            raise ImportProblem(CAS_ONLY_MESSAGE)
         indexes = {header: index for index, header in enumerate(headers)}
         rows = []
         for row_number, cells in enumerate(iterator, start=2):
@@ -248,10 +252,8 @@ def _parse_workbook(path: Path):
                 continue
             try:
                 value = normalize_match_value(field, values[indexes[field_header]])
-                status_label = clean_text(values[indexes[_HEADER_STATUS]], max_chars=120)
+                status_label = normalize_status_label(values[indexes[_HEADER_STATUS]])
                 note = clean_text(values[indexes[_HEADER_NOTE]], max_chars=4000)
-                if not status_label:
-                    raise ImportProblem("Tình trạng quản lý không được để trống.")
             except (ValueError, ImportProblem) as exc:
                 raise ImportProblem(f"Dòng {row_number}: {exc}") from exc
             rows.append({
@@ -289,9 +291,17 @@ def detail_bytes(value):
 
 
 def build_plan(cur, rows, mode):
-    manual.require_schema(cur)
     if mode not in ('upsert', 'replace_scoped') or not rows:
         raise ImportProblem('Chế độ hoặc danh sách quy tắc không hợp lệ; không dùng file rỗng để xóa.')
+    for row in rows:
+        try:
+            if row['match_field'] != 'cas':
+                raise ImportProblem(CAS_ONLY_MESSAGE)
+            normalize_match_value('cas', row['match_value'])
+            normalize_status_label(row['status_label'])
+        except ValueError as exc:
+            raise ImportProblem(f"Dòng {row['row_number']}: {exc}") from exc
+    manual.require_schema(cur)
     statuses = _records(cur, "SELECT *,upper(btrim(label)) AS norm FROM regulatory_statuses ORDER BY priority,id")
     existing_rules = _records(cur, """SELECT r.*,s.label AS status_label,upper(btrim(s.label)) AS status_norm,
         upper(btrim(r.match_value)) AS value_norm FROM regulatory_rules r

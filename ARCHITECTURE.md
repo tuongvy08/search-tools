@@ -31,6 +31,7 @@ khách hàng).
 | `quote_request_file.py` | Đọc file yêu cầu báo giá của khách (xlsx/csv), tự gợi ý mapping cột (Name/Code/CAS). |
 | `quote_workbook_export.py` | Ghi kết quả vào file mẫu Excel (BG template) bằng thao tác XML/zip trực tiếp (không dùng openpyxl để ghi, để giữ nguyên style/công thức gốc); template mặc định cột B–P theo `BG_HEADERS`. |
 | `search_suggestions.py` | Endpoint gợi ý tìm kiếm nhẹ, tách khỏi `/search` (không JOIN giá/pháp chế), giới hạn 500ms/10 kết quả. |
+| `machine_api.py`, `scripts/machine_token.py`, `integrations/mcp/` | **Cổng API chỉ đọc cho bot/AI** (phase 2026-11-15): dịch vụ Flask/Gunicorn **riêng** (loopback :8100 sau Nginx `/machine/`), chỉ GET, thẻ Bearer lưu băm SHA-256 trong file ngoài Git, gắn một team có sẵn (hãng + quyền trường), không session/cookie, **giá và ghi chú nội bộ bị loại cứng**, tồn kho cho khách chỉ Còn/Hết. Không sửa `search.py`/middleware. MCP là chương trình riêng chạy ở máy dùng AI. Thiết kế: [docs/machine-api/PLAN.md](docs/machine-api/PLAN.md). |
 | `scripts/import_worker.py` | Vòng lặp worker độc lập: xử lý job import sản phẩm → job import quy tắc pháp chế → job import tồn kho, mỗi loại một hàm `run_once()`. |
 
 ## Mô hình dữ liệu (theo `sql/schema.sql` + `sql/migration_*.sql`)

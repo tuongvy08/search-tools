@@ -1,0 +1,31 @@
+# Cổng API máy (machine_api.py). Thêm vào server{} HTTPS hiện có, KHÔNG mở cổng 8100 ra ngoài.
+# Kiểm tra `nginx -t` trước khi reload; đây là thay đổi hạ tầng dùng chung (mức HIGH).
+
+# --- Đặt trong khối http{} (một lần) ---
+# Không ghi từ khóa khách tìm (query string) vào log: dùng $uri thay vì $request.
+log_format machine_api '$remote_addr [$time_local] "$request_method $uri" $status $body_bytes_sent $request_time';
+limit_req_zone $binary_remote_addr zone=machine_ip:10m    rate=20r/s;
+limit_req_zone $http_authorization zone=machine_token:10m rate=60r/m;
+
+# --- Đặt trong server{} HTTPS ---
+location /machine/ {
+    access_log /var/log/nginx/machine_api.access.log machine_api;
+    # Nginx error log records the full request line (incl. query) on upstream errors: keep only critical.
+    error_log  /var/log/nginx/machine_api.error.log crit;
+    limit_req zone=machine_ip    burst=40 nodelay;
+    limit_req zone=machine_token burst=20 nodelay;
+    limit_req_status 429;
+    client_max_body_size 8k;          # API chỉ có GET
+    client_body_timeout 5s;
+    proxy_connect_timeout 3s;
+    proxy_send_timeout 10s;
+    proxy_read_timeout 15s;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    # GHI ĐÈ (không nối thêm) để client không tự khai IP; ứng dụng chỉ tin đúng 1 lớp proxy.
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Authorization $http_authorization;
+    proxy_hide_header Set-Cookie;
+    proxy_pass http://127.0.0.1:8100;
+}

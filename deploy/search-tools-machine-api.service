@@ -1,0 +1,41 @@
+[Unit]
+Description=Search Tools machine API (read-only gateway for bots/AI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Dedicated low-privilege account: it must NOT be able to read the staff app's runtime.env.
+User=searchtools-machine
+Group=searchtools-machine
+# Code dir containing machine_api.py and its few shared modules (see docs/machine-api/OPERATIONS.md).
+WorkingDirectory=/srv/search-tools-machine-api/app
+# Contains only: MACHINE_DATABASE_URL, MACHINE_API_TOKENS_FILE. Mode 0600, owned by root (systemd reads it).
+EnvironmentFile=/etc/search-tools-machine/machine.env
+Environment=PYTHONUNBUFFERED=1
+# ONE worker process (8 threads): the per-token rate limiter lives in process memory,
+# so a single process keeps the limit exact. CONNECTION LIMIT 10 of the DB role covers 8 threads.
+# Loopback only: public traffic must go through Nginx (see nginx-machine-api.conf.example).
+# NO --access-logfile: Gunicorn's access log records the query string (customers' search terms).
+# The app writes its own one-line audit record (token id, endpoint, status, count, ip, ms).
+ExecStart=/srv/search-tools-machine-api/venv/bin/gunicorn \
+    --bind 127.0.0.1:8100 --workers 1 --threads 8 --timeout 15 --graceful-timeout 10 \
+    --limit-request-line 4094 --limit-request-fields 50 --limit-request-field_size 4096 \
+    machine_api:app
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# Read-only service: no ReadWritePaths on purpose.
+MemoryMax=512M
+CPUQuota=50%
+LogRateLimitIntervalSec=60
+LogRateLimitBurst=200
+
+[Install]
+WantedBy=multi-user.target

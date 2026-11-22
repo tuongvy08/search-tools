@@ -111,3 +111,12 @@ Mỗi nhân viên dùng thẻ riêng gắn đúng team của họ (ví dụ team
 - **Ghi chú pháp chế do nhân viên nhập** được chuyển nguyên văn cho bot nếu team của thẻ có quyền "Ghi chú quản lý". Nếu ghi chú có thể chứa thông tin nội bộ, đừng cấp quyền đó cho team khách (bot vẫn trả nhãn pháp chế).
 - Cổng chặt hơn ô tìm kiếm nhân viên: chỉ tìm theo tên/mã/CAS khi team được xem đúng trường đó; kết quả sắp theo hãng rồi tên (mã/CAS khớp đúng lên đầu), nên khách cần hỏi cụ thể.
 - Dữ liệu trả lời đi qua dịch vụ AI bên ngoài (PO đã đồng ý); không có giá, không có thông tin khách hàng.
+
+## 7. Thẻ nội bộ có giá (n8n lập báo giá) — khác thẻ khách ở đâu
+
+- Dành cho hệ thống **nội bộ** của công ty (ví dụ n8n lập báo giá), **không** đưa cho chatbot khách. Hai loại thẻ tách hẳn nhau; thẻ khách không bao giờ có giá, dù cấu hình thế nào.
+- Cùng 3 điểm vào (`/products`, `/compliance`, `/stock`) nhưng mỗi sản phẩm có thêm: `note` (ghi chú sản phẩm), khối `price` (`original_price` giá gốc, `ship_factor` hệ số ship, `currency`, `rate_vnd`, `unit_price_vnd` = giá VND đúng công thức ứng dụng nhân viên, `price_status`), `stock.lots` (từng lô: số lượng, hạn dùng, `stock_price_vnd`, `stock_note`) và `stock.quantity` chính xác; `regulatory_note` luôn có.
+- `unit_price_vnd = null` + `price_status` (mã lỗi tỷ giá) nghĩa là **không quy đổi được** — đừng tự tính. `price_status = NO_PRICE_DATA` nghĩa là sản phẩm chưa có giá (giá liên hệ). Không bao giờ coi `0` là giá thật.
+- Mặc định 20 kết quả, tối đa 50 (`limit`); `more=true` nghĩa là còn nữa. Kết quả xếp theo độ khớp (trùng mã → trùng CAS → trùng tên → bắt đầu bằng → chứa) và **xen đều các hãng**.
+- Tìm theo mã cũng trả các mã **chứa** từ khóa: luôn lọc "mã trùng chính xác" rồi mới coi là khớp. Chỉ tự điền khi xác định được **đúng một** sản phẩm; còn lại để người chọn. Mẫu hoàn chỉnh: [integrations/n8n/bao-gia-tu-dong](../../integrations/n8n/bao-gia-tu-dong/README.md).
+- Thẻ nội bộ bắt buộc khóa IP của máy n8n và hạn tối đa 90 ngày; cấp bằng `machine_token.py new --profile internal --allowed-ip ...` (xem [OPERATIONS mục 7](OPERATIONS.md)). Không dán thẻ vào chat/email; trong n8n phải đặt ở Credentials.

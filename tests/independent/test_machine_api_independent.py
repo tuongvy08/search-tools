@@ -604,8 +604,20 @@ class V4_TeamScope(Base):
         for q in queries:
             if "%" in q:
                 continue  # staff không thoát ký tự đại diện (khác biệt có chủ ý ở V8)
-            staff = self.staff_results(q, team, perms)[:10]
+            staff_all = self.staff_results(q, team, perms)
             mine = self.products(q, limit=10).get_json()
+            # Cổng xếp hạng lại nên top-10 có thể khác top-10 của nhân viên khi có > 10 kết quả (PO duyệt 2026-11-21):
+            # đủ số kết quả thì so TẬP; nhiều hơn 10 thì top-10 của cổng phải là tập con của kết quả nhân viên.
+            if len(staff_all) <= 10:
+                staff = staff_all
+            else:
+                self.assertEqual(len(mine["results"]), 10, q)
+                staff_keys = {(r["Code"], r["Brand"], r["Size"], r["Name"]) for r in staff_all}
+                mine_keys = {(r["code"], r["brand"], r["size"], r["name"]) for r in mine["results"]}
+                self.assertTrue(mine_keys <= staff_keys, q)
+                staff = [r for r in staff_all if (r["Code"], r["Brand"], r["Size"], r["Name"]) in mine_keys]
+            order = {(r["Code"], r["Brand"], r["Size"], r["Name"]): i for i, r in enumerate(staff)}
+            mine["results"] = sorted(mine["results"], key=lambda r: order.get((r["code"], r["brand"], r["size"], r["name"]), 10**6))
             staff_view = [(r["Name"], r["Code"], r["Cas"], r["Brand"], r["Size"], r["Compliance_Status"], r["Compliance_Note"],
                            r["Compliance_Export_Policy"], r["Compliance_Source"]) for r in staff]
             my_view = [(r["name"], r["code"], r["cas"], r["brand"], r["size"],
@@ -642,8 +654,12 @@ class V4_TeamScope(Base):
         for q in ("ethanol", "methanol", "ETH", "formaldehyde", "64-17-5"):
             staff = self.staff_results(q, self.env.team_limited, perms)
             mine = self.products(q, token="limited").get_json()["results"]
-            self.assertEqual([r.get("Code") for r in staff], [r.get("code") for r in mine], q)
-            for s_row, m_row in zip(staff, mine):
+            # Thứ tự do cổng xếp hạng lại (trùng mã/CAS/tên trước, xen đều các hãng) — PO duyệt 2026-11-21;
+            # so sánh theo TẬP kết quả, không theo thứ tự.
+            self.assertEqual(sorted(r.get("Code") for r in staff), sorted(r.get("code") for r in mine), q)
+            by_code = {r.get("code"): r for r in mine}
+            for s_row in staff:
+                m_row = by_code[s_row["Code"]]
                 self.assertEqual(s_row["Name"], m_row["name"])
                 self.assertEqual(s_row["Brand"], m_row["brand"])
 

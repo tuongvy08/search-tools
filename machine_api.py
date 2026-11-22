@@ -23,6 +23,7 @@ import hmac
 import ipaddress
 import json
 import logging
+import math
 import os
 import re
 import stat
@@ -30,7 +31,7 @@ import sys
 import threading
 import time
 from collections import defaultdict, deque
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
 import psycopg2
@@ -41,6 +42,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 import team_permissions
 from compliance_resolver import resolve_compliance_precedence
+from currency_rates import load_currency_rate_resolver
 from regulatory import EXPORT_ALLOW, EXPORT_BLOCK, cas_resolver_lateral, product_resolver_lateral
 from stock import expiry_state, literal_like, normalized_text
 
@@ -50,8 +52,19 @@ MIN_QUERY_CHARS = 3
 MAX_QUERY_CHARS = 100
 DEFAULT_LIMIT = 10
 MAX_LIMIT = 10
+INTERNAL_DEFAULT_LIMIT = 20
+INTERNAL_MAX_LIMIT = 50
 SAME_CAS_LIMIT = 5
+INTERNAL_SAME_CAS_LIMIT = 10
 STOCK_ITEMS_LIMIT = 10
+INTERNAL_STOCK_ITEMS_LIMIT = 30
+INTERNAL_LOT_LIMIT = 200
+EXACT_LOT_SCAN_CAP = 50000  # lô của đúng các mã đang hỏi: đọc đầy đủ để số lượng/trạng thái luôn chính xác
+SAME_CAS_LOT_SCAN_CAP = 5000  # lô cùng CAS chỉ dùng để gợi ý "tương đương"
+MAX_INTERNAL_DAYS = 90
+INTERNAL_MIN_PREFIX = {4: 16, 6: 48}  # thẻ có giá không được mở cho dải IP quá rộng
+MAX_PRICE_VND = 1e15
+PROFILES = ("customer", "internal")
 STATEMENT_TIMEOUT_MS = 3000
 CONFIG_RECHECK_SECONDS = 2.0
 DEFAULT_RATE_PER_MINUTE = 60
@@ -64,6 +77,9 @@ FORBIDDEN_KEYS = frozenset({
     "stock_price_vnd", "stock_note", "product_id", "stock_item_id", "id",
     "currency_rate_status", "currency_rate_message", "total", "total_price",
 })
+
+# Thẻ NỘI BỘ (n8n lập báo giá, PO duyệt 2026-11-21) được xem giá/ghi chú; chỉ còn chặn khóa kỹ thuật.
+INTERNAL_FORBIDDEN_KEYS = frozenset({"product_id", "stock_item_id", "id", "sha256", "token", "password"})
 
 DISCLAIMER = (
     "Dữ liệu tham khảo từ hệ thống nội bộ; hệ thống chưa lưu số nghị định/căn cứ "
@@ -133,9 +149,15 @@ def _validate_entry(raw: Any) -> dict[str, Any]:
     digest = raw.get("sha256")
     if not isinstance(digest, str) or not _SHA256_RE.fullmatch(digest):
         raise ValueError("sha256")
+    profile = raw.get("profile", "customer")
+    if profile not in PROFILES:
+        raise ValueError("profile")
     team_id = raw.get("team_id")
-    if isinstance(team_id, bool) or not isinstance(team_id, int) or team_id <= 0:
-        raise ValueError("team_id")
+    if profile == "customer":
+        if isinstance(team_id, bool) or not isinstance(team_id, int) or team_id <= 0:
+            raise ValueError("team_id")
+    else:
+        team_id = None  # thẻ nội bộ không gắn team, không chịu phân quyền team
     expires_at = _parse_expiry(raw.get("expires_at"))
     enabled = raw.get("enabled", True)
     if not isinstance(enabled, bool):
@@ -143,6 +165,8 @@ def _validate_entry(raw: Any) -> dict[str, Any]:
     stock_detail = raw.get("stock_detail", "status")
     if stock_detail not in ("status", "quantity"):
         raise ValueError("stock_detail")
+    if profile == "internal":
+        stock_detail = "quantity"
     rate = raw.get("rate_per_minute", DEFAULT_RATE_PER_MINUTE)
     if isinstance(rate, bool) or not isinstance(rate, int) or not 1 <= rate <= MAX_RATE_PER_MINUTE:
         raise ValueError("rate_per_minute")
@@ -155,10 +179,17 @@ def _validate_entry(raw: Any) -> dict[str, Any]:
             if not isinstance(item, str):
                 raise ValueError("allowed_ips")
             networks.append(ipaddress.ip_network(item.strip(), strict=False))
+    if profile == "internal":
+        if not networks:
+            raise ValueError("allowed_ips")  # thẻ có giá bắt buộc khóa theo IP
+        if any(net.prefixlen < INTERNAL_MIN_PREFIX[net.version] for net in networks):
+            raise ValueError("allowed_ips")  # dải quá rộng (ví dụ 0.0.0.0/0) coi như không khóa
+        if expires_at > datetime.now(timezone.utc) + timedelta(days=MAX_INTERNAL_DAYS):
+            raise ValueError("expires_at")  # thẻ có giá tối đa 90 ngày
     return {
         "id": token_id, "sha256": digest, "team_id": team_id, "expires_at": expires_at,
         "enabled": enabled, "stock_detail": stock_detail, "rate_per_minute": rate,
-        "networks": networks,
+        "networks": networks, "profile": profile,
     }
 
 
@@ -339,6 +370,8 @@ def _bearer_token() -> Optional[str]:
 def _authenticate():
     g.started = time.monotonic()
     g.token_id = "anonymous"
+    g.profile = "none"
+    g.internal = False
     g.result_count = 0
     g.conn = None
     if request.endpoint not in DATA_ENDPOINTS:
@@ -366,13 +399,25 @@ def _authenticate():
     if wait is not None:
         raise ApiError(429, "rate_limited", "Gọi quá nhiều lần, vui lòng thử lại sau.", wait)
     g.entry = entry
-    g.grants = _load_team_grants(entry["team_id"])
+    g.profile = entry["profile"]
+    g.internal = entry["profile"] == "internal"
+    if g.internal:
+        # Thẻ nội bộ: toàn quyền xem 3 loại dữ liệu; kết nối riêng (role riêng) nên thiếu cấu hình => 503.
+        g.grants = frozenset(team_permissions.REGISTRY)
+        _connection()
+    else:
+        g.grants = _load_team_grants(entry["team_id"])
     return None
 
 
 def _connection():
     if g.get("conn") is None:
-        dsn = os.environ.get("MACHINE_DATABASE_URL") or os.environ.get("DATABASE_URL")
+        internal = bool(g.get("internal"))
+        if internal:
+            # Không bao giờ lùi về kết nối của thẻ khách (role đó không đọc được giá, và ngược lại).
+            dsn = os.environ.get("MACHINE_INTERNAL_DATABASE_URL")
+        else:
+            dsn = os.environ.get("MACHINE_DATABASE_URL") or os.environ.get("DATABASE_URL")
         if not dsn:
             raise ApiError(503, "service_unavailable", "Dịch vụ tạm thời chưa sẵn sàng.", 5)
         try:
@@ -383,7 +428,7 @@ def _connection():
                     f"-c statement_timeout={STATEMENT_TIMEOUT_MS} "
                     "-c default_transaction_read_only=on -c lock_timeout=1000 "
                     "-c idle_in_transaction_session_timeout=10000 "
-                    "-c application_name=search-tools-machine-api"
+                    f"-c application_name=search-tools-machine-api{'-internal' if internal else ''}"
                 ),
             )
             conn.set_session(readonly=True)
@@ -486,10 +531,17 @@ def _finalize(response: Response):
 # --------------------------------------------------------------------------
 
 def _brand_visibility_sql(alias: str) -> str:
+    """Mệnh đề SQL giới hạn hãng theo team (kèm một tham số: team_id). Thẻ nội bộ: không giới hạn (PO 2026-11-21)."""
+    if g.get("internal"):
+        return ""
     return (
         f" AND {alias}.brand IN (SELECT tb.brand FROM team_brands tb JOIN teams t ON t.id = tb.team_id "
         "WHERE tb.team_id = %s AND t.lifecycle_status = 'ACTIVE')"
     )
+
+
+def _brand_visibility_params() -> tuple:
+    return () if g.get("internal") else (g.entry["team_id"],)
 
 
 def _compliance_block(label, note, export_policy, source, stable_key) -> dict[str, Any]:
@@ -517,30 +569,111 @@ def _compliance_block(label, note, export_policy, source, stable_key) -> dict[st
     return block
 
 
-def _stock_lots(conn, codes: list[str], cas_values: list[str]) -> list[dict[str, Any]]:
+def _stock_lots(conn, codes: list[str], cas_values: list[str], cas_cap: int = SAME_CAS_LOT_SCAN_CAP) -> list[dict[str, Any]]:
     """Các lô tồn kho đang hoạt động, đã lọc theo hãng của team. KHÔNG SELECT giá/ghi chú."""
     if not codes and not cas_values:
         return []
+    internal = bool(g.get("internal"))
+    vis_sql, vis_params = _brand_visibility_sql("i"), _brand_visibility_params()
+    extra_cols = ", i.stock_price_vnd, i.stock_note" if internal else ""
+    extra_cols_outer = ", t.stock_price_vnd, t.stock_note" if internal else ""
+    inner = (f"SELECT i.code, i.code_norm, i.cas_norm, i.brand, i.size, i.quantity, i.expiry_date, i.brand_norm, i.size_norm{extra_cols} "
+             "FROM stock_state st JOIN stock_items i ON i.snapshot_id = st.active_snapshot_id "
+             "WHERE st.singleton = TRUE AND ")
+    # Mỗi nhánh phải SẮP XẾP trước khi cắt trần, để tập lô giữ lại không phụ thuộc thứ tự vật lý của bảng
+    lot_order = " ORDER BY i.brand_norm, i.code_norm, i.size_norm, i.expiry_date NULLS LAST"
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT i.code, i.code_norm, i.cas_norm, i.brand, i.size, i.quantity, i.expiry_date "
-            "FROM stock_state st JOIN stock_items i ON i.snapshot_id = st.active_snapshot_id "
-            "WHERE st.singleton = TRUE AND (i.code_norm = ANY(%s) OR i.cas_norm = ANY(%s))"
-            + _brand_visibility_sql("i")
-            + " ORDER BY i.brand_norm, i.code_norm, i.size_norm, i.expiry_date NULLS LAST LIMIT 5000",
-            (codes, cas_values, g.entry["team_id"]),
+            f"SELECT t.code, t.code_norm, t.cas_norm, t.brand, t.size, t.quantity, t.expiry_date{extra_cols_outer} FROM ("
+            "(" + inner + "i.code_norm = ANY(%s)" + vis_sql + lot_order + f" LIMIT {EXACT_LOT_SCAN_CAP}) "
+            "UNION ALL "
+            "(" + inner + "i.cas_norm = ANY(%s) AND NOT (i.code_norm = ANY(%s))" + vis_sql + lot_order + f" LIMIT {cas_cap})"
+            ") t ORDER BY t.brand_norm, t.code_norm, t.size_norm, t.expiry_date NULLS LAST",
+            (codes,) + vis_params + (cas_values, codes) + vis_params,
         )
         rows = cur.fetchall()
     lots = []
-    for code, code_norm, cas_norm, brand, size, quantity, expiry in rows:
+    for row in rows:
+        code, code_norm, cas_norm, brand, size, quantity, expiry = row[:7]
         state, _label = expiry_state(expiry)
-        lots.append({
+        lot = {
             "code": code, "code_norm": code_norm, "cas_norm": cas_norm or "", "brand": brand,
             "size": size, "brand_key": normalized_text(brand), "size_key": normalized_text(size),
             "quantity": int(quantity), "expiry_state": state,
             "available": int(quantity) > 0 and state != "expired",
-        })
+        }
+        if internal:
+            price_vnd, stock_note = row[7], row[8]
+            lot["expiry_date"] = expiry.isoformat() if expiry else None
+            price_value = float(price_vnd) if price_vnd is not None else None
+            lot["stock_price_vnd"] = price_value if price_value is None or math.isfinite(price_value) else None
+            lot["stock_note"] = stock_note or ""
+        lots.append(lot)
     return lots
+
+
+def _lots_fields(lots: list[dict[str, Any]]) -> dict[str, Any]:
+    """Các khóa lô cho thẻ nội bộ: danh sách (tối đa INTERNAL_LOT_LIMIT), tổng số lô và cờ bị cắt."""
+    return {"lots": _lot_details(lots), "lots_total": len(lots), "lots_truncated": len(lots) > INTERNAL_LOT_LIMIT}
+
+
+def _lot_details(lots: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Chi tiết từng lô — chỉ dùng cho thẻ nội bộ."""
+    return [
+        {
+            "brand": lot["brand"], "size": lot["size"], "quantity": lot["quantity"],
+            "expiry_date": lot.get("expiry_date"), "expiry_state": lot["expiry_state"],
+            "available": lot["available"], "stock_price_vnd": lot.get("stock_price_vnd"),
+            "stock_note": lot.get("stock_note", ""),
+        }
+        for lot in lots[:INTERNAL_LOT_LIMIT]
+    ]
+
+
+# Phép tính giá giữ NGUYÊN công thức của ứng dụng nhân viên (search._compute_unit_price_details):
+# round(giá × hệ số ship × tỷ giá, -3). Có test đối chiếu trực tiếp với hàm gốc (claim I4).
+def _as_float(value) -> float:
+    try:
+        return float(value) if value is not None else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def _finite_or_none(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _price_block(price, ship, brand, resolver) -> dict[str, Any]:
+    try:
+        resolution = resolver.resolve((brand or "").strip())
+    except Exception:  # noqa: BLE001  (dữ liệu tỷ giá hỏng, ví dụ NaN): báo rõ, không làm hỏng cả truy vấn
+        return {"original_price": price, "ship_factor": ship, "currency": None, "rate_vnd": None,
+                "unit_price_vnd": None, "price_status": "INVALID_RATE_DATA"}
+    block: dict[str, Any] = {
+        "original_price": price, "ship_factor": ship,
+        "currency": resolution.currency_code,
+        "rate_vnd": _finite_or_none(resolution.rate),
+    }
+    if not resolution.is_valid or resolution.rate is None:
+        block.update(unit_price_vnd=None, price_status=str(resolution.status))
+        return block
+    price_f, ship_f = _as_float(price), _as_float(ship)
+    try:
+        raw = price_f * ship_f * float(resolution.rate)
+        # nan/inf/quá lớn: dữ liệu giá hỏng (ví dụ chuỗi "nan" từ file nhập) — báo rõ, không làm hỏng cả phản hồi.
+        if not math.isfinite(price_f) or not math.isfinite(ship_f) or not math.isfinite(raw) or abs(raw) > MAX_PRICE_VND:
+            raise ValueError("non-finite price")
+        unit = round(raw, -3)
+        block["unit_price_vnd"] = int(unit)
+    except (ValueError, OverflowError):
+        block.update(unit_price_vnd=None, price_status="INVALID_PRICE_DATA")
+        return block
+    block["price_status"] = "OK" if price_f > 0 and ship_f > 0 and unit > 0 else "NO_PRICE_DATA"
+    return block
 
 
 def _summarize(lots: list[dict[str, Any]], with_quantity: bool) -> dict[str, Any]:
@@ -578,7 +711,8 @@ def _same_cas_items(lots, own_code_norm: str, cas_norm: str, with_quantity: bool
             item["size"] = ref["size"]
         item.update(_summarize(group["lots"], with_quantity))
         items.append(item)
-    return items[:SAME_CAS_LIMIT], len(items) > SAME_CAS_LIMIT
+    limit = INTERNAL_SAME_CAS_LIMIT if g.get("internal") else SAME_CAS_LIMIT
+    return items[:limit], len(items) > limit
 
 
 def _clean_query(raw: Optional[str], minimum: int = MIN_QUERY_CHARS) -> str:
@@ -597,24 +731,28 @@ def _single_arg(name: str) -> Optional[str]:
 
 
 def _parse_limit() -> int:
+    internal = bool(g.get("internal"))
+    default, maximum = (INTERNAL_DEFAULT_LIMIT, INTERNAL_MAX_LIMIT) if internal else (DEFAULT_LIMIT, MAX_LIMIT)
     raw = _single_arg("limit")
     if raw is None or raw == "":
-        return DEFAULT_LIMIT
+        return default
     if not raw.isascii() or not raw.isdigit() or int(raw) < 1:
         raise ApiError(400, "invalid_limit", "limit phải là số nguyên dương.")
-    return min(int(raw), MAX_LIMIT)
+    return min(int(raw), maximum)
 
 
-def _assert_clean(value: Any) -> Any:
-    """Lưới an toàn cuối: không khóa cấm nào được lọt ra ngoài."""
+def _assert_clean(value: Any, forbidden: Optional[frozenset] = None) -> Any:
+    """Lưới an toàn cuối: không khóa cấm nào được lọt ra ngoài (thẻ khách: cả giá/ghi chú; thẻ nội bộ: khóa kỹ thuật)."""
+    if forbidden is None:
+        forbidden = INTERNAL_FORBIDDEN_KEYS if g.get("internal") else FORBIDDEN_KEYS
     if isinstance(value, dict):
         for key, item in value.items():
-            if str(key).lower() in FORBIDDEN_KEYS:
+            if str(key).lower() in forbidden:
                 raise RuntimeError("forbidden key in machine response")
-            _assert_clean(item)
+            _assert_clean(item, forbidden)
     elif isinstance(value, list):
         for item in value:
-            _assert_clean(item)
+            _assert_clean(item, forbidden)
     return value
 
 
@@ -637,47 +775,79 @@ def products():
     _require("SEARCH")
     query = _clean_query(_single_arg("q"))
     limit = _parse_limit()
-    match_clauses, params = [], []
-    pattern = "%" + literal_like(query) + "%"
-    if _can("VIEW_NAME"):
+    internal = bool(g.get("internal"))
+    can_name, can_code = _can("VIEW_NAME"), _can("VIEW_CODE")
+    can_cas = _can("SEARCH_BY_CAS") and _can("VIEW_CAS")
+    like = literal_like(query)
+    pattern, prefix = "%" + like + "%", like + "%"
+    match_clauses, match_params = [], []
+    # Xếp hạng (chỉ dùng các trường mà thẻ được phép thấy): 0 trùng mã -> 1 trùng CAS -> 2 trùng tên ->
+    # 3 bắt đầu bằng (mã HOẶC tên, MỘT mức) -> 4 chứa. Trong cùng mức, XEN ĐỀU các hãng (brand_rank).
+    tier_whens, tier_params = [], []
+    code_expr = "UPPER(TRIM(COALESCE(p.code, '')))"
+    cas_expr = "UPPER(TRIM(COALESCE(p.cas, '')))"
+    name_expr = "UPPER(TRIM(COALESCE(p.name, '')))"
+    if can_code:
+        tier_whens.append(f"WHEN {code_expr} = UPPER(%s) THEN 0")
+        tier_params.append(query)
+    if can_cas:
+        tier_whens.append(f"WHEN {cas_expr} = UPPER(%s) THEN 1")
+        tier_params.append(query)
+    if can_name:
+        tier_whens.append(f"WHEN {name_expr} = UPPER(%s) THEN 2")
+        tier_params.append(query)
+    if can_code:
+        tier_whens.append(f"WHEN {code_expr} LIKE UPPER(%s) ESCAPE '!' THEN 3")
+        tier_params.append(prefix)
+    if can_name:
+        tier_whens.append(f"WHEN {name_expr} LIKE UPPER(%s) ESCAPE '!' THEN 3")
+        tier_params.append(prefix)
+    if can_name:
         match_clauses.append("p.name ILIKE %s ESCAPE '!'")
-        params.append(pattern)
-    if _can("VIEW_CODE"):
+        match_params.append(pattern)
+    if can_code:
         match_clauses.append("p.code ILIKE %s ESCAPE '!'")
-        params.append(pattern)
-    if _can("SEARCH_BY_CAS") and _can("VIEW_CAS"):
+        match_params.append(pattern)
+    if can_cas:
         match_clauses.append("p.cas ILIKE %s ESCAPE '!'")
-        params.append(pattern)
+        match_params.append(pattern)
     if not match_clauses:
         raise ApiError(403, "forbidden", "Thẻ không có quyền tìm kiếm theo trường nào.")
-    team_id = g.entry["team_id"]
+    tier_sql = "CASE " + " ".join(tier_whens) + " ELSE 4 END" if tier_whens else "4"
+    vis_sql, vis_params = _brand_visibility_sql("p"), _brand_visibility_params()
+    extra_matched = ", p.price AS price_text, p.ship AS ship_text, p.note AS product_note" if internal else ""
+    extra_final = ", p.price_text, p.ship_text, p.product_note" if internal else ""
+    order_tail = ("UPPER(TRIM(COALESCE({a}.size, ''))), UPPER(TRIM(COALESCE({a}.name, ''))), "
+                  "UPPER(TRIM(COALESCE({a}.code, ''))), {a}.id")
     conn = _connection()
     with conn.cursor() as cur:
         cur.execute(
             f"""
-            WITH candidates AS (
+            WITH matched AS (
                 SELECT p.id, p.name, p.code, p.cas, p.brand, p.size,
-                       p.manual_compliance, p.manual_compliance_note, p.manual_compliance_status_id
+                       p.manual_compliance, p.manual_compliance_note, p.manual_compliance_status_id{extra_matched},
+                       {tier_sql} AS tier,
+                       UPPER(TRIM(COALESCE(p.brand, ''))) AS brand_key
                 FROM products p
-                WHERE ({' OR '.join(match_clauses)}) {_brand_visibility_sql('p')}
-                ORDER BY (UPPER(TRIM(COALESCE(p.code, ''))) = UPPER(%s)) DESC,
-                         (UPPER(TRIM(COALESCE(p.cas, ''))) = UPPER(%s)) DESC,
-                         UPPER(TRIM(COALESCE(p.brand, ''))), UPPER(TRIM(COALESCE(p.size, ''))),
-                         UPPER(TRIM(COALESCE(p.name, ''))), UPPER(TRIM(COALESCE(p.code, ''))), p.id
+                WHERE ({' OR '.join(match_clauses)}) {vis_sql}
+            ), candidates AS (
+                SELECT * FROM (
+                    SELECT m.*, ROW_NUMBER() OVER (
+                               PARTITION BY m.tier, m.brand_key ORDER BY {order_tail.format(a='m')}) AS brand_rank
+                    FROM matched m
+                ) r
+                ORDER BY r.tier, r.brand_rank, r.brand_key, {order_tail.format(a='r')}
                 LIMIT %s
             )
             SELECT p.name, p.code, p.cas, p.brand, p.size,
-                   rr.rule_label, rr.note, rr.export_policy, rr.source, rr.stable_key
+                   rr.rule_label, rr.note, rr.export_policy, rr.source, rr.stable_key{extra_final}
             FROM candidates p
             LEFT JOIN brand_compliance_settings bcs
               ON bcs.brand_norm = UPPER(TRIM(COALESCE(p.brand, '')))
             {product_resolver_lateral('p', 'bcs')}
-            ORDER BY (UPPER(TRIM(COALESCE(p.code, ''))) = UPPER(%s)) DESC,
-                     (UPPER(TRIM(COALESCE(p.cas, ''))) = UPPER(%s)) DESC,
-                     UPPER(TRIM(COALESCE(p.brand, ''))), UPPER(TRIM(COALESCE(p.size, ''))),
-                     UPPER(TRIM(COALESCE(p.name, ''))), UPPER(TRIM(COALESCE(p.code, ''))), p.id
+            ORDER BY p.tier, p.brand_rank, p.brand_key, {order_tail.format(a='p')}
             """,
-            tuple(params) + (team_id, query, query, limit + 1, query, query),
+            tuple(tier_params) + tuple(match_params) + vis_params + (limit + 1,),
         )
         rows = cur.fetchall()
     more = len(rows) > limit
@@ -687,9 +857,11 @@ def products():
     cas_norms = sorted({normalized_text(r[2]) for r in rows if normalized_text(r[2])}) if _allow_same_cas() else []
     lots = _stock_lots(conn, code_norms, cas_norms)
     with_quantity = g.entry["stock_detail"] == "quantity"
+    resolver = load_currency_rate_resolver(conn, app.root_path) if internal and rows else None
 
     results = []
-    for name, code, cas, brand, size, label, note, policy, source, stable_key in rows:
+    for row in rows:
+        name, code, cas, brand, size, label, note, policy, source, stable_key = row[:10]
         item: dict[str, Any] = {}
         if _can("VIEW_NAME"):
             item["name"] = name
@@ -701,6 +873,10 @@ def products():
             item["brand"] = brand
         if _can("VIEW_SIZE"):
             item["size"] = size
+        if internal:
+            price_text, ship_text, product_note = row[10], row[11], row[12]
+            item["note"] = product_note or ""
+            item["price"] = _price_block(price_text, ship_text, brand, resolver)
         item["compliance"] = _compliance_block(label, note, policy, source, stable_key)
         own_code = normalized_text(code)
         exact = [lot for lot in lots if own_code and lot["code_norm"] == own_code]
@@ -711,14 +887,19 @@ def products():
             stock["pack_confirmed"] = any(
                 lot["available"] and lot["brand_key"] == normalized_text(brand) and lot["size_key"] == normalized_text(size)
                 for lot in exact)
+        if internal:
+            stock.update(_lots_fields(exact))
         if _allow_same_cas() and normalized_text(cas):
             same, same_more = _same_cas_items(lots, own_code, normalized_text(cas), with_quantity)
             stock["same_cas"] = same
             stock["same_cas_more"] = same_more
         item["stock"] = stock
         results.append(item)
-    return _respond({"query": query, "count": len(results), "more": more, "results": results,
-                     "price_notice": PRICE_NOTICE, "disclaimer": DISCLAIMER}, len(results))
+    payload = {"query": query, "count": len(results), "more": more, "results": results}
+    if not internal:
+        payload["price_notice"] = PRICE_NOTICE
+    payload["disclaimer"] = DISCLAIMER
+    return _respond(payload, len(results))
 
 
 @app.get(f"{API_PREFIX}/compliance", endpoint="compliance")
@@ -739,7 +920,10 @@ def compliance():
         )
         row = cur.fetchone() or (None,) * 5
     block = _compliance_block(*row)
-    return _respond({"cas": cas, "compliance": block, "price_notice": PRICE_NOTICE}, 1 if block["state"] != "NO_RULE" else 0)
+    payload = {"cas": cas, "compliance": block}
+    if not g.get("internal"):
+        payload["price_notice"] = PRICE_NOTICE
+    return _respond(payload, 1 if block["state"] != "NO_RULE" else 0)
 
 
 @app.get(f"{API_PREFIX}/stock", endpoint="stock")
@@ -748,8 +932,18 @@ def stock():
     code, cas = _single_arg("code"), _single_arg("cas")
     if bool(code) == bool(cas):
         raise ApiError(400, "invalid_request", "Cần đúng một trong hai tham số: code hoặc cas.")
+    internal = bool(g.get("internal"))
+    items_limit = INTERNAL_STOCK_ITEMS_LIMIT if internal else STOCK_ITEMS_LIMIT
     with_quantity = g.entry["stock_detail"] == "quantity"
     conn = _connection()
+
+    def finish(head: dict[str, Any], lots: list, items: list):
+        payload = {**head, **_summarize(lots, with_quantity), "items": items[:items_limit],
+                   "more": len(items) > items_limit}
+        if not internal:
+            payload["price_notice"] = PRICE_NOTICE
+        return _respond(payload, len(items[:items_limit]))
+
     if code:
         _require("VIEW_CODE")
         code = _clean_query(code, minimum=1)
@@ -767,16 +961,17 @@ def stock():
             if _can("VIEW_SIZE"):
                 item["size"] = ref["size"]
             item.update(_summarize(group, with_quantity))
+            if internal:
+                item.update(_lots_fields(group))
             items.append(item)
-        payload = {"code": code, **_summarize(lots, with_quantity), "items": items[:STOCK_ITEMS_LIMIT],
-                   "more": len(items) > STOCK_ITEMS_LIMIT}
-        return _respond(dict(payload, price_notice=PRICE_NOTICE), len(items[:STOCK_ITEMS_LIMIT]))
+        return finish({"code": code}, lots, items)
     if not _allow_same_cas():
         raise ApiError(403, "forbidden", "Thẻ không có quyền tra theo CAS.")
     if not _CAS_FORMAT_RE.match(cas.strip()):
         raise ApiError(400, "invalid_cas", "CAS phải có dạng 64-17-5.")
     cas_norm = normalized_text(cas)
-    lots = [lot for lot in _stock_lots(conn, [], [cas_norm]) if lot["cas_norm"] == cas_norm]
+    # Tra theo CAS: lô cùng CAS chính là dữ liệu cần trả, nên đọc đầy đủ (không phải chỉ gợi ý)
+    lots = [lot for lot in _stock_lots(conn, [], [cas_norm], cas_cap=EXACT_LOT_SCAN_CAP) if lot["cas_norm"] == cas_norm]
     groups = defaultdict(list)
     for lot in lots:
         groups[(lot["code_norm"], normalized_text(lot["brand"]), normalized_text(lot["size"]))].append(lot)
@@ -791,10 +986,10 @@ def stock():
         if _can("VIEW_SIZE"):
             item["size"] = ref["size"]
         item.update(_summarize(group, with_quantity))
+        if internal:
+            item.update(_lots_fields(group))
         items.append(item)
-    payload = {"cas": cas.strip(), **_summarize(lots, with_quantity), "items": items[:STOCK_ITEMS_LIMIT],
-               "more": len(items) > STOCK_ITEMS_LIMIT, "price_notice": PRICE_NOTICE}
-    return _respond(payload, len(items[:STOCK_ITEMS_LIMIT]))
+    return finish({"cas": cas.strip()}, lots, items)
 
 
 # --------------------------------------------------------------------------

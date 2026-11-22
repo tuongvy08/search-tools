@@ -638,7 +638,8 @@ class R3_MinimalDeployDir(GunicornMixin, unittest.TestCase):
         cls.env.close()
 
     def test_module_set_matches_documented_eight_and_service_runs_from_it(self):
-        self.assertEqual(len(self.mods), 8, self.mods)
+        # 8 module ban đầu + currency_rates và admin_permissions (tỷ giá cho thẻ nội bộ, PO duyệt 2026-11-21)
+        self.assertEqual(len(self.mods), 10, self.mods)
         self.assertNotIn("search", self.mods)
         # mô phỏng ProtectSystem=strict: thư mục mã chỉ-đọc (không ghi được __pycache__, không tạo được tệp nào)
         for root, dirs, files in os.walk(self.deploy):

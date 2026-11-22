@@ -3,6 +3,9 @@
 
     python scripts/machine_token.py new  --file /etc/search-tools/machine_tokens.json \
         --id chatbot-khach --team-id 7 --days 365
+    # Thẻ NỘI BỘ có giá (n8n lập báo giá): không gắn team, bắt buộc khóa IP, tối đa 90 ngày
+    python scripts/machine_token.py new  --file ... --id n8n-bao-gia --profile internal \
+        --allowed-ip 139.180.215.28 --days 30
     python scripts/machine_token.py list   --file ...
     python scripts/machine_token.py revoke --file ... --id chatbot-khach
 
@@ -27,6 +30,7 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 
 TOKEN_PREFIX = "stm_"
+MAX_INTERNAL_DAYS = 90
 
 
 def _load(path: str) -> dict:
@@ -82,16 +86,31 @@ def _cmd_new(args: argparse.Namespace) -> int:
     document = _load(args.file)
     if any(isinstance(entry, dict) and entry.get("id") == args.id for entry in document["tokens"]):
         raise SystemExit(f"Đã có thẻ với id '{args.id}'. Hãy thu hồi trước hoặc chọn id khác.")
+    internal = args.profile == "internal"
+    if args.days < 1:
+        raise SystemExit("--days phải >= 1.")
+    if internal:
+        if not args.allowed_ip:
+            raise SystemExit("Thẻ nội bộ (có giá) bắt buộc khóa theo IP: dùng --allowed-ip.")
+        if args.days > MAX_INTERNAL_DAYS:
+            raise SystemExit(f"Thẻ nội bộ chỉ có hiệu lực tối đa {MAX_INTERNAL_DAYS} ngày.")
+        if args.team_id is not None:
+            raise SystemExit("Thẻ nội bộ không gắn team (không chịu phân quyền team): bỏ --team-id.")
+    elif args.team_id is None:
+        raise SystemExit("Thẻ khách cần --team-id (team đã tạo ở trang admin).")
     token = TOKEN_PREFIX + secrets.token_urlsafe(32)  # >= 256 bit ngẫu nhiên
     entry = {
         "id": args.id,
         "sha256": hashlib.sha256(token.encode("utf-8")).hexdigest(),
-        "team_id": args.team_id,
         "expires_at": (datetime.now(timezone.utc) + timedelta(days=args.days)).isoformat(timespec="seconds"),
         "enabled": True,
-        "stock_detail": args.stock_detail,
+        "stock_detail": "quantity" if internal else args.stock_detail,
         "rate_per_minute": args.rate_per_minute,
     }
+    if internal:
+        entry["profile"] = "internal"
+    else:
+        entry["team_id"] = args.team_id
     if args.allowed_ip:
         entry["allowed_ips"] = args.allowed_ip
     # Dùng chính bộ kiểm của cổng: không cấp thẻ mà cổng sẽ âm thầm bỏ qua.
@@ -104,7 +123,8 @@ def _cmd_new(args: argparse.Namespace) -> int:
                          "team-id > 0, rate 1-600, IP/CIDR đúng định dạng.")
     document["tokens"].append(entry)
     _save(args.file, document)
-    print(f"Đã tạo thẻ '{args.id}' (team {args.team_id}, hết hạn {entry['expires_at']}).")
+    print(f"Đã tạo thẻ '{args.id}' ({'NỘI BỘ có giá' if internal else 'team ' + str(args.team_id)}, "
+          f"hết hạn {entry['expires_at']}).")
     print("THẺ (chỉ hiện một lần, hãy chép ngay và không gửi qua chat/email):")
     print(token)
     return 0
@@ -125,7 +145,7 @@ def cmd_list(args: argparse.Namespace) -> int:
         except ValueError:
             state = "HẠN SAI ĐỊNH DẠNG"
         status = "bật" if entry.get("enabled", True) else "TẮT"
-        print(f"{entry.get('id')}: team={entry.get('team_id')} {status} {state} "
+        print(f"{entry.get('id')}: {entry.get('profile', 'customer')} team={entry.get('team_id')} {status} {state} "
               f"tồn_kho={entry.get('stock_detail', 'status')} "
               f"tần_suất={entry.get('rate_per_minute', 60)}/phút "
               f"ip={'hạn chế' if entry.get('allowed_ips') else 'không hạn chế'}")
@@ -160,7 +180,9 @@ def build_parser() -> argparse.ArgumentParser:
     new = sub.add_parser("new", help="tạo thẻ mới")
     new.add_argument("--file", required=True)
     new.add_argument("--id", required=True, help="tên gợi nhớ, chữ thường/số/gạch, ví dụ chatbot-khach")
-    new.add_argument("--team-id", required=True, type=int, help="team đã tạo ở trang admin")
+    new.add_argument("--profile", choices=["customer", "internal"], default="customer",
+                     help="customer = thẻ khách (không giá, theo team); internal = thẻ nội bộ có giá (n8n báo giá)")
+    new.add_argument("--team-id", type=int, help="team đã tạo ở trang admin (chỉ thẻ khách)")
     new.add_argument("--days", type=int, default=365, help="số ngày hiệu lực (mặc định 365)")
     new.add_argument("--stock-detail", choices=["status", "quantity"], default="status",
                      help="status = chỉ Còn/Hết hàng (cho khách); quantity = có số lượng (nội bộ)")

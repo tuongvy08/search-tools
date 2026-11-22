@@ -67,3 +67,31 @@ Sau sửa (staging, 2026-11-15): dòng truy vết xuất đúng vào journald ch
 1. Nhật ký truy cập mặc định của Gunicorn (`--access-logfile -`) ghi cả query string, tức **từ khóa khách tìm** → đã bỏ khỏi unit.
 2. Dòng nhật ký riêng của cổng không được xuất ra khi chạy dưới Gunicorn (logger chưa có handler) → đã thêm handler ghi ra stderr.
 3. Nhánh `main` cục bộ có thể **cũ** so với `origin/main`; phép kiểm tra "không sửa ứng dụng nhân viên" phải so với `origin/main`.
+
+## 7. Thẻ NỘI BỘ có giá (2026-11-21) — cho n8n lập báo giá
+
+Kế hoạch: [INTERNAL_PRICE](INTERNAL_PRICE.md). Hợp đồng: [specs/machine-api-internal-price/VERIFICATION.md](../../specs/machine-api-internal-price/VERIFICATION.md).
+
+**Khác thẻ khách:** `profile=internal`; không gắn team, thấy mọi hãng và mọi trường của hàng hóa + giá + pháp chế + tồn kho (giá gốc, hệ số ship, tiền tệ, tỷ giá, giá VND đúng công thức ứng dụng `round(giá × ship × tỷ giá, -3)`, ghi chú sản phẩm, lô tồn kho kèm giá/ghi chú tồn kho); tối đa 50 kết quả (mặc định 20); **bắt buộc** `allowed_ips`; hạn tối đa 90 ngày (công cụ cấp thẻ chặn dài hơn); thẻ khách **không bao giờ** có giá.
+
+**Hạ tầng thêm so với mục 1:**
+
+| Thành phần | Ghi chú |
+| --- | --- |
+| Role PostgreSQL `machine_api_internal_ro` | tạo bằng [sql/machine_internal_role.sql](../../sql/machine_internal_role.sql): SELECT theo cột trên `products`, `stock_items`, `stock_state`, `regulatory_*`, `brand_compliance_settings`, `brand_master`, `currency_rates`; không đọc được `teams`, `team_brands`, bảng người dùng/đăng nhập; chỉ-đọc |
+| `MACHINE_INTERNAL_DATABASE_URL` trong `/etc/search-tools-machine/machine.env` (0600) | kết nối riêng cho thẻ nội bộ; thiếu biến này thì thẻ nội bộ bị từ chối (503), **không** lùi về kết nối khách |
+| 2 module thêm vào thư mục mã | `currency_rates.py`, `admin_permissions.py` (tập module từ 8 lên 10) |
+
+**Cấp / thu hồi thẻ nội bộ** (bằng tài khoản dịch vụ, như thẻ khách):
+
+```bash
+sudo -u searchtools-machine /srv/search-tools-machine-api/venv/bin/python /srv/search-tools-machine-api/app/scripts/machine_token.py \
+  new --file /var/lib/search-tools-machine/tokens.json --id n8n-bao-gia --profile internal \
+  --allowed-ip <IP-n8n> --days 30 --rate-per-minute 300
+```
+
+**Trạng thái staging (2026-11-21):** đã cài (sao lưu mã cũ ở `/srv/search-tools-machine-api/app.bak-20261121`); role `machine_api_internal_ro` đã tạo; thẻ `n8n-bao-gia` (IP n8n `139.180.215.28`, hạn 30 ngày) và thẻ thử `smoke-noibo` (chỉ `127.0.0.1`, hạn 1 ngày — **xóa sau khi dùng**). **Production: CHƯA** — cần PO "đồng ý bắt đầu"; làm đúng các bước ở mục 4 cộng: tạo role nội bộ, thêm biến DSN, thêm 2 module, cấp thẻ nội bộ có IP; verifier + Codex chỉ-đọc phải PASS trước.
+
+**Hoàn tác staging:** khôi phục `app.bak-20261121` → `systemctl restart search-tools-machine-api`; thu hồi thẻ nội bộ (`revoke`); `DROP OWNED BY machine_api_internal_ro; DROP ROLE machine_api_internal_ro;` và xóa dòng `MACHINE_INTERNAL_DATABASE_URL`.
+
+**Bài học (2026-11-21):** (1) ràng buộc khóa ngoại `products.brand → brand_master` nghĩa là "hãng chưa gán tiền tệ" chỉ xảy ra khi hãng bị ngừng (`is_active=false`) hoặc tiền tệ thiếu tỷ giá; (2) Code node của n8n **không có mạng** → việc gọi API phải đặt ở node HTTP Request; (3) kết quả tìm theo mã cũng trả các mã **chứa** từ khóa (T0050000 ra 2 kết quả) nên n8n phải lọc "trùng chính xác" — đã làm trong [integrations/n8n/bao-gia-tu-dong](../../integrations/n8n/bao-gia-tu-dong/README.md).

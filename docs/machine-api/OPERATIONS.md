@@ -25,7 +25,9 @@ Tắt khẩn cấp: `revoke` thẻ (≈ vài giây) hoặc `systemctl stop searc
 ## 3. Trạng thái triển khai
 
 - **Staging (2026-11-15):** đã cài theo mục 1 (`staging.search.standards.vn`, database `search_tools_staging`, team thử "Chatbot khách hàng (thử)" id 166 với 5 hãng, thẻ thử có hạn 7–30 ngày). Evidence kiểm tra hạ tầng (V11) ghi ở mục 5.
-- **Production:** CHƯA triển khai. Cần PO nói "đồng ý bắt đầu" (mục 4).
+- **Production (2026-11-22, PO duyệt):** ĐÃ triển khai, chỉ thẻ NỘI BỘ cho n8n (chưa cấp thẻ khách, chưa tạo team khách). Máy `ssh python` (`search.standards.com.vn`), database `searchtools_pg_r1_rollback_20260906_153842`. Mã cài từ commit `0827450` (machine_api.py sha256 `3dfc7c24…`), thư mục `/srv/search-tools-machine-api/{app,venv}`, bản sao release ở `/root/machine-deploy-20261122`; tài khoản `searchtools-machine`; 2 role DB `machine_api_ro`, `machine_api_internal_ro` (đã kiểm: chỉ-đọc, không đọc được `app_users`, role khách không đọc được giá); nginx: file `/etc/nginx/conf.d/machine-api.conf` + `/etc/nginx/snippets/machine-api-location.conf` + 1 dòng `include` trong `sites-available/search-tools-production` (bản gốc ở `/root/nginx-backup-20261122/search-tools-production.orig`); `/login`, `/search` của nhân viên không đổi (200/401 trước và sau). Thẻ `n8n-bao-gia-prod` (nội bộ, hạn 90 ngày đến 2027-02-20, IP cho phép `172.18.0.3` = container n8n và `139.180.215.28` = máy chủ; nếu container n8n khởi động lại và đổi IP nội bộ thì gọi API sẽ bị 403 — cấp lại thẻ với IP mới). Kiểm tra: giá VND khớp truy vấn SQL độc lập (T0050000 = 2.930.000 đ; EPT0050000 = 4.566.000 đ), `ethanol` xen đủ 5 hãng, không thẻ/sai thẻ 401.
+  - **Hoàn tác production:** gỡ dòng `include` khỏi `search-tools-production` (hoặc khôi phục file ở `/root/nginx-backup-20261122/`) → `nginx -t` → `reload`; `systemctl disable --now search-tools-machine-api`; `DROP OWNED BY machine_api_ro; DROP ROLE machine_api_ro; DROP OWNED BY machine_api_internal_ro; DROP ROLE machine_api_internal_ro;`; xóa `/srv/search-tools-machine-api`, `/etc/search-tools-machine`, `/var/lib/search-tools-machine`, tài khoản `searchtools-machine`.
+  - **Chưa làm / việc mở:** `REVOKE CREATE ON SCHEMA public FROM PUBLIC` (PG14; hiện PUBLIC còn quyền CREATE — không dùng được qua API, chỉ là lớp phòng thủ thêm; cần kiểm tra ảnh hưởng ứng dụng trước); theo dõi 24 giờ; thẻ khách cần PO chọn hãng + tạo team.
 
 ## 4. Kế hoạch production (HIGH) — chờ PO duyệt
 
@@ -90,7 +92,7 @@ sudo -u searchtools-machine /srv/search-tools-machine-api/venv/bin/python /srv/s
   --allowed-ip <IP-n8n> --days 30 --rate-per-minute 300
 ```
 
-**Trạng thái staging (2026-11-21):** đã cài (sao lưu mã cũ ở `/srv/search-tools-machine-api/app.bak-20261121`); role `machine_api_internal_ro` đã tạo; thẻ `n8n-bao-gia` (IP n8n `139.180.215.28`, hạn 30 ngày) và thẻ thử `smoke-noibo` (chỉ `127.0.0.1`, hạn 1 ngày — **xóa sau khi dùng**). **Production: CHƯA** — cần PO "đồng ý bắt đầu"; làm đúng các bước ở mục 4 cộng: tạo role nội bộ, thêm biến DSN, thêm 2 module, cấp thẻ nội bộ có IP; verifier + Codex chỉ-đọc phải PASS trước.
+**Trạng thái staging (2026-11-21):** đã cài (sao lưu mã cũ ở `/srv/search-tools-machine-api/app.bak-20261121`); role `machine_api_internal_ro` đã tạo; thẻ `n8n-bao-gia` (IP n8n `139.180.215.28`, hạn 30 ngày) và thẻ thử `smoke-noibo` (chỉ `127.0.0.1`, hạn 1 ngày — **xóa sau khi dùng**). **Production: ĐÃ triển khai 2026-11-22 (xem mục 3);** làm đúng các bước ở mục 4 cộng: tạo role nội bộ, thêm biến DSN, thêm 2 module, cấp thẻ nội bộ có IP; verifier + Codex chỉ-đọc phải PASS trước.
 
 **Hoàn tác staging:** khôi phục `app.bak-20261121` → `systemctl restart search-tools-machine-api`; thu hồi thẻ nội bộ (`revoke`); `DROP OWNED BY machine_api_internal_ro; DROP ROLE machine_api_internal_ro;` và xóa dòng `MACHINE_INTERNAL_DATABASE_URL`.
 

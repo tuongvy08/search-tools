@@ -120,3 +120,4 @@ Mỗi nhân viên dùng thẻ riêng gắn đúng team của họ (ví dụ team
 - Mặc định 20 kết quả, tối đa 50 (`limit`); `more=true` nghĩa là còn nữa. Kết quả xếp theo độ khớp (trùng mã → trùng CAS → trùng tên → bắt đầu bằng → chứa) và **xen đều các hãng**.
 - Tìm theo mã cũng trả các mã **chứa** từ khóa: luôn lọc "mã trùng chính xác" rồi mới coi là khớp. Chỉ tự điền khi xác định được **đúng một** sản phẩm; còn lại để người chọn. Mẫu hoàn chỉnh: [integrations/n8n/bao-gia-tu-dong](../../integrations/n8n/bao-gia-tu-dong/README.md).
 - Thẻ nội bộ bắt buộc khóa IP của máy n8n và hạn tối đa 90 ngày; cấp bằng `machine_token.py new --profile internal --allowed-ip ...` (xem [OPERATIONS mục 7](OPERATIONS.md)). Không dán thẻ vào chat/email; trong n8n phải đặt ở Credentials.
+- **Hướng dẫn đầy đủ để dựng luồng báo giá (email, Telegram, AI Agent):** [HUONG_DAN_BAO_GIA_NOI_BO](HUONG_DAN_BAO_GIA_NOI_BO.md).

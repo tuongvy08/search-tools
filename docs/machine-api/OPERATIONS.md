@@ -97,3 +97,53 @@ sudo -u searchtools-machine /srv/search-tools-machine-api/venv/bin/python /srv/s
 **Hoàn tác staging:** khôi phục `app.bak-20261121` → `systemctl restart search-tools-machine-api`; thu hồi thẻ nội bộ (`revoke`); `DROP OWNED BY machine_api_internal_ro; DROP ROLE machine_api_internal_ro;` và xóa dòng `MACHINE_INTERNAL_DATABASE_URL`.
 
 **Bài học (2026-11-21):** (1) ràng buộc khóa ngoại `products.brand → brand_master` nghĩa là "hãng chưa gán tiền tệ" chỉ xảy ra khi hãng bị ngừng (`is_active=false`) hoặc tiền tệ thiếu tỷ giá; (2) Code node của n8n **không có mạng** → việc gọi API phải đặt ở node HTTP Request; (3) kết quả tìm theo mã cũng trả các mã **chứa** từ khóa (T0050000 ra 2 kết quả) nên n8n phải lọc "trùng chính xác" — đã làm trong [integrations/n8n/bao-gia-tu-dong](../../integrations/n8n/bao-gia-tu-dong/README.md).
+
+## 8. Tra hàng loạt `POST /products/batch` (2026-11-26)
+
+Thiết kế + cách gọi: [BATCH](BATCH.md). Hợp đồng: [specs/machine-api-batch/VERIFICATION.md](../../specs/machine-api-batch/VERIFICATION.md). Không cần thẻ mới, không đổi role DB, không migration. Chỉ đổi: `machine_api.py` (1 file) và **một khối Nginx con** trong snippet `/etc/nginx/snippets/machine-api-location.conf`:
+
+```nginx
+    location = /machine/v1/products/batch {
+        client_max_body_size 128k;
+        client_body_buffer_size 128k;
+        proxy_pass http://127.0.0.1:8100;
+    }
+```
+
+(đặt TRONG `location /machine/ { ... }`, trước dấu `}` cuối; các đường khác giữ `client_max_body_size 8k`).
+
+**Triển khai (staging và production cùng các bước):** sao lưu `machine_api.py` và snippet Nginx → cài `machine_api.py` mới (0644 root) → `systemctl restart search-tools-machine-api` → `is-active` + `/health` → thêm khối Nginx → `nginx -t` PHẢI đạt → `systemctl reload nginx` → `/login` nhân viên 200 trước/sau → smoke.
+
+**Hoàn tác:** chép lại bản sao lưu `machine_api.py` → restart dịch vụ; chép lại snippet đã sao lưu → `nginx -t` → reload. Không có thay đổi dữ liệu.
+
+### Staging (2026-11-26) — đã cài
+
+- Sao lưu: `/root/machine_api.py.before-batch-20261126` (sha256 `3dfc7c24…`, giống production), `/root/machine-api-location.conf.before-batch-20261126`. Bản mới sha256 `8d1b7136…` (lượt 1), sau sửa lần 1: `05700e7c…`, **bản cuối sau sửa lần 2 (hợp đồng v2): `4b44868f…`** — verifier lượt 3: B1–B8 PASS. `nginx -t` đạt; `/login` 200 trước và sau reload; không thẻ → 401.
+- Thẻ thử tạm (chỉ `127.0.0.1`, hạn 1 ngày, giá trị trong file root-only `/root/.sb_*.tok`, không in ra): `smoke-batch-noibo` (nội bộ), `smoke-batch-khach` (team 166). **Thu hồi + xóa file sau khi xong.**
+- Đo qua Nginx + TLS thật (gọi từ chính máy chủ bằng `--resolve`; dữ liệu staging 1.262.173 sản phẩm):
+
+| Kiểm tra | Kết quả |
+| --- | --- |
+| 490 mã thật (lấy mẫu ngẫu nhiên, 5 mã đổi chữ thường + khoảng trắng) + 10 mã không có, kèm pháp chế + tồn kho, thẻ nội bộ | 200, **0,30 giây**, 0,6 MB; 500 dòng đúng thứ tự và đúng `ref`; 490 FOUND, 10 NOT_FOUND, 0 bị cắt |
+| Cùng gói, không `include` | 200, 0,19–0,22 giây |
+| 500 CAS ngẫu nhiên, đủ `include` | 200, 1,4 giây, 134 dòng bị cắt (> 20 sản phẩm/CAS) |
+| 500 CAS phổ biến nhất (mặc định 20/mục) | 200, 3,8–4,0 giây, 8 MB; `/login` nhân viên trong lúc chạy: 8/8 lần 200, chậm nhất 0,03 giây |
+| 500 CAS phổ biến nhất, `max_per_item=50` | 400 `too_many_results` sau 2 giây (đúng thiết kế, không cắt thầm lặng) |
+| Đối chiếu 15 sản phẩm ngẫu nhiên với `/products?q=<mã>` | **15/15 y hệt** (giá, pháp chế, tồn kho) |
+| Giá VND của 10 sản phẩm so với truy vấn SQL độc lập (`round(giá×ship×tỷ giá,-3)`) | **10/10 khớp từng đồng** |
+| Thẻ khách (team 166): 500 CAS phổ biến nhất | Lượt 1: **503 sau 8,1 giây** (verifier bắt; planner dùng chỉ mục hãng). Sau sửa lần 1: **200, 1,6 giây** (2/2 lần) |
+| Thẻ khách (team 166): 200 mã + 100 CAS | 200, 0,24–1,1 giây; 0 khóa giá/ghi chú; 0 sản phẩm ngoài hãng của team; `max_per_item`=10; có `price_notice` |
+| Thân 94,5 KB hợp lệ tới batch / 100 KB tới `/products` / 140 KB tới batch | 200 / **413** / **413** (Nginx chỉ nới đúng đường batch) |
+| Nhật ký Nginx + journald của cổng sau khi chạy | 0 lần xuất hiện thẻ, mã hàng thử, `ref` |
+
+- Đo lại trên bản cuối `4b44868f…` (2026-11-27): 500 mã đủ `include` 0,31 giây; không `include` 0,17 giây; 500 CAS ngẫu nhiên 1,3 giây; 500 CAS phổ biến nhất 3,7 giây; thẻ khách 0,2 giây; 15/15 trùng `/products`; 10/10 giá khớp SQL; Nginx 200/413/413 như trên. (Bản trung gian đọc lô bằng LATERAL từng mã chậm gấp đôi — 7,8 giây — nên đã đổi sang một lượt đọc + ROW_NUMBER theo từng mã; bài học: với bảng nhỏ, LATERAL lặp hàng nghìn lần tốn hơn một lần quét.)
+- **Chưa chạy qua n8n trên staging:** n8n hiện chỉ còn credential trỏ thẻ **production** (`Search_Tools_Machine_API_Noi_bo`); credential thẻ staging cũ đã không còn. Lượt chạy thật qua n8n (B9) làm ngay sau khi production được duyệt (chỉ đọc).
+
+### Production (2026-11-27) — ĐÃ TRIỂN KHAI (PO: "Đồng ý bắt đầu")
+
+- **Kiểm trước (chỉ đọc, `ssh python`):** `search-tools-pg`, `search-tools-import-worker`, `search-tools-machine-api`, `nginx` đều active; mã đang chạy `machine_api.py` sha256 `3dfc7c24…` (= bản 22/11), 9 module hỗ trợ trùng bản mới; `nginx -t` sạch; `/login` 200; đĩa trống 73 GB; thẻ duy nhất `n8n-bao-gia-prod` còn hạn. Dữ liệu: 1.107.385 sản phẩm, 925 lô tồn kho đang hoạt động.
+- **Cài:** sao lưu ở `/root/machine-batch-deploy-20261127/` (`machine_api.py.before` sha256 `3dfc7c24…`, `machine-api-location.conf.before` sha256 `47d3f175…`, `machine_api.py.after`); cài `machine_api.py` từ commit `ba84159` (sha256 `4b44868f…`); `systemctl restart search-tools-machine-api` (chỉ dịch vụ máy; ứng dụng nhân viên KHÔNG khởi động lại) → active, `/health` ok; thêm khối `location = /machine/v1/products/batch` → `nginx -t` đạt → `reload`.
+- **Hậu kiểm:** `/login` 200 trước và sau; `/search` ẩn danh 401 (như trước); batch không thẻ 401, GET vào batch 405; 100 KB tới `/products` → 413 (Nginx); `/openapi.json` có `/products/batch`; journald không lỗi.
+- **Chạy thật qua n8n (B9):** workflow chạy tay `UAT_tra_hang_loat_Search_tools` (`fXx0ygUei4lki3I2`, credential `Search_Tools_Machine_API_Noi_bo`, lần chạy `376401`): 120 mã thật (12 mã viết thường + khoảng trắng) + 2 mã giả + 1 CAS → 1 lời gọi HTTP 200, **123/123 dòng về đúng thứ tự**, 121 FOUND, 2 NOT_FOUND, 120 dòng tự điền được; cả workflow 0,54 giây (trước đây 120 mã ≈ 135 giây). Đối chiếu SQL độc lập trên production (chỉ đọc): **12/12** sản phẩm có giá khớp từng đồng; **128/128** sản phẩm `NO_PRICE_DATA` đúng là chưa có giá/ship.
+- **Hoàn tác:** `cp -p /root/machine-batch-deploy-20261127/machine_api.py.before /srv/search-tools-machine-api/app/machine_api.py` → `systemctl restart search-tools-machine-api`; `cp -p /root/machine-batch-deploy-20261127/machine-api-location.conf.before /etc/nginx/snippets/machine-api-location.conf` → `nginx -t` → `systemctl reload nginx`.
+- **Staging:** đã thu hồi + xóa 2 thẻ thử `smoke-batch-*` và file thẻ tạm (2026-11-27).

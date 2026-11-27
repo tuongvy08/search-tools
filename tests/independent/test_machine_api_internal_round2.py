@@ -774,7 +774,7 @@ class R5_CustomerOrderVsOld(Base):
                        "machine_api_internal_ro", "price_status", "note"):
             self.assertNotIn(needle, text, needle)
         old_text = subprocess.run(["git", "show", f"{OLD_COMMIT}:machine_api.py"], capture_output=True, text=True, cwd=str(ROOT)).stdout
-        self.assertEqual(self.client.get(V + "/openapi.json").get_json()["paths"].keys(), {"/products", "/compliance", "/stock", "/health"})
+        self.assertEqual(self.client.get(V + "/openapi.json").get_json()["paths"].keys(), {"/products", "/products/batch", "/compliance", "/stock", "/health"})  # batch: PO 2026-11-26
         self.assertIn("maximum", old_text)
 
 

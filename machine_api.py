@@ -7,7 +7,8 @@ chung SQL pháp chế, bảng quyền và quy tắc hạn dùng). Thiết kế: 
 hợp đồng kiểm chứng: specs/machine-api-readonly/VERIFICATION.md.
 
 Bất biến an toàn (mỗi bất biến có claim kiểm chứng tương ứng):
-- Chỉ GET. Kết nối PostgreSQL luôn chỉ-đọc, có statement_timeout.
+- Chỉ đọc: GET, cộng đúng một POST tra cứu hàng loạt (/products/batch, thân JSON ≤ 128 KB, không ghi gì).
+  Kết nối PostgreSQL luôn chỉ-đọc, có statement_timeout.
 - Giá/ship/ghi chú nội bộ/mã nội bộ KHÔNG BAO GIỜ nằm trong phản hồi: các trường
   này không được SELECT, và bộ lọc cuối ``_assert_clean`` chặn mọi khóa cấm.
 - Thẻ (Bearer) chỉ lưu dưới dạng SHA-256 trong file cấu hình ngoài Git; file được
@@ -330,7 +331,7 @@ class _NullSessionInterface(SessionInterface):
 
 app = Flask(__name__)
 app.session_interface = _NullSessionInterface()
-app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
+app.config["MAX_CONTENT_LENGTH"] = 128 * 1024  # đủ cho 500 mục của /products/batch; Nginx chỉ nới đúng đường đó
 app.config["JSON_AS_ASCII"] = False
 app.config["JSON_SORT_KEYS"] = False
 app.json.ensure_ascii = False
@@ -352,7 +353,7 @@ def _error(status: int, code: str, message: str, retry_after: Optional[int] = No
     return response
 
 
-DATA_ENDPOINTS = frozenset({"products", "compliance", "stock"})
+DATA_ENDPOINTS = frozenset({"products", "products_batch", "compliance", "stock"})
 
 
 def _bearer_token() -> Optional[str]:
@@ -592,24 +593,71 @@ def _stock_lots(conn, codes: list[str], cas_values: list[str], cas_cap: int = SA
             (codes,) + vis_params + (cas_values, codes) + vis_params,
         )
         rows = cur.fetchall()
-    lots = []
+    return [_lot_from_row(row, internal) for row in rows]
+
+
+def _lots_per_value(conn, column: str, values: list[str], caps: list[int]) -> dict[str, list[dict[str, Any]]]:
+    """Batch: với TỪNG giá trị của ``column`` (code_norm hoặc cas_norm), đọc tối đa ``caps[i]`` lô đầu tiên
+    theo đúng thứ tự của /products. Trần tính riêng từng giá trị nên các mục trong gói không chiếm chỗ của nhau."""
+    assert column in ("code_norm", "cas_norm")
+    if not values:
+        return {}
+    internal = bool(g.get("internal"))
+    vis_sql, vis_params = _brand_visibility_sql("i"), _brand_visibility_params()
+    extra = ", i.stock_price_vnd, i.stock_note" if internal else ""
+    extra_outer = ", t.stock_price_vnd, t.stock_note" if internal else ""
+    # MỘT lượt đọc (join với danh sách giá trị) + ROW_NUMBER theo từng giá trị: tránh LATERAL lặp hàng nghìn lần.
+    # Thứ tự trong mỗi giá trị = thứ tự của /products (khóa duy nhất của lô trong một snapshot nên không có hòa).
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT t.code, t.code_norm, t.cas_norm, t.brand, t.size, t.quantity, t.expiry_date" + extra_outer + " FROM ("
+            "SELECT i.code, i.code_norm, i.cas_norm, i.brand, i.size, i.quantity, i.expiry_date, i.brand_norm, i.size_norm"
+            + extra + ", c.cap, ROW_NUMBER() OVER (PARTITION BY i." + column
+            + " ORDER BY i.brand_norm, i.code_norm, i.size_norm, i.expiry_date NULLS LAST) AS rn"
+            " FROM unnest(%s::text[], %s::int[]) AS c(match_value, cap)"
+            " JOIN stock_items i ON i." + column + " = c.match_value"
+            " JOIN stock_state st ON st.singleton = TRUE AND i.snapshot_id = st.active_snapshot_id"
+            " WHERE TRUE" + vis_sql +
+            ") t WHERE t.rn <= t.cap"
+            f" ORDER BY t.{column}, t.brand_norm, t.code_norm, t.size_norm, t.expiry_date NULLS LAST",
+            (values, caps) + vis_params,
+        )
+        rows = cur.fetchall()
+    out: dict[str, list] = defaultdict(list)
+    key = 1 if column == "code_norm" else 2
     for row in rows:
-        code, code_norm, cas_norm, brand, size, quantity, expiry = row[:7]
-        state, _label = expiry_state(expiry)
-        lot = {
-            "code": code, "code_norm": code_norm, "cas_norm": cas_norm or "", "brand": brand,
-            "size": size, "brand_key": normalized_text(brand), "size_key": normalized_text(size),
-            "quantity": int(quantity), "expiry_state": state,
-            "available": int(quantity) > 0 and state != "expired",
-        }
-        if internal:
-            price_vnd, stock_note = row[7], row[8]
-            lot["expiry_date"] = expiry.isoformat() if expiry else None
-            price_value = float(price_vnd) if price_vnd is not None else None
-            lot["stock_price_vnd"] = price_value if price_value is None or math.isfinite(price_value) else None
-            lot["stock_note"] = stock_note or ""
-        lots.append(lot)
-    return lots
+        out[row[key] or ""].append(_lot_from_row(row, internal))
+    return out
+
+
+def _exact_lot_lists(conn, code_norms: list[str]) -> dict[str, list[dict[str, Any]]]:
+    return _lots_per_value(conn, "code_norm", list(code_norms), [EXACT_LOT_SCAN_CAP] * len(code_norms))
+
+
+def _same_cas_lot_lists(conn, caps: dict[str, int]) -> dict[str, list[dict[str, Any]]]:
+    """Batch: với TỪNG CAS, đọc ``caps[cas]`` lô đầu tiên (mọi mã). Mỗi sản phẩm (mã C) sau đó lấy 5.000 lô đầu
+    tiên có mã khác C — đúng cửa sổ /products thấy khi tra riêng mã đó (hợp đồng B4 v2); cap = 5.000 + số lô của
+    chính mã đó nên cửa sổ không phụ thuộc các mục khác trong gói."""
+    values = sorted(caps)
+    return _lots_per_value(conn, "cas_norm", values, [caps[v] for v in values])
+
+
+def _lot_from_row(row, internal: bool) -> dict[str, Any]:
+    code, code_norm, cas_norm, brand, size, quantity, expiry = row[:7]
+    state, _label = expiry_state(expiry)
+    lot = {
+        "code": code, "code_norm": code_norm, "cas_norm": cas_norm or "", "brand": brand,
+        "size": size, "brand_key": normalized_text(brand), "size_key": normalized_text(size),
+        "quantity": int(quantity), "expiry_state": state,
+        "available": int(quantity) > 0 and state != "expired",
+    }
+    if internal:
+        price_vnd, stock_note = row[7], row[8]
+        lot["expiry_date"] = expiry.isoformat() if expiry else None
+        price_value = float(price_vnd) if price_vnd is not None else None
+        lot["stock_price_vnd"] = price_value if price_value is None or math.isfinite(price_value) else None
+        lot["stock_note"] = stock_note or ""
+    return lot
 
 
 def _lots_fields(lots: list[dict[str, Any]]) -> dict[str, Any]:
@@ -859,47 +907,302 @@ def products():
     with_quantity = g.entry["stock_detail"] == "quantity"
     resolver = load_currency_rate_resolver(conn, app.root_path) if internal and rows else None
 
-    results = []
-    for row in rows:
-        name, code, cas, brand, size, label, note, policy, source, stable_key = row[:10]
-        item: dict[str, Any] = {}
-        if _can("VIEW_NAME"):
-            item["name"] = name
-        if _can("VIEW_CODE"):
-            item["code"] = code
-        if _can("VIEW_CAS"):
-            item["cas"] = cas
-        if _can("VIEW_BRAND"):
-            item["brand"] = brand
-        if _can("VIEW_SIZE"):
-            item["size"] = size
-        if internal:
-            price_text, ship_text, product_note = row[10], row[11], row[12]
-            item["note"] = product_note or ""
-            item["price"] = _price_block(price_text, ship_text, brand, resolver)
-        item["compliance"] = _compliance_block(label, note, policy, source, stable_key)
-        own_code = normalized_text(code)
-        exact = [lot for lot in lots if own_code and lot["code_norm"] == own_code]
-        stock = _summarize(exact, with_quantity)
-        if stock["status"] == "IN_STOCK":
-            # Tồn kho khớp theo MÃ (như ô tìm kiếm nhân viên). Cờ này cho biết lô còn hàng có đúng hãng
-            # và quy cách của sản phẩm này không; false => chỉ nên nói "có mã tương ứng trong kho, cần xác nhận".
-            stock["pack_confirmed"] = any(
-                lot["available"] and lot["brand_key"] == normalized_text(brand) and lot["size_key"] == normalized_text(size)
-                for lot in exact)
-        if internal:
-            stock.update(_lots_fields(exact))
-        if _allow_same_cas() and normalized_text(cas):
-            same, same_more = _same_cas_items(lots, own_code, normalized_text(cas), with_quantity)
-            stock["same_cas"] = same
-            stock["same_cas_more"] = same_more
-        item["stock"] = stock
-        results.append(item)
+    lots_by_code, lots_by_cas = _index_lots(lots)
+    results = [_result_item(row, lots_by_code, lots_by_cas, resolver, with_quantity) for row in rows]
     payload = {"query": query, "count": len(results), "more": more, "results": results}
     if not internal:
         payload["price_notice"] = PRICE_NOTICE
     payload["disclaimer"] = DISCLAIMER
     return _respond(payload, len(results))
+
+
+def _index_lots(lots: list[dict[str, Any]]) -> tuple[dict[str, list], dict[str, list]]:
+    """Gom lô theo mã và theo CAS (giữ nguyên thứ tự gốc) để tra O(1) thay vì quét cả danh sách mỗi sản phẩm."""
+    by_code: dict[str, list] = defaultdict(list)
+    by_cas: dict[str, list] = defaultdict(list)
+    for lot in lots:
+        by_code[lot["code_norm"]].append(lot)
+        if lot["cas_norm"]:
+            by_cas[lot["cas_norm"]].append(lot)
+    return by_code, by_cas
+
+
+def _result_item(row, lots_by_code, lots_by_cas, resolver, with_quantity: bool,
+                 include_compliance: bool = True, include_stock: bool = True,
+                 same_cas_lots=None) -> dict[str, Any]:
+    """Dựng MỘT sản phẩm trong phản hồi. Dùng chung cho /products và /products/batch (claim B4):
+    cùng quyền trường, cùng khối giá, pháp chế, tồn kho. ``row`` = (name, code, cas, brand, size,
+    rule_label, note, export_policy, source, stable_key[, price_text, ship_text, product_note])."""
+    name, code, cas, brand, size, label, note, policy, source, stable_key = row[:10]
+    internal = bool(g.get("internal"))
+    item: dict[str, Any] = {}
+    if _can("VIEW_NAME"):
+        item["name"] = name
+    if _can("VIEW_CODE"):
+        item["code"] = code
+    if _can("VIEW_CAS"):
+        item["cas"] = cas
+    if _can("VIEW_BRAND"):
+        item["brand"] = brand
+    if _can("VIEW_SIZE"):
+        item["size"] = size
+    if internal:
+        price_text, ship_text, product_note = row[10], row[11], row[12]
+        item["note"] = product_note or ""
+        item["price"] = _price_block(price_text, ship_text, brand, resolver)
+    if include_compliance:
+        item["compliance"] = _compliance_block(label, note, policy, source, stable_key)
+    if not include_stock:
+        return item
+    own_code = normalized_text(code)
+    exact = lots_by_code.get(own_code, []) if own_code else []
+    stock = _summarize(exact, with_quantity)
+    if stock["status"] == "IN_STOCK":
+        # Tồn kho khớp theo MÃ (như ô tìm kiếm nhân viên). Cờ này cho biết lô còn hàng có đúng hãng
+        # và quy cách của sản phẩm này không; false => chỉ nên nói "có mã tương ứng trong kho, cần xác nhận".
+        stock["pack_confirmed"] = any(
+            lot["available"] and lot["brand_key"] == normalized_text(brand) and lot["size_key"] == normalized_text(size)
+            for lot in exact)
+    if internal:
+        stock.update(_lots_fields(exact))
+    if _allow_same_cas() and normalized_text(cas):
+        cas_key = normalized_text(cas)
+        cas_lots = same_cas_lots(cas_key, own_code) if same_cas_lots else lots_by_cas.get(cas_key, [])
+        same, same_more = _same_cas_items(cas_lots, own_code, cas_key, with_quantity)
+        stock["same_cas"] = same
+        stock["same_cas_more"] = same_more
+    item["stock"] = stock
+    return item
+
+
+# --------------------------------------------------------------------------
+# Tra hàng loạt (POST /products/batch) — docs/machine-api/BATCH.md, specs/machine-api-batch/VERIFICATION.md
+# --------------------------------------------------------------------------
+
+BATCH_MAX_ITEMS = 500
+BATCH_MAX_REF_CHARS = 64
+BATCH_DEFAULT_PER_ITEM = 10
+BATCH_MAX_PER_ITEM = 10
+INTERNAL_BATCH_DEFAULT_PER_ITEM = 20
+INTERNAL_BATCH_MAX_PER_ITEM = 50
+BATCH_MAX_RESULTS = 10000
+BATCH_STATEMENT_TIMEOUT_MS = 8000
+BATCH_INCLUDES = ("compliance", "stock")
+BATCH_TOP_KEYS = frozenset({"items", "include", "max_per_item"})
+# Ký tự điều khiển C0/C1 và nửa cặp UTF-16 lẻ (JSON hợp lệ nhưng không mã hóa lại được) => mục INVALID.
+_BAD_CHARS_RE = re.compile("[\x00-\x1f\x7f-\x9f\ud800-\udfff]")
+
+
+def _batch_bad(message: str, code: str = "invalid_request"):
+    raise ApiError(400, code, message)
+
+
+def _parse_batch_body() -> tuple[list[dict[str, Any]], set, int]:
+    try:
+        body = request.get_json(silent=True)
+    except RecursionError:  # JSON lồng quá sâu
+        body = None
+    if not isinstance(body, dict):
+        _batch_bad("Thân yêu cầu phải là JSON dạng đối tượng, ví dụ {\"items\": [...]}.")
+    unknown = set(body) - BATCH_TOP_KEYS
+    if unknown:
+        _batch_bad("Có trường không được hỗ trợ ở cấp ngoài cùng (chỉ nhận items, include, max_per_item).")
+    raw_items = body.get("items")
+    if not isinstance(raw_items, list) or not raw_items:
+        _batch_bad("items phải là danh sách có ít nhất 1 mục.")
+    if len(raw_items) > BATCH_MAX_ITEMS:
+        _batch_bad(f"Tối đa {BATCH_MAX_ITEMS} mục mỗi lần gọi; hãy chia nhỏ.", "too_many_items")
+    include = body.get("include", [])
+    if not isinstance(include, list) or any(not isinstance(x, str) or x not in BATCH_INCLUDES for x in include):
+        _batch_bad("include chỉ nhận các giá trị: compliance, stock.", "invalid_include")
+    internal = bool(g.get("internal"))
+    default, maximum = ((INTERNAL_BATCH_DEFAULT_PER_ITEM, INTERNAL_BATCH_MAX_PER_ITEM) if internal
+                        else (BATCH_DEFAULT_PER_ITEM, BATCH_MAX_PER_ITEM))
+    per_item = body.get("max_per_item", default)
+    if isinstance(per_item, bool) or not isinstance(per_item, int) or per_item < 1:
+        _batch_bad("max_per_item phải là số nguyên dương.", "invalid_limit")
+    return raw_items, set(include), min(per_item, maximum)
+
+
+def _parse_batch_item(position: int, raw: Any) -> dict[str, Any]:
+    entry: dict[str, Any] = {"position": position}
+    if (isinstance(raw, dict) and isinstance(raw.get("ref"), str) and len(raw["ref"]) <= BATCH_MAX_REF_CHARS
+            and not _BAD_CHARS_RE.search(raw["ref"])):
+        entry["ref"] = raw["ref"]
+
+    def invalid(message: str):
+        entry.update(type=None, value=None, status="INVALID", message=message)
+        return entry
+
+    if not isinstance(raw, dict):
+        return invalid("Mỗi mục phải là đối tượng, ví dụ {\"code\": \"T0050000\"} hoặc {\"cas\": \"64-17-5\"}.")
+    if set(raw) - {"code", "cas", "ref"}:
+        return invalid("Mục có trường không được hỗ trợ (chỉ nhận code, cas, ref).")
+    if "ref" in raw and "ref" not in entry:
+        return invalid(f"ref phải là chuỗi tối đa {BATCH_MAX_REF_CHARS} ký tự, không có ký tự điều khiển.")
+    kinds = [kind for kind in ("code", "cas") if kind in raw]
+    if len(kinds) != 1:
+        return invalid("Mỗi mục cần đúng một trong hai trường: code hoặc cas.")
+    kind = kinds[0]
+    value = raw[kind]
+    if not isinstance(value, str):
+        return invalid(f"{kind} phải là chuỗi.")
+    value = value.strip()
+    entry["type"] = kind
+    if not value or len(value) > MAX_QUERY_CHARS or _BAD_CHARS_RE.search(value):
+        # Không trả lại giá trị sai (có thể chứa ký tự không mã hóa được); n8n ghép dòng bằng position/ref.
+        entry.update(value=None, status="INVALID",
+                     message=f"{kind} phải dài từ 1 đến {MAX_QUERY_CHARS} ký tự, không có ký tự điều khiển.")
+        return entry
+    entry["value"] = value
+    return entry
+
+
+def _batch_rows(conn, field: str, values: list[str], per_item: int, include_compliance: bool) -> dict[int, list]:
+    """Trả {vị trí trong values: [(match_total, row), ...]} — khớp CHÍNH XÁC UPPER(TRIM(field)) qua chỉ mục biểu thức.
+
+    Cùng thứ tự với /products trong một mức xếp hạng: xen đều các hãng (brand_rank) rồi quy cách, tên, mã, id."""
+    assert field in ("code", "cas")
+    if not values:
+        return {}
+    internal = bool(g.get("internal"))
+    # Lọc hãng ĐẶT SAU bước tra chỉ mục (q = tập đã khớp, OFFSET 0 chặn planner gộp): nếu để chung WHERE,
+    # planner có thể kết hợp idx_products_brand (BitmapAnd) và đọc hàng trăm nghìn dòng mỗi mục (đo staging:
+    # thẻ khách, 500 CAS phổ biến → 11 giây). Kết quả không đổi, chỉ đổi đường đọc.
+    vis_sql, vis_params = _brand_visibility_sql("q"), _brand_visibility_params()
+    extra_inner = ", p.price AS price_text, p.ship AS ship_text, p.note AS product_note" if internal else ""
+    extra_final = ", p.price_text, p.ship_text, p.product_note" if internal else ""
+    order_tail = ("UPPER(TRIM(COALESCE({a}.size, ''))), UPPER(TRIM(COALESCE({a}.name, ''))), "
+                  "UPPER(TRIM(COALESCE({a}.code, ''))), {a}.id")
+    if include_compliance:
+        rule_cols = "rr.rule_label, rr.note, rr.export_policy, rr.source, rr.stable_key"
+        rule_join = ("LEFT JOIN brand_compliance_settings bcs ON bcs.brand_norm = UPPER(TRIM(COALESCE(p.brand, ''))) "
+                     + product_resolver_lateral("p", "bcs"))
+    else:
+        rule_cols = "NULL::text, NULL::text, NULL::text, NULL::text, NULL::text"
+        rule_join = ""
+    sql = f"""
+        WITH input AS (
+            SELECT u.val, u.ord FROM unnest(%s::text[]) WITH ORDINALITY AS u(val, ord)
+        ), hits AS (
+            SELECT i.ord, x.* FROM input i
+            CROSS JOIN LATERAL (
+                SELECT r.* FROM (
+                    SELECT q.*,
+                           COUNT(*) OVER () AS match_total,
+                           UPPER(TRIM(COALESCE(q.brand, ''))) AS brand_key,
+                           ROW_NUMBER() OVER (PARTITION BY UPPER(TRIM(COALESCE(q.brand, '')))
+                                              ORDER BY {order_tail.format(a='q')}) AS brand_rank
+                    FROM (
+                        SELECT p.id, p.name, p.code, p.cas, p.brand, p.size,
+                               p.manual_compliance, p.manual_compliance_note, p.manual_compliance_status_id{extra_inner}
+                        FROM products p
+                        WHERE p.{field} IS NOT NULL AND TRIM(p.{field}) <> ''
+                          AND UPPER(TRIM(p.{field})) = UPPER(i.val)
+                        OFFSET 0
+                    ) q
+                    WHERE TRUE {vis_sql}
+                ) r
+                ORDER BY r.brand_rank, r.brand_key, {order_tail.format(a='r')}
+                LIMIT %s
+            ) x
+        )
+        SELECT p.ord, p.match_total, p.name, p.code, p.cas, p.brand, p.size, {rule_cols}{extra_final}
+        FROM hits p
+        {rule_join}
+        ORDER BY p.ord, p.brand_rank, p.brand_key, {order_tail.format(a='p')}
+    """
+    out: dict[int, list] = defaultdict(list)
+    with conn.cursor() as cur:
+        cur.execute(sql, (values,) + vis_params + (per_item,))
+        for row in cur.fetchall():
+            out[int(row[0]) - 1].append((int(row[1]), row[2:]))
+    return out
+
+
+@app.post(f"{API_PREFIX}/products/batch", endpoint="products_batch")
+def products_batch():
+    _require("SEARCH")
+    raw_items, include, per_item = _parse_batch_body()
+    internal = bool(g.get("internal"))
+    include_compliance, include_stock = "compliance" in include, "stock" in include
+    allowed = {"code": _can("VIEW_CODE"), "cas": _allow_same_cas()}
+    entries = [_parse_batch_item(position, raw) for position, raw in enumerate(raw_items, start=1)]
+    unique: dict[str, dict[str, int]] = {"code": {}, "cas": {}}
+    for entry in entries:
+        if "status" in entry:
+            continue
+        if not allowed[entry["type"]]:
+            entry.update(status="NOT_ALLOWED", message="Thẻ không có quyền tra theo loại này.")
+            continue
+        unique[entry["type"]].setdefault(entry["value"], len(unique[entry["type"]]))
+
+    conn = _connection()
+    with conn.cursor() as cur:
+        # Chỉ trong giao dịch chỉ-đọc của lời gọi này; các đường khác giữ 3 giây.
+        cur.execute(f"SET LOCAL statement_timeout = {BATCH_STATEMENT_TIMEOUT_MS}")
+    found = {kind: _batch_rows(conn, kind, list(unique[kind]), per_item, include_compliance) for kind in ("code", "cas")}
+    # Mục trùng nhau được trả lặp lại, nên đếm theo từng mục gửi lên.
+    returned = sum(len(found[e["type"]].get(unique[e["type"]][e["value"]], [])) for e in entries if "status" not in e)
+    if returned > BATCH_MAX_RESULTS:
+        raise ApiError(400, "too_many_results",
+                       f"Kết quả vượt {BATCH_MAX_RESULTS} sản phẩm; hãy gửi ít mục hơn hoặc giảm max_per_item.")
+
+    all_rows = [row for kind in found for rows in found[kind].values() for _total, row in rows]
+    lots_by_code: dict[str, list] = {}
+    lots_by_cas: dict[str, list] = {}
+    same_cas_lots = None
+    if include_stock and all_rows:
+        code_norms = sorted({normalized_text(r[1]) for r in all_rows if normalized_text(r[1])})
+        # Lô của đúng các mã đang hỏi: trần riêng TỪNG mã (như /products cho một trang), nên một mã nhiều lô
+        # không chiếm chỗ của mã khác trong cùng gói.
+        lots_by_code = _exact_lot_lists(conn, code_norms)
+        if _allow_same_cas():
+            # Gợi ý cùng CAS: mỗi sản phẩm nhận đúng cửa sổ /products sẽ thấy khi tra riêng mã đó
+            # (SAME_CAS_LOT_SCAN_CAP lô đầu tiên của các mã khác), độc lập với các mục khác trong gói.
+            caps: dict[str, int] = {}
+            for r in all_rows:
+                cas_key, own = normalized_text(r[2]), normalized_text(r[1])
+                if not cas_key:
+                    continue
+                own_lots = sum(1 for lot in lots_by_code.get(own, []) if lot["cas_norm"] == cas_key) if own else 0
+                caps[cas_key] = max(caps.get(cas_key, 0), SAME_CAS_LOT_SCAN_CAP + own_lots)
+            cas_lists = _same_cas_lot_lists(conn, caps)
+
+            def same_cas_lots(cas_key: str, own: str) -> list:
+                window = [lot for lot in cas_lists.get(cas_key, []) if not own or lot["code_norm"] != own]
+                return window[:SAME_CAS_LOT_SCAN_CAP]
+    with_quantity = g.entry["stock_detail"] == "quantity"
+    resolver = load_currency_rate_resolver(conn, app.root_path) if internal and all_rows else None
+
+    built: dict[tuple[str, int], list] = {}
+    summary = {"found": 0, "not_found": 0, "invalid": 0, "not_allowed": 0, "truncated": 0}
+    items = []
+    for entry in entries:
+        status = entry.get("status")
+        if status is None:
+            key = (entry["type"], unique[entry["type"]][entry["value"]])
+            rows = found[key[0]].get(key[1], [])
+            if key not in built:
+                built[key] = [_result_item(row, lots_by_code, lots_by_cas, resolver, with_quantity,
+                                           include_compliance, include_stock, same_cas_lots) for _total, row in rows]
+            results = built[key]
+            total = rows[0][0] if rows else 0
+            status = "FOUND" if results else "NOT_FOUND"
+            entry.update(status=status, matches_total=total, truncated=total > len(results), results=results)
+        else:
+            entry.update(matches_total=0, truncated=False, results=[])
+        summary[status.lower()] += 1
+        summary["truncated"] += 1 if entry["truncated"] else 0
+        items.append(entry)
+    payload: dict[str, Any] = {
+        "count": len(items), "max_per_item": per_item, "include": [x for x in BATCH_INCLUDES if x in include],
+        "summary": summary, "items": items,
+    }
+    if not internal:
+        payload["price_notice"] = PRICE_NOTICE
+    payload["disclaimer"] = DISCLAIMER
+    return _respond(payload, returned)
 
 
 @app.get(f"{API_PREFIX}/compliance", endpoint="compliance")
@@ -1041,6 +1344,21 @@ def openapi_document() -> dict[str, Any]:
                     {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": MAX_LIMIT, "default": DEFAULT_LIMIT}},
                 ],
                 "responses": responses()}},
+            "/products/batch": {"post": {
+                "operationId": "tra_hang_loat", "security": secured,
+                "summary": f"Tra tối đa {BATCH_MAX_ITEMS} mã/CAS trong một lần gọi; khớp chính xác, trả mọi sản phẩm khớp",
+                "requestBody": {"required": True, "content": {"application/json": {"schema": {
+                    "type": "object", "required": ["items"], "additionalProperties": False,
+                    "properties": {
+                        "items": {"type": "array", "minItems": 1, "maxItems": BATCH_MAX_ITEMS, "items": {
+                            "type": "object", "additionalProperties": False, "properties": {
+                                "code": {"type": "string", "maxLength": MAX_QUERY_CHARS},
+                                "cas": {"type": "string", "maxLength": MAX_QUERY_CHARS},
+                                "ref": {"type": "string", "maxLength": BATCH_MAX_REF_CHARS}}}},
+                        "include": {"type": "array", "items": {"type": "string", "enum": list(BATCH_INCLUDES)}},
+                        "max_per_item": {"type": "integer", "minimum": 1},
+                    }}}}},
+                "responses": responses({"413": {"description": "Thân yêu cầu quá lớn"}})}},
             "/compliance": {"get": {
                 "operationId": "kiem_tra_phap_che", "security": secured,
                 "summary": "Tình trạng pháp chế theo số CAS (ví dụ 64-17-5)",

@@ -25,10 +25,12 @@ Tài liệu liên quan: [HUONG_DAN_KET_NOI](HUONG_DAN_KET_NOI.md) (thẻ khách,
 | Mô tả máy đọc được | `GET /openapi.json` (không cần thẻ; không chứa giá) |
 
 - n8n chạy cùng máy chủ nên API thấy nó là IP nội bộ docker. **Nếu container n8n khởi động lại và đổi IP → 403**: báo bên API cấp lại thẻ với IP mới (thu hồi + cấp mới mất vài phút).
-- Code node của n8n **không có mạng**: việc gọi API phải đặt ở node **HTTP Request** (bật "Never Error" + "Full Response" để đọc được mã lỗi, "Batching" 1 yêu cầu/0,4 giây).
+- Code node của n8n **không có mạng**: việc gọi API phải đặt ở node **HTTP Request** (bật "Never Error" + "Full Response" để đọc được mã lỗi, "Batching" 1 yêu cầu/**1 giây** — Nginx chặn 429 khi gọi dày hơn; để "Response Format" = autodetect vì 429 của Nginx là HTML).
 - Đổi thẻ khi gần hết hạn (nhắc trước 2 tuần). Thẻ chỉ hiện một lần lúc cấp.
 
-## 3. Ba điểm vào (tất cả `GET`, chỉ đọc)
+## 3. Các điểm vào (chỉ đọc)
+
+**Nhiều dòng có mã/CAS → dùng `POST /products/batch`** (tới 500 dòng/lần, khớp chính xác, đúng thứ tự, đánh dấu không tìm thấy/bị cắt). Chi tiết cách gọi, giới hạn, mã lỗi: [BATCH](BATCH.md). Hướng dẫn cho người dựng workflow kèm node n8n mẫu: `n8n-automation/docs/search-tools-api.md` mục 4.0 và 13.1. Dòng chỉ có tên vẫn dùng `/products` bên dưới.
 
 ### 3.1 `/products` — tìm hàng hóa kèm giá, pháp chế, tồn kho
 

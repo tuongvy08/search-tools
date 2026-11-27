@@ -1,6 +1,6 @@
 # Tra hàng loạt qua cổng API máy — `POST /machine/v1/products/batch`
 
-Trạng thái: PO duyệt phương án 2026-11-26 ("Đồng ý"), kể cả sửa Nginx cho riêng đường này. Mức **HIGH** (giá qua Internet). Production chỉ khi PO nói "đồng ý bắt đầu". Hợp đồng kiểm chứng: [specs/machine-api-batch/VERIFICATION.md](../../specs/machine-api-batch/VERIFICATION.md). Vận hành: [OPERATIONS mục 8](OPERATIONS.md).
+Trạng thái: PO duyệt phương án 2026-11-26 ("Đồng ý"), kể cả sửa Nginx cho riêng đường này. Mức **HIGH** (giá qua Internet). **Production đã chạy từ 2026-11-27** (commit `ba84159`, PR #43; chạy thật qua n8n đạt). Hợp đồng kiểm chứng: [specs/machine-api-batch/VERIFICATION.md](../../specs/machine-api-batch/VERIFICATION.md). Vận hành: [OPERATIONS mục 8](OPERATIONS.md).
 
 ## Nhu cầu
 

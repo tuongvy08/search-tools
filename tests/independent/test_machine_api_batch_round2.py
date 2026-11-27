@@ -11,6 +11,7 @@ import sys
 import unittest
 
 import machine_api
+from stock import expiry_state, normalized_text
 
 from test_machine_api_batch_independent import VBase, V
 
@@ -25,7 +26,69 @@ class R2Base(VBase):
                 if all(r.get(k) == res.get(k) for k in ("name", "code", "brand", "size", "cas"))]
         return same
 
-    def diffs(self, token, items, limit, include=("compliance", "stock")):
+    # Hợp đồng v2, B4: oracle độc lập (SQL) cho gợi ý cùng CAS tính RIÊNG cho từng sản phẩm (mã C, CAS X):
+    # 5.000 lô đầu (brand_norm, code_norm, size_norm, expiry NULLS LAST) có CAS X, mã khác C, hãng thẻ được thấy;
+    # rồi nhóm / lọc còn hàng / cắt 5 (khách) hoặc 10 (nội bộ) như /products.
+    def v2_team_of(self, token):
+        return {"cust": self.team_full, "wide": self.team_wide, "wideq": self.team_wide,
+                "limited": self.team_limited}.get(token)
+
+    def v2_expected_same_cas(self, token, code, cas):
+        team = self.v2_team_of(token)
+        vis = "" if team is None else " AND i.brand IN (SELECT brand FROM team_brands WHERE team_id = %s)"
+        args = (normalized_text(cas), normalized_text(code)) + (() if team is None else (team,))
+        rows = self.sql(
+            "SELECT i.code, i.code_norm, i.brand, i.size, i.quantity, i.expiry_date FROM stock_items i "
+            "JOIN stock_state st ON st.singleton AND st.active_snapshot_id = i.snapshot_id "
+            "WHERE i.cas_norm = %s AND i.code_norm <> %s" + vis +
+            " ORDER BY i.brand_norm, i.code_norm, i.size_norm, i.expiry_date NULLS LAST LIMIT 5000", args)
+        groups = {}
+        for c, cn, brand, size, qty, exp in rows:
+            state = expiry_state(exp)[0]
+            if not (qty > 0 and state != "expired"):
+                continue
+            g = groups.setdefault((cn, normalized_text(brand), normalized_text(size)),
+                                  {"code": c, "brand": brand, "size": size, "lots": []})
+            g["lots"].append((qty, state))
+        out = []
+        for g in groups.values():
+            entry = {"code": g["code"], "brand": g["brand"], "size": g["size"], "status": "IN_STOCK",
+                     "expiry_warning": all(s == "near_expiry" for _q, s in g["lots"])}
+            if token in ("wideq", "internal"):  # thẻ nội bộ luôn ở mức số lượng
+                entry["quantity"] = sum(q for q, _s in g["lots"])
+            out.append(entry)
+        cap = 10 if token == "internal" else 5
+        return out[:cap], len(out) > cap
+
+    def v2_same_cas_diffs(self, token, res):
+        """Hợp đồng v2, B4: same_cas/same_cas_more đối chiếu theo ĐỊNH NGHĨA (oracle SQL) và, khi trang
+        /products?q=<mã>&limit=1 chỉ có đúng sản phẩm đó, phải y hệt trang đó. Không so với trang limit 10/50."""
+        stock = res.get("stock")
+        got = (stock.get("same_cas"), stock.get("same_cas_more"))
+        out = []
+        if "cas" not in res:
+            if got != (None, None):
+                out.append("same_cas-present-but-cas-hidden")
+            return out
+        if not normalized_text(res.get("cas")):
+            if "same_cas" in stock or "same_cas_more" in stock:
+                out.append(("same_cas-without-cas", got))
+            return out
+        exp = self.v2_expected_same_cas(token, res.get("code"), res.get("cas"))
+        if got != exp:
+            out.append(("same_cas-v2-definition", got, exp))
+        machine_api.rate_limiter.reset()
+        one = self.get(V + "/products", token=token, q=res.get("code"), limit="1").get_json()["results"]
+        if one and all(one[0].get(k) == res.get(k) for k in ("name", "code", "brand", "size", "cas")):
+            ost = one[0].get("stock") or {}
+            if (ost.get("same_cas"), ost.get("same_cas_more")) != got:
+                out.append(("same_cas-vs-/products-limit-1", got, (ost.get("same_cas"), ost.get("same_cas_more"))))
+        return out
+
+    def diffs(self, token, items, limit, include=("compliance", "stock"), same_cas_v2=False):
+        # same_cas_v2=False (mặc định): hành vi cũ, so NGUYÊN phần tử với trang /products (limit = max_per_item).
+        # same_cas_v2=True (hợp đồng v2, B4): mọi khối khác vẫn so với trang /products như cũ; riêng
+        # stock.same_cas/same_cas_more so theo định nghĩa v2 (v2_same_cas_diffs).
         body = self.ok(items, token=token, include=list(include), max_per_item=limit)
         out, checked = [], 0
         for item in body["items"]:
@@ -40,9 +103,19 @@ class R2Base(VBase):
                 if include != ("compliance", "stock"):
                     ref = {k: v for k, v in ref.items()
                            if k not in ("compliance", "stock") or k in include}
-                if ref != res:
+                got = res
+                if same_cas_v2 and isinstance(res.get("stock"), dict):
+                    sc = self.v2_same_cas_diffs(token, res)
+                    if sc:
+                        out.append((res.get("code"), res.get("brand"), sc))
+                    got, ref = json.loads(json.dumps(res)), json.loads(json.dumps(ref))
+                    for blk in (got, ref):
+                        if isinstance(blk.get("stock"), dict):
+                            blk["stock"].pop("same_cas", None)
+                            blk["stock"].pop("same_cas_more", None)
+                if ref != got:
                     out.append((res.get("code"), res.get("brand"),
-                                {k: (res.get(k), ref.get(k)) for k in set(res) | set(ref) if res.get(k) != ref.get(k)}))
+                                {k: (got.get(k), ref.get(k)) for k in set(got) | set(ref) if got.get(k) != ref.get(k)}))
         return checked, out
 
 
@@ -164,7 +237,8 @@ class R2_B4_LotWindows(R2Base):
 
     def test_same_code_two_cas_values(self):
         for token, limit in (("internal", 50), ("wide", 10)):
-            checked, diffs = self.diffs(token, [{"code": "DUAL-1"}], limit, include=("stock",))
+            # Hợp đồng v2, B4: same_cas theo định nghĩa v2 (từng sản phẩm), các khối khác vẫn so với /products.
+            checked, diffs = self.diffs(token, [{"code": "DUAL-1"}], limit, include=("stock",), same_cas_v2=True)
             self.assertEqual(checked, 2, token)
             if diffs:
                 sys.stderr.write(f"\nOBSERVATION[R2-B4-dualcas-{token}]: {json.dumps(diffs, ensure_ascii=False)[:600]}\n")
@@ -172,7 +246,8 @@ class R2_B4_LotWindows(R2Base):
 
     def test_contains_match_code_in_products_page(self):
         for token, limit in (("internal", 50), ("wide", 10)):
-            checked, diffs = self.diffs(token, [{"code": "CCC-ASK"}], limit, include=("stock",))
+            # Hợp đồng v2, B4: same_cas theo định nghĩa v2 (từng sản phẩm), các khối khác vẫn so với /products.
+            checked, diffs = self.diffs(token, [{"code": "CCC-ASK"}], limit, include=("stock",), same_cas_v2=True)
             self.assertEqual(checked, 1, token)
             if diffs:
                 sys.stderr.write(f"\nOBSERVATION[R2-B4-contains-{token}]: {json.dumps(diffs, ensure_ascii=False)[:600]}\n")
@@ -205,7 +280,8 @@ class R2_B4_LotWindows(R2Base):
                  {"code": "PAR-001"}, {"cas": "222-22-2"}]
         all_diffs = {}
         for token, limit in (("internal", 50), ("cust", 10), ("wide", 10)):
-            checked, diffs = self.diffs(token, items, limit)
+            # Hợp đồng v2, B4: same_cas theo định nghĩa v2 (từng sản phẩm), các khối khác vẫn so với /products.
+            checked, diffs = self.diffs(token, items, limit, same_cas_v2=True)
             sys.stderr.write(f"\nOBSERVATION[R2-B4-mixed-{token}]: checked={checked} diffs={[(d[0], d[1]) for d in diffs]}\n")
             all_diffs[token] = diffs
         self.assertEqual({k: v for k, v in all_diffs.items() if v}, {})

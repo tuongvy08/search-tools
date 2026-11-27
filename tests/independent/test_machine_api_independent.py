@@ -1791,9 +1791,9 @@ class V_Extra(Base):
         self.assertEqual(r.status_code, 200)
         doc = r.get_json()
         ops = {op["operationId"] for path in doc["paths"].values() for op in path.values()}
-        self.assertEqual(ops, {"tim_san_pham", "kiem_tra_phap_che", "xem_ton_kho", "health"})
-        for path in doc["paths"].values():
-            self.assertEqual(set(path), {"get"})
+        self.assertEqual(ops, {"tim_san_pham", "tra_hang_loat", "kiem_tra_phap_che", "xem_ton_kho", "health"})  # tra_hang_loat: machine-api-batch (PO 2026-11-26)
+        for name, path in doc["paths"].items():
+            self.assertEqual(set(path), {"post"} if name == "/products/batch" else {"get"})  # batch: PO 2026-11-26
         self.assertNotRegex(json.dumps(doc).lower(), r"price|ship|note\b")
 
 

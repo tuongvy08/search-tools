@@ -28,4 +28,13 @@ location /machine/ {
     proxy_set_header Authorization $http_authorization;
     proxy_hide_header Set-Cookie;
     proxy_pass http://127.0.0.1:8100;
+
+    # Tra hàng loạt (PO duyệt 2026-11-26): ĐƯỜNG DUY NHẤT nhận thân POST lớn (≤ 500 mục ≈ 40–80 KB).
+    # Kế thừa log/limit_req/timeout/proxy_set_header của khối cha; proxy_pass phải khai lại.
+    # Thân giữ trong bộ nhớ (không ghi file tạm); không bao giờ ghi thân vào log.
+    location = /machine/v1/products/batch {
+        client_max_body_size 128k;
+        client_body_buffer_size 128k;
+        proxy_pass http://127.0.0.1:8100;
+    }
 }
